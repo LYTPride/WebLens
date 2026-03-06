@@ -2,29 +2,35 @@ package cluster
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	weblensconfig "weblens/server/internal/config"
+
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Cluster represents a logical Kubernetes cluster (kubeconfig file + context).
 type Cluster struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	FilePath   string `json:"filePath"`
-	Context    string `json:"context"`
-	Kubeconfig string `json:"-"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	FilePath          string `json:"filePath"`
+	Context           string `json:"context"`
+	DefaultNamespace  string `json:"defaultNamespace,omitempty"` // from kubeconfig context, for SA without cluster-scope list
+	Kubeconfig        string `json:"-"`
 }
 
 // Registry stores all discovered clusters and their clients.
 type Registry struct {
-	mu       sync.RWMutex
-	clusters map[string]*Cluster
-	clients  map[string]*kubernetes.Clientset
+	mu        sync.RWMutex
+	clusters  map[string]*Cluster
+	clients   map[string]*kubernetes.Clientset
+	restCfgs  map[string]*rest.Config
 }
 
 // NewRegistry creates an empty registry.
@@ -32,6 +38,7 @@ func NewRegistry() *Registry {
 	return &Registry{
 		clusters: make(map[string]*Cluster),
 		clients:  make(map[string]*kubernetes.Clientset),
+		restCfgs: make(map[string]*rest.Config),
 	}
 }
 
@@ -42,6 +49,7 @@ func (r *Registry) LoadFromDir(dir string) error {
 
 	r.clusters = make(map[string]*Cluster)
 	r.clients = make(map[string]*kubernetes.Clientset)
+	r.restCfgs = make(map[string]*rest.Config)
 
 	if dir == "" {
 		return fmt.Errorf("kubeconfig directory is empty")
@@ -61,7 +69,11 @@ func (r *Registry) LoadFromDir(dir string) error {
 			return nil
 		}
 
-		return r.loadKubeconfigFile(path)
+		if loadErr := r.loadKubeconfigFile(path); loadErr != nil {
+			log.Printf("cluster: skip kubeconfig %s: %v", path, loadErr)
+			return nil // 单个文件失败不中断整次扫描
+		}
+		return nil
 	})
 
 	return err
@@ -76,6 +88,14 @@ func (r *Registry) loadKubeconfigFile(path string) error {
 	// for each context treat as a separate logical cluster
 	for ctxName := range config.Contexts {
 		id := fmt.Sprintf("%s@%s", filepath.Base(path), ctxName)
+		ctx := config.Contexts[ctxName]
+		defaultNS := ""
+		if ctx != nil && ctx.Namespace != "" {
+			defaultNS = ctx.Namespace
+		}
+		if defaultNS == "" {
+			defaultNS = weblensconfig.DefaultNamespace()
+		}
 
 		clientCfg := clientcmd.NewNonInteractiveClientConfig(*config, ctxName, &clientcmd.ConfigOverrides{}, nil)
 		restCfg, err := clientCfg.ClientConfig()
@@ -89,12 +109,14 @@ func (r *Registry) loadKubeconfigFile(path string) error {
 		}
 
 		r.clusters[id] = &Cluster{
-			ID:       id,
-			Name:     ctxName,
-			FilePath: path,
-			Context:  ctxName,
+			ID:               id,
+			Name:             ctxName,
+			FilePath:         path,
+			Context:          ctxName,
+			DefaultNamespace: defaultNS,
 		}
 		r.clients[id] = clientset
+		r.restCfgs[id] = restCfg
 	}
 
 	return nil
@@ -118,4 +140,20 @@ func (r *Registry) Client(id string) (*kubernetes.Clientset, bool) {
 	defer r.mu.RUnlock()
 	c, ok := r.clients[id]
 	return c, ok
+}
+
+// Cluster returns cluster info for a given cluster ID.
+func (r *Registry) Cluster(id string) (*Cluster, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.clusters[id]
+	return c, ok
+}
+
+// RestConfig returns rest.Config for a given cluster ID (for exec/port-forward etc).
+func (r *Registry) RestConfig(id string) (*rest.Config, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	cfg, ok := r.restCfgs[id]
+	return cfg, ok
 }

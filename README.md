@@ -18,17 +18,18 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
   - 通过环境变量 `WEBLENS_KUBECONFIG_DIR` 指定一个目录，目录中存放多个 kubeconfig 文件（`.yaml` / `.yml` / `config*`）。
   - 后端启动时扫描目录，解析其中的所有 context，每个 context 视为一个逻辑集群。
   - `GET /api/clusters` 返回所有可用集群（ID、context 名称、kubeconfig 路径等），前端以列表方式展示，可点击选择当前集群。
+  - **默认命名空间**：当 kubeconfig 中 context 未设置 namespace 或当前账号无集群级 list namespaces 权限时，可采用两种方式之一：（1）在 `config/weblens.env` 或环境中设置 `WEBLENS_DEFAULT_NAMESPACE=你的命名空间`，对该服务器上所有未在 kubeconfig 中指定 namespace 的 context 生效；（2）在前端命名空间下拉为空时，使用「输入命名空间」输入框填写后点击「应用」。
+  - **平台配置**：顶栏右侧提供「平台配置」按钮，可在界面中指定 kubeconfig 存放目录（仅支持绝对路径，无需在服务器上 export 环境变量）。若目录不存在或非绝对路径会提示；配置会持久化到 `config/kubeconfig-dir.override`，重启后仍生效。
+  - **集群选择**：主区使用下拉框选择当前集群，下拉框顶部带搜索框，输入关键字可过滤 ID/名称/配置文件路径；选中后仅显示该集群的一条摘要及命名空间与资源列表，无需长表滚动。
   - 支持前端“刷新”按钮重新从后端获取最新集群列表。
 
-- **基础资源浏览（部分对标 Freelens 左侧菜单）**
-  - 后端提供以下接口，基于当前选中集群：
-    - `GET /api/clusters/:id/namespaces`：Namespaces 列表
-    - `GET /api/clusters/:id/nodes`：Nodes 列表
-    - `GET /api/clusters/:id/pods`：Pods 列表（可通过 `namespace` 查询参数过滤）
-    - `GET /api/clusters/:id/deployments`：Deployments 列表（可通过 `namespace` 查询参数过滤）
-  - 前端当前版本已实现：
-    - 集群列表选择
-    - 选中集群后的 **Pods 列表**（所有命名空间）：Name / Namespace / Node / Status / Restarts 等基础字段。
+- **资源浏览（对标 Freelens 左侧菜单）**
+  - 后端提供以下接口（均支持 `namespace` 查询参数，Nodes/Namespaces 为集群级）：
+    - **工作负载**：`/pods`、`/deployments`、`/statefulsets`、`/daemonsets`、`/jobs`、`/cronjobs`
+    - **配置**：`/configmaps`、`/secrets`
+    - **网络**：`/services`、`/ingresses`
+    - **集群**：`/namespaces`、`/nodes`、`/events`
+  - 前端：左侧 **侧栏菜单**（工作负载 / 配置 / 网络 / 集群），主区域为「当前集群 + 命名空间选择」上方固定区域 + 下方可滚动的资源列表。Pods 视图中，每一行提供三点操作菜单（当前支持 Logs / Edit / Delete，Shell 将在后续版本中整合到底部面板）。
 
 - **Pod 日志查看**
   - 接口：`GET /api/clusters/:id/pods/:namespace/:pod/logs`
@@ -39,8 +40,14 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
   - 行为：
     - `follow=false`：一次性返回文本日志。
     - `follow=true`：后端使用 chunked 传输流式输出日志行，便于前端实现实时跟随。
-  - 前端当前版本：
-    - 在 Pods 列表中点击“日志”按钮，拉取一次性日志并在页面下方以可滚动 `pre` 区域展示。
+  - 前端：在 Pods 列表中点击「日志」按钮，在页面下方以可滚动区域展示。
+
+- **Pod Shell（kubectl exec）（后端已实现，前端待完善）**
+  - 后端：`GET /api/clusters/:id/pods/:namespace/:pod/exec` 升级为 WebSocket，使用 `remotecommand.NewSPDYExecutor` 在容器内启动 `/bin/sh`，将 stdin/stdout/stderr 与 WebSocket 双向桥接。
+  - 前端：当前版本保留基础 Shell 终端组件（`PodShell`），后续将在 Pods 三点菜单 + 底部多标签面板中完成完整集成。
+
+- **可选 Basic 鉴权**
+  - 环境变量 `WEBLENS_AUTH_USER` 与 `WEBLENS_AUTH_PASSWORD` 同时设置时，对所有请求（除 `/healthz`）启用 HTTP Basic 鉴权。
 
 - **统一端口 Web 访问**
   - Go 后端在一个进程中同时提供：
@@ -58,19 +65,14 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
     - 读取 PID 文件，优雅终止进程，必要时使用 SIGKILL。
   - `scripts/weblens-restart.sh`
     - 顺序调用 stop + start。
+  - `scripts/smoke-test.sh`
+    - 本地冒烟：构建前端、启动后端（临时端口 18080）、校验 healthz / 集群与资源 API / 静态首页，通过后自动退出。
 
 ### 规划中/待完成功能
 
-- **更多资源视图（对标 Freelens 左侧菜单）**
-  - Deployments / StatefulSets / DaemonSets / Jobs / CronJobs 等前端页面。
-  - Nodes / Namespaces / Events 等集群视图。
-  - ConfigMaps / Secrets / Services / Ingress 等配置与网络资源视图。
-- **Pod Shell（`kubectl exec` WebSocket）**
-  - 后端通过 `remotecommand` 建立与 K8s 的 exec 通道。
-  - 前端提供浏览器内终端组件（类似 Freelens 的 Shell）。
-- **权限与安全**
-  - Web 端登录鉴权（如 Basic/JWT/OIDC）。
-  - 集群级或用户级访问控制。
+- **权限与安全（进阶）**
+  - 集群级或用户级访问控制（RBAC 与 Web 用户映射）。
+  - JWT / OIDC 等登录方式。
 - **监控与告警集成**
   - 对接 Metrics Server / Prometheus 展示 CPU、内存等监控图。
   - 对接 Alertmanager 或其他告警系统。
@@ -90,7 +92,8 @@ WebLens/
 
   web/              # 前端（React + Vite）
     src/
-      pages/App.tsx # 当前主界面（集群 & Pods & 日志）
+      pages/App.tsx # 主界面（侧栏 + 集群/命名空间 + 多资源视图 + Pod 日志/Shell）
+      components/   # Sidebar、ResourceTable、PodShell
       api.ts        # 与后端交互的 API 封装
 
   scripts/          # 启停脚本
@@ -130,6 +133,9 @@ go run ./cmd/weblens
 
 ```bash
 cd server
+
+# 若 go mod tidy / go build 因 proxy.golang.org 超时失败，可先设置国内代理再执行：
+# export GOPROXY=https://goproxy.cn,direct
 
 # 生成 Linux amd64 静态二进制
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
@@ -188,8 +194,11 @@ npm run build
 
 ```bash
 WEBLENS_HTTP_ADDR=0.0.0.0:8080               # 后端监听地址
-WEBLENS_KUBECONFIG_DIR=/appdata/soft/weblens/kubeconfigs
+WEBLENS_KUBECONFIG_DIR=/appdata/soft/weblens/kubeconfigs  # 也可在界面「平台配置」中设置，会写入 config/kubeconfig-dir.override
 WEBLENS_WEB_DIST_DIR=/appdata/soft/weblens/web/dist  # 可选，默认 ./web/dist
+WEBLENS_DEFAULT_NAMESPACE=train-uat                   # 可选：kubeconfig 不能改时，作为未在 context 中指定 namespace 的集群的默认命名空间
+WEBLENS_AUTH_USER=admin                              # 可选，与 AUTH_PASSWORD 同时设置时启用 Basic 鉴权
+WEBLENS_AUTH_PASSWORD=your-secret
 ```
 
 ### 启动/停止
@@ -228,8 +237,6 @@ cd /appdata/soft/weblens
 
 ## 后续规划
 
-- 实现完整的 Freelens 风格侧边栏与多资源视图。
-- 实现 Pod Shell（WebSocket + `exec`）。
-- 支持用户身份认证与权限控制。
+- 支持 JWT/OIDC 与集群级访问控制。
 - 集成监控（Prometheus/Metrics Server）与告警视图。
 
