@@ -94,9 +94,25 @@ export const App: React.FC = () => {
     clusterId: null,
     namespace: ALL_NAMESPACES,
   });
+  /** 页面是否可见，用于在标签页隐藏时暂停轮询，减少不必要请求 */
+  const [pageVisible, setPageVisible] = useState(
+    typeof document === "undefined" ? true : document.visibilityState === "visible",
+  );
   useEffect(() => {
     activeClusterNsRef.current = { clusterId: activeClusterId, namespace: activeNamespace };
   }, [activeClusterId, activeNamespace]);
+
+  // 监听浏览器标签页可见性变化：隐藏时暂停列表轮询，显示时再恢复
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handler = () => {
+      setPageVisible(document.visibilityState === "visible");
+    };
+    document.addEventListener("visibilitychange", handler);
+    return () => {
+      document.removeEventListener("visibilitychange", handler);
+    };
+  }, []);
 
   // 切换集群 / 视图 / 命名空间时，重置 Name 关键字搜索，避免带着上一次的关键字影响新视图
   useEffect(() => {
@@ -286,19 +302,31 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!activeClusterId) return;
-    if (currentView === "pods") {
-      loadPods(activeClusterId, activeNamespace).catch((err: any) => {
-        const status = err?.response?.status;
-        const backendMsg = err?.response?.data?.error;
-        if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
-        else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
-        else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
-        else setError(err?.message || "Failed to load pods");
-      });
-    } else {
-      loadResourceList();
-    }
-  }, [activeClusterId, activeNamespace, currentView]);
+    if (!pageVisible) return;
+
+    const loadOnce = () => {
+      if (currentView === "pods") {
+        loadPods(activeClusterId, activeNamespace).catch((err: any) => {
+          const status = err?.response?.status;
+          const backendMsg = err?.response?.data?.error;
+          if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
+          else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
+          else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+          else setError(err?.message || "Failed to load pods");
+        });
+      } else {
+        loadResourceList();
+      }
+    };
+
+    // 初次加载一次
+    loadOnce();
+
+    // 对当前选中的 cluster + namespace + 视图 做持续轮询，起到「watch」效果
+    // 间隔从 5 秒调整为 3 秒，并在标签页隐藏时暂停（依赖 pageVisible）
+    const timer = window.setInterval(loadOnce, 3000);
+    return () => window.clearInterval(timer);
+  }, [activeClusterId, activeNamespace, currentView, pageVisible]);
 
   const viewTitle: Record<ResourceKind, string> = {
     pods: "Pods",

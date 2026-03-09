@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"weblens/server/internal/cluster"
 
@@ -20,6 +22,43 @@ import (
 func isForbiddenClusterScope(err error) bool {
 	s := err.Error()
 	return strings.Contains(s, "forbidden") && strings.Contains(s, "cluster scope")
+}
+
+// listCacheEntry / listCache：针对各类 List 结果做一个极短 TTL（1 秒）的软缓存，
+// 用于吸收多个前端在同一时间段对同一资源的并发轮询请求，降低对 kube-apiserver 的压力。
+type listCacheEntry struct {
+	ts   time.Time
+	data interface{}
+}
+
+var (
+	listCache   = make(map[string]listCacheEntry)
+	listCacheMu sync.Mutex
+	listTTL     = time.Second
+)
+
+func listCacheKey(parts ...string) string {
+	return strings.Join(parts, "|")
+}
+
+func getListFromCache(key string) (interface{}, bool) {
+	listCacheMu.Lock()
+	defer listCacheMu.Unlock()
+	entry, ok := listCache[key]
+	if !ok {
+		return nil, false
+	}
+	if time.Since(entry.ts) > listTTL {
+		delete(listCache, key)
+		return nil, false
+	}
+	return entry.data, true
+}
+
+func setListCache(key string, data interface{}) {
+	listCacheMu.Lock()
+	listCache[key] = listCacheEntry{ts: time.Now(), data: data}
+	listCacheMu.Unlock()
 }
 
 // defaultNamespaceForCluster 返回该集群在 kubeconfig 中的默认命名空间（无则空）
@@ -75,6 +114,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 	// Nodes
 	r.GET("/api/clusters/:id/nodes", func(c *gin.Context) {
 		id := c.Param("id")
+		cacheKey := listCacheKey("nodes", id)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
+		}
 		client, ok := reg.Client(id)
 		if !ok {
 			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
@@ -85,6 +129,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -94,6 +139,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		ns := c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("pods", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -123,6 +173,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				}
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -203,6 +254,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		if ns == "" {
 			ns = corev1.NamespaceAll
 		}
+		cacheKey := listCacheKey("deployments", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
+		}
 		client, ok := reg.Client(id)
 		if !ok {
 			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
@@ -224,6 +280,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -232,6 +289,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id, ns := c.Param("id"), c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("statefulsets", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -254,6 +316,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -262,6 +325,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id, ns := c.Param("id"), c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("daemonsets", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -284,6 +352,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -292,6 +361,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id, ns := c.Param("id"), c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("jobs", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -314,6 +388,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -322,6 +397,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id, ns := c.Param("id"), c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("cronjobs", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -344,6 +424,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -352,6 +433,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id, ns := c.Param("id"), c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("events", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -374,6 +460,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -382,6 +469,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id, ns := c.Param("id"), c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("configmaps", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -404,6 +496,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -412,6 +505,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id, ns := c.Param("id"), c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("secrets", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -434,6 +532,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -442,6 +541,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id, ns := c.Param("id"), c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("services", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -464,6 +568,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
@@ -472,6 +577,11 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id, ns := c.Param("id"), c.Query("namespace")
 		if ns == "" {
 			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("ingresses", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data})
+			return
 		}
 		client, ok := reg.Client(id)
 		if !ok {
@@ -494,6 +604,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				return
 			}
 		}
+		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 }

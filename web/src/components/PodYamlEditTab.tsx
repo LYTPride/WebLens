@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { applyPodYaml, fetchPodYaml } from "../api";
 
+const MINIMAP_WIDTH = 56;
 const LINE_HEIGHT = 18;
-const MINIMAP_WIDTH = 80;
 
 interface PodYamlEditTabProps {
   clusterId: string;
@@ -24,6 +24,8 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const minimapWrapRef = useRef<HTMLDivElement>(null);
@@ -98,6 +100,60 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
 
   const isDirty = yaml !== initialYaml;
 
+  const keyword = search.trim();
+  const { matches, total } = useMemo(() => {
+    if (!keyword) return { matches: [] as { start: number; end: number }[], total: 0 };
+    const re = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const list: { start: number; end: number }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(yaml)) !== null) {
+      list.push({ start: m.index, end: m.index + m[0].length });
+    }
+    return { matches: list, total: list.length };
+  }, [yaml, keyword]);
+
+  const safeIndex = total > 0 ? ((currentMatchIndex % total) + total) % total : 0;
+
+  const scrollToMatch = useCallback(
+    (idx: number, opts?: { focusEditor?: boolean }) => {
+      const focusEditor = opts?.focusEditor ?? true;
+      const el = editorRef.current;
+      if (!el || total === 0) return;
+      const target = matches[idx];
+      if (!target) return;
+      if (focusEditor) {
+        el.focus();
+      }
+      el.setSelectionRange(target.start, target.end);
+      // 根据匹配所在行，手动滚动到视图中央附近，确保可见并同步 minimap
+      const before = yaml.slice(0, target.start);
+      const lineIndex = before.split("\n").length - 1; // 从 0 开始
+      const targetTop = lineIndex * LINE_HEIGHT;
+      const viewTop = targetTop - el.clientHeight / 2;
+      el.scrollTop = Math.max(0, viewTop);
+      // 额外触发一次 viewport 更新和 minimap 同步
+      setTimeout(() => updateViewportFromEditor(), 0);
+    },
+    [matches, total, yaml, updateViewportFromEditor],
+  );
+
+  const goPrev = () => {
+    if (total === 0) return;
+    setCurrentMatchIndex((i) => {
+      const next = (i - 1 + total) % total;
+      scrollToMatch(next, { focusEditor: true });
+      return next;
+    });
+  };
+  const goNext = () => {
+    if (total === 0) return;
+    setCurrentMatchIndex((i) => {
+      const next = (i + 1) % total;
+      scrollToMatch(next, { focusEditor: true });
+      return next;
+    });
+  };
+
   const save = async (andClose: boolean) => {
     if (!isDirty) {
       if (andClose) onClose();
@@ -139,6 +195,9 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         flexDirection: "column",
         height: "100%",
         minHeight: 0,
+        flex: 1,
+        minWidth: 0,
+        width: "100%",
         backgroundColor: "#0f172a",
       }}
     >
@@ -161,6 +220,65 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
           <span>Namespace: {namespace}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCurrentMatchIndex(0);
+            }}
+            placeholder="搜索关键字"
+            style={{
+              width: 160,
+              padding: "4px 8px",
+              borderRadius: 4,
+              border: "1px solid #334155",
+              backgroundColor: "#020617",
+              color: "#e2e8f0",
+              fontSize: 12,
+            }}
+          />
+          {keyword && (
+            <>
+              <span style={{ fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap" }}>
+                × {total > 0 ? `${safeIndex + 1}/${total}` : "0/0"}
+              </span>
+              <button
+                type="button"
+                onClick={goPrev}
+                title="上一处匹配"
+                style={{
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  border: "1px solid #334155",
+                  backgroundColor: "#1e293b",
+                  color: "#e2e8f0",
+                  cursor: total > 0 ? "pointer" : "not-allowed",
+                  fontSize: 12,
+                  lineHeight: 1.2,
+                }}
+              >
+                ▲
+              </button>
+              <button
+                type="button"
+                onClick={goNext}
+                title="下一处匹配"
+                style={{
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  border: "1px solid #334155",
+                  backgroundColor: "#1e293b",
+                  color: "#e2e8f0",
+                  cursor: total > 0 ? "pointer" : "not-allowed",
+                  fontSize: 12,
+                  lineHeight: 1.2,
+                }}
+              >
+                ▼
+              </button>
+            </>
+          )}
           {error && (
             <span style={{ fontSize: 12, color: "#f97373" }}>{error}</span>
           )}
@@ -174,7 +292,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               backgroundColor: "transparent",
               color: "#94a3b8",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: 11,
             }}
           >
             Cancel
@@ -221,6 +339,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
           minHeight: 0,
           display: "flex",
           overflow: "hidden",
+          width: "100%",
         }}
       >
         {/* 行号 + 编辑区 */}
@@ -230,6 +349,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
             minWidth: 0,
             display: "flex",
             overflow: "hidden",
+            width: "100%",
           }}
         >
           <div
@@ -242,11 +362,12 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               backgroundColor: "#0f172a",
               color: "#64748b",
               fontSize: 12,
-              lineHeight: LINE_HEIGHT,
+              lineHeight: 1.5,
               paddingTop: 10,
               paddingRight: 8,
               textAlign: "right",
-              fontFamily: "ui-monospace, monospace",
+              fontFamily:
+                '"JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
             }}
           >
             {lines.map((_, i) => (
@@ -266,15 +387,16 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               outline: "none",
               backgroundColor: "#020617",
               color: "#e2e8f0",
-              fontSize: 13,
-              lineHeight: LINE_HEIGHT,
-              fontFamily: "ui-monospace, monospace",
+              fontSize: 12,
+              lineHeight: 1.5,
+              fontFamily:
+                '"JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
               resize: "none",
             }}
           />
         </div>
 
-        {/* 文档缩略与定位区 */}
+        {/* 文档缩略与定位区（窄列，不占用过多宽度） */}
         <div
           ref={minimapWrapRef}
           role="button"
@@ -282,11 +404,11 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
           onClick={handleMinimapClick}
           style={{
             width: MINIMAP_WIDTH,
-            flexShrink: 0,
+            flex: "0 0 auto",
             position: "relative",
             overflow: "hidden",
             borderLeft: "1px solid #1e293b",
-            backgroundColor: "#0f172a",
+            backgroundColor: "#020617",
             cursor: "pointer",
           }}
         >
@@ -296,7 +418,6 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               left: 0,
               right: 0,
               top: 0,
-              height: lineCount * 2,
               padding: 2,
               fontSize: 2,
               lineHeight: 2,
@@ -304,10 +425,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               color: "#64748b",
               whiteSpace: "pre",
               wordBreak: "break-all",
-              transformOrigin: "top left",
-              transform: minimapHeight > 0 && lineCount > 0
-                ? `scaleY(${minimapHeight / (lineCount * 2)})`
-                : undefined,
+              opacity: 0.7,
             }}
           >
             {yaml}
@@ -319,8 +437,9 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               left: 0,
               right: 0,
               top: viewportStyle.top,
-              height: viewportStyle.height,
-              backgroundColor: "rgba(100, 116, 139, 0.35)",
+              height: viewportStyle.height || 40,
+              backgroundColor: "rgba(148, 163, 184, 0.45)",
+              borderRadius: 2,
               pointerEvents: "none",
             }}
           />
