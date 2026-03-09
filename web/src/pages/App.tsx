@@ -1,14 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ClusterSummary,
   fetchClusters,
   fetchPods,
   Pod,
-  fetchPodLogs,
+  getPodContainerNames,
   reloadClustersFromBackend,
   fetchNamespaces,
   fetchResourceList,
-  podExecWsUrl,
   fetchConfig,
   saveConfig,
   deletePod,
@@ -16,9 +15,21 @@ import {
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
 import { ResourceTable, type Column } from "../components/ResourceTable";
-import { PodShell } from "../components/PodShell";
+import { BottomPanel, type PanelTab } from "../components/BottomPanel";
 
 const ALL_NAMESPACES = "";
+
+const POD_COLUMN_KEYS = ["name", "namespace", "node", "status", "restarts", "containers", "actions"] as const;
+const POD_COLUMN_DEFAULTS: Record<(typeof POD_COLUMN_KEYS)[number], number> = {
+  name: 180,
+  namespace: 120,
+  node: 140,
+  status: 80,
+  restarts: 70,
+  containers: 70,
+  actions: 80,
+};
+const MIN_COL_WIDTH = 40;
 
 const thStyle: React.CSSProperties = {
   textAlign: "left",
@@ -45,10 +56,14 @@ export const App: React.FC = () => {
   const [pods, setPods] = useState<Pod[]>([]);
   const [resourceItems, setResourceItems] = useState<K8sItem[]>([]);
   const [resourceLoading, setResourceLoading] = useState(false);
-  const [selectedPod, setSelectedPod] = useState<Pod | null>(null);
-  const [logs, setLogs] = useState<string>("");
-  const [shellPod, setShellPod] = useState<{ namespace: string; name: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  /** 底部面板：Shell/Logs 多标签 */
+  const [panelTabs, setPanelTabs] = useState<PanelTab[]>([]);
+  const [activePanelTabId, setActivePanelTabId] = useState<string | null>(null);
+  const [panelHeightRatio, setPanelHeightRatio] = useState(0.4);
+  const [panelMinimized, setPanelMinimized] = useState(false);
+  /** 三点菜单子菜单：当前展开的是 Shell 还是 Logs */
+  const [podMenuSubmenu, setPodMenuSubmenu] = useState<"shell" | "logs" | null>(null);
   const [reloading, setReloading] = useState(false);
   const [namespacesLoading, setNamespacesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +79,106 @@ export const App: React.FC = () => {
   const [clusterSearchKeyword, setClusterSearchKeyword] = useState("");
   /** 当前打开操作菜单的 Pod（namespace/name），null 表示未打开 */
   const [podMenuOpenKey, setPodMenuOpenKey] = useState<string | null>(null);
+  /** 列表区按 Name 关键字搜索（Pods / Deployments / Ingresses 等共用） */
+  const [nameFilter, setNameFilter] = useState("");
+  /** Pod 表列宽（可拖拽调整） */
+  const [podColumnWidths, setPodColumnWidths] = useState<Record<string, number>>(() => ({ ...POD_COLUMN_DEFAULTS }));
+  /** 列宽拖拽：当前拖拽的列 key */
+  const [resizingCol, setResizingCol] = useState<string | null>(null);
+  const resizeStartX = useRef(0);
+  const resizeStartWidth = useRef(0);
+  /** 用户手动输入并点击「应用」的命名空间，避免 namespaces 接口返回后覆盖导致列表消失 */
+  const manualNamespaceRef = useRef<{ clusterId: string; namespace: string } | null>(null);
+  /** 当前选中的 cluster/namespace，用于 loadPods 返回时丢弃过期响应 */
+  const activeClusterNsRef = useRef<{ clusterId: string | null; namespace: string }>({
+    clusterId: null,
+    namespace: ALL_NAMESPACES,
+  });
+  useEffect(() => {
+    activeClusterNsRef.current = { clusterId: activeClusterId, namespace: activeNamespace };
+  }, [activeClusterId, activeNamespace]);
+
+  // 切换集群 / 视图 / 命名空间时，重置 Name 关键字搜索，避免带着上一次的关键字影响新视图
+  useEffect(() => {
+    setNameFilter("");
+  }, [activeClusterId, activeNamespace, currentView]);
+
+  useEffect(() => {
+    if (!resizingCol) return;
+    const onMove = (e: MouseEvent) => {
+      const delta = e.clientX - resizeStartX.current;
+      setPodColumnWidths((prev) => ({
+        ...prev,
+        [resizingCol]: Math.max(MIN_COL_WIDTH, (resizeStartWidth.current + delta) | 0),
+      }));
+    };
+    const onUp = () => setResizingCol(null);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [resizingCol]);
+
+  const openPanelTab = (type: "shell" | "logs", pod: Pod, container: string) => {
+    if (!activeClusterId) return;
+    const ns = pod.metadata.namespace;
+    const name = pod.metadata.name;
+    const containers = getPodContainerNames(pod);
+    const id = `${type}-${ns}-${name}-${container}`;
+    setPanelTabs((prev) => {
+      const exists = prev.some((t) => t.id === id);
+      if (exists) return prev;
+      const tab: PanelTab = {
+        id,
+        type,
+        clusterId: activeClusterId,
+        namespace: ns,
+        pod: name,
+        container,
+        title: `${name} / ${container}`,
+        containers,
+      };
+      return [...prev, tab];
+    });
+    setActivePanelTabId(id);
+    setPodMenuOpenKey(null);
+    setPodMenuSubmenu(null);
+  };
+
+  const openEditTab = (pod: Pod) => {
+    if (!activeClusterId) return;
+    const ns = pod.metadata.namespace;
+    const name = pod.metadata.name;
+    const id = `edit-${ns}-${name}`;
+    setPanelTabs((prev) => {
+      const exists = prev.some((t) => t.id === id);
+      if (exists) return prev;
+      const tab: PanelTab = {
+        id,
+        type: "edit",
+        clusterId: activeClusterId,
+        namespace: ns,
+        pod: name,
+        container: "",
+        title: name,
+        containers: getPodContainerNames(pod),
+      };
+      return [...prev, tab];
+    });
+    setActivePanelTabId(id);
+    setPodMenuOpenKey(null);
+    setPodMenuSubmenu(null);
+  };
+
+  const closePanelTab = (id: string) => {
+    setPanelTabs((prev) => {
+      const next = prev.filter((t) => t.id !== id);
+      if (activePanelTabId === id) setActivePanelTabId(next[0]?.id ?? null);
+      return next;
+    });
+  };
 
   const loadClusters = async () => {
     const items = await fetchClusters();
@@ -87,7 +202,12 @@ export const App: React.FC = () => {
   };
 
   const loadPods = async (clusterId: string, namespace: string) => {
-    const items = await fetchPods(clusterId, namespace || undefined);
+    const requestedNs = namespace || undefined;
+    const items = await fetchPods(clusterId, requestedNs);
+    const cur = activeClusterNsRef.current;
+    if (cur.clusterId !== clusterId || (cur.namespace || "") !== (requestedNs ?? "")) {
+      return;
+    }
     setPods(items);
     setError(null);
   };
@@ -112,34 +232,35 @@ export const App: React.FC = () => {
       .finally(() => setResourceLoading(false));
   };
 
-  const openPodLogs = async (pod: Pod) => {
-    if (!activeClusterId) return;
-    setSelectedPod(pod);
-    try {
-      const text = await fetchPodLogs(activeClusterId, pod.metadata.namespace, pod.metadata.name, undefined, false);
-      setLogs(text);
-      setError(null);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load pod logs");
-    }
-  };
-
   useEffect(() => {
     loadClusters().catch((e: any) => setError(e?.message || "Failed to load clusters")).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
     if (!activeClusterId) {
+      manualNamespaceRef.current = null;
       setNamespaces([]);
       setActiveNamespace(ALL_NAMESPACES);
       setPods([]);
       setResourceItems([]);
       return;
     }
+    if (manualNamespaceRef.current && manualNamespaceRef.current.clusterId !== activeClusterId) {
+      manualNamespaceRef.current = null;
+    }
     setNamespacesLoading(true);
+    const currentClusterId = activeClusterId;
     const currentCluster = clusters.find((c) => c.id === activeClusterId);
     fetchNamespaces(activeClusterId)
       .then((list) => {
+        const manual = manualNamespaceRef.current;
+        if (manual && manual.clusterId === currentClusterId) {
+          setNamespaces((prev) =>
+            prev.includes(manual.namespace) ? prev : [...prev, manual.namespace],
+          );
+          setActiveNamespace(manual.namespace);
+          return;
+        }
         if (list.length === 0 && currentCluster?.defaultNamespace) {
           list = [currentCluster.defaultNamespace];
           setNamespaces(list);
@@ -150,8 +271,14 @@ export const App: React.FC = () => {
         }
       })
       .catch((e: any) => {
-        setNamespaces([]);
-        setActiveNamespace(ALL_NAMESPACES);
+        const manual = manualNamespaceRef.current;
+        if (manual && manual.clusterId === currentClusterId) {
+          setNamespaces([manual.namespace]);
+          setActiveNamespace(manual.namespace);
+        } else {
+          setNamespaces([]);
+          setActiveNamespace(ALL_NAMESPACES);
+        }
         setError(e?.message || "Failed to load namespaces");
       })
       .finally(() => setNamespacesLoading(false));
@@ -161,7 +288,6 @@ export const App: React.FC = () => {
     if (!activeClusterId) return;
     if (currentView === "pods") {
       loadPods(activeClusterId, activeNamespace).catch((err: any) => {
-        setPods([]);
         const status = err?.response?.status;
         const backendMsg = err?.response?.data?.error;
         if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
@@ -560,7 +686,8 @@ export const App: React.FC = () => {
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             const ns = manualNamespaceInput.trim();
-                            if (ns) {
+                            if (ns && activeClusterId) {
+                              manualNamespaceRef.current = { clusterId: activeClusterId, namespace: ns };
                               setNamespaces([ns]);
                               setActiveNamespace(ns);
                               setError(null);
@@ -572,7 +699,8 @@ export const App: React.FC = () => {
                         type="button"
                         onClick={() => {
                           const ns = manualNamespaceInput.trim();
-                          if (ns) {
+                          if (ns && activeClusterId) {
+                            manualNamespaceRef.current = { clusterId: activeClusterId, namespace: ns };
                             setNamespaces([ns]);
                             setActiveNamespace(ns);
                             setError(null);
@@ -625,14 +753,40 @@ export const App: React.FC = () => {
                   )}
                 </div>
 
-                <h3 style={{ fontSize: 15, marginBottom: 8 }}>
-                  {viewTitle[currentView]}（{activeClusterId ?? "未选择"}）
-                  {activeNamespace && currentView !== "nodes" && currentView !== "namespaces"
-                    ? ` · ${activeNamespace}`
-                    : currentView !== "nodes" && currentView !== "namespaces"
-                      ? " · 所有命名空间"
-                      : ""}
-                </h3>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    marginBottom: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <h3 style={{ fontSize: 15, margin: 0 }}>
+                    {viewTitle[currentView]}（{activeClusterId ?? "未选择"}）
+                    {activeNamespace && currentView !== "nodes" && currentView !== "namespaces"
+                      ? ` · ${activeNamespace}`
+                      : currentView !== "nodes" && currentView !== "namespaces"
+                        ? " · 所有命名空间"
+                        : ""}
+                  </h3>
+                  <input
+                    type="text"
+                    value={nameFilter}
+                    onChange={(e) => setNameFilter(e.target.value)}
+                    placeholder="按 Name 关键字过滤"
+                    style={{
+                      padding: "4px 8px",
+                      borderRadius: 6,
+                      border: "1px solid #1f2937",
+                      backgroundColor: "#020617",
+                      color: "#e5e7eb",
+                      fontSize: 12,
+                      minWidth: 160,
+                    }}
+                  />
+                </div>
               </>
             )}
           </div>
@@ -642,39 +796,105 @@ export const App: React.FC = () => {
               flex: 1,
               minHeight: 0,
               overflowY: "auto",
-              overflowX: "hidden",
+              overflowX: "auto",
             }}
           >
             {!loading && clusters.length > 0 && activeClusterId && (
               currentView === "pods" ? (
                 <>
-                  <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "#020617" }}>
+                  <table
+                    style={{
+                      width: POD_COLUMN_KEYS.reduce((s, k) => s + (podColumnWidths[k] ?? POD_COLUMN_DEFAULTS[k]), 0),
+                      minWidth: "100%",
+                      borderCollapse: "collapse",
+                      backgroundColor: "#020617",
+                      tableLayout: "fixed",
+                    }}
+                  >
+                    <colgroup>
+                      {POD_COLUMN_KEYS.map((key) => (
+                        <col key={key} style={{ width: podColumnWidths[key] ?? POD_COLUMN_DEFAULTS[key] }} />
+                      ))}
+                    </colgroup>
                     <thead>
                       <tr>
-                        <th style={thStyle}>Name</th>
-                        <th style={thStyle}>Namespace</th>
-                        <th style={thStyle}>Node</th>
-                        <th style={thStyle}>Status</th>
-                        <th style={thStyle}>Restarts</th>
-                        <th style={thStyle}>操作</th>
+                        {(["Name", "Namespace", "Node", "Status", "Restarts", "容器数", "操作"] as const).map(
+                          (label, i) => {
+                            const key = POD_COLUMN_KEYS[i];
+                            const w = podColumnWidths[key] ?? POD_COLUMN_DEFAULTS[key];
+                            return (
+                              <th
+                                key={key}
+                                style={{
+                                  ...thStyle,
+                                  position: "sticky",
+                                  top: 0,
+                                  zIndex: 2,
+                                  backgroundColor: "#0f172a",
+                                  boxShadow: "0 1px 0 0 #1f2937",
+                                  width: w,
+                                  maxWidth: w,
+                                  minWidth: w,
+                                  boxSizing: "border-box",
+                                  verticalAlign: "middle",
+                                  overflow: "hidden",
+                                }}
+                              >
+                                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                                <div
+                                  role="presentation"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setResizingCol(key);
+                                    resizeStartX.current = e.clientX;
+                                    resizeStartWidth.current = podColumnWidths[key] ?? POD_COLUMN_DEFAULTS[key];
+                                  }}
+                                  style={{
+                                    position: "absolute",
+                                    top: 0,
+                                    right: 0,
+                                    width: 6,
+                                    bottom: 0,
+                                    cursor: "col-resize",
+                                    userSelect: "none",
+                                  }}
+                                  title="拖拽调整列宽"
+                                />
+                              </th>
+                            );
+                          },
+                        )}
                       </tr>
                     </thead>
                     <tbody>
-                      {pods.map((p) => {
+                      {pods
+                        .filter((p) => {
+                          const k = nameFilter.trim().toLowerCase();
+                          if (!k) return true;
+                          return p.metadata.name.toLowerCase().includes(k);
+                        })
+                        .map((p) => {
                         const status = p.status?.phase ?? "-";
                         const node = p.spec?.nodeName ?? "-";
                         const restarts = p.status?.containerStatuses?.reduce((s, cs) => s + cs.restartCount, 0) ?? 0;
-                        return (
+                        const containerCount = getPodContainerNames(p).length;
+                        const menuKey = `${p.metadata.namespace}/${p.metadata.name}`;
+                        const containers = getPodContainerNames(p);
+                        const isMenuOpen = podMenuOpenKey === menuKey;
+                        const cellStyle: React.CSSProperties = { ...tdStyle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 0 };
+                          return (
                           <tr key={p.metadata.uid}>
-                            <td style={tdStyle}>{p.metadata.name}</td>
-                            <td style={tdStyle}>{p.metadata.namespace}</td>
-                            <td style={tdStyle}>{node}</td>
-                            <td style={tdStyle}>{status}</td>
-                            <td style={tdStyle}>{restarts}</td>
-                            <td style={tdStyle}>
+                            <td style={cellStyle} title={p.metadata.name}>{p.metadata.name}</td>
+                            <td style={cellStyle} title={p.metadata.namespace}>{p.metadata.namespace}</td>
+                            <td style={cellStyle} title={node}>{node}</td>
+                            <td style={cellStyle} title={status}>{status}</td>
+                            <td style={cellStyle}>{restarts}</td>
+                            <td style={cellStyle}>{containerCount}</td>
+                            <td style={{ ...tdStyle, overflow: "visible" }}>
                               <div style={{ position: "relative" }}>
                                 <button
                                   type="button"
+                                  className="wl-pod-menu-trigger"
                                   onClick={() =>
                                     setPodMenuOpenKey((k) =>
                                       k === `${p.metadata.namespace}/${p.metadata.name}`
@@ -687,8 +907,6 @@ export const App: React.FC = () => {
                                     height: 28,
                                     borderRadius: "50%",
                                     border: "1px solid #1f2937",
-                                    backgroundColor: "#1e293b",
-                                    color: "#9ca3af",
                                     cursor: "pointer",
                                     display: "flex",
                                     alignItems: "center",
@@ -700,11 +918,11 @@ export const App: React.FC = () => {
                                 >
                                   ⋮
                                 </button>
-                                {podMenuOpenKey === `${p.metadata.namespace}/${p.metadata.name}` && (
+                                {isMenuOpen && (
                                   <>
                                     <div
                                       style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                                      onClick={() => setPodMenuOpenKey(null)}
+                                      onClick={() => { setPodMenuOpenKey(null); setPodMenuSubmenu(null); }}
                                       aria-hidden
                                     />
                                     <div
@@ -713,128 +931,114 @@ export const App: React.FC = () => {
                                         right: 0,
                                         top: "100%",
                                         marginTop: 4,
-                                        minWidth: 120,
+                                        minWidth: 140,
                                         backgroundColor: "#1e293b",
                                         border: "1px solid #334155",
                                         borderRadius: 8,
                                         boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
                                         zIndex: 41,
                                         padding: "4px 0",
+                                        display: "flex",
                                       }}
                                       onClick={(e) => e.stopPropagation()}
                                     >
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          openPodLogs(p);
-                                          setPodMenuOpenKey(null);
-                                        }}
-                                        style={menuItemStyle}
-                                      >
-                                        <span style={{ marginRight: 8 }}>≡</span>
-                                        Logs
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setError("编辑功能规划中");
-                                          setPodMenuOpenKey(null);
-                                        }}
-                                        style={menuItemStyle}
-                                      >
-                                        <span style={{ marginRight: 8 }}>✎</span>
-                                        Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (
-                                            !activeClusterId ||
-                                            !window.confirm(`确定删除 Pod ${p.metadata.namespace}/${p.metadata.name}？`)
-                                          ) {
-                                            setPodMenuOpenKey(null);
-                                            return;
-                                          }
-                                          deletePod(activeClusterId, p.metadata.namespace, p.metadata.name)
-                                            .then(() => {
-                                              setPodMenuOpenKey(null);
-                                              setError(null);
-                                              loadPods(activeClusterId!, activeNamespace);
-                                            })
-                                            .catch((err: any) =>
-                                              setError(
-                                                err?.response?.data?.error ?? err?.message ?? "删除失败",
-                                              ),
-                                            );
-                                        }}
-                                        style={{ ...menuItemStyle, color: "#f97373" }}
-                                      >
-                                        <span style={{ marginRight: 8 }}>🗑</span>
-                                        Delete
-                                      </button>
+                                      <div style={{ padding: "4px 0", borderRight: podMenuSubmenu ? "1px solid #334155" : undefined }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setPodMenuSubmenu((s) => (s === "shell" ? null : "shell"))}
+                                          className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
+                                          style={{
+                                            ...menuItemStyleForDropdown,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            width: "100%",
+                                          }}
+                                        >
+                                          <span><span style={{ marginRight: 8 }}>⌘</span> Shell</span>
+                                          <span style={{ fontSize: 10 }}>▸</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setPodMenuSubmenu((s) => (s === "logs" ? null : "logs"))}
+                                          className={`wl-menu-item${podMenuSubmenu === "logs" ? " is-active" : ""}`}
+                                          style={{
+                                            ...menuItemStyleForDropdown,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            width: "100%",
+                                          }}
+                                        >
+                                          <span><span style={{ marginRight: 8 }}>≡</span> Logs</span>
+                                          <span style={{ fontSize: 10 }}>▸</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => openEditTab(p)}
+                                          className="wl-menu-item"
+                                          style={menuItemStyleForDropdown}
+                                        >
+                                          <span style={{ marginRight: 8 }}>✎</span> Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (!activeClusterId || !window.confirm(`确定删除 Pod ${p.metadata.namespace}/${p.metadata.name}？`)) {
+                                              setPodMenuOpenKey(null); setPodMenuSubmenu(null);
+                                              return;
+                                            }
+                                            deletePod(activeClusterId, p.metadata.namespace, p.metadata.name)
+                                              .then(() => {
+                                                setPodMenuOpenKey(null); setPodMenuSubmenu(null);
+                                                setError(null);
+                                                loadPods(activeClusterId!, activeNamespace);
+                                              })
+                                              .catch((err: any) => setError(err?.response?.data?.error ?? err?.message ?? "删除失败"));
+                                          }}
+                                          className="wl-menu-item wl-menu-item-danger"
+                                          style={menuItemStyleForDropdown}
+                                        >
+                                          <span style={{ marginRight: 8 }}>🗑</span> Delete
+                                        </button>
+                                      </div>
+                                      {podMenuSubmenu && (
+                                        <div style={{ minWidth: 100, padding: "4px 0" }}>
+                                          {containers.map((c) => (
+                                            <button
+                                              key={c}
+                                              type="button"
+                                              onClick={() => openPanelTab(podMenuSubmenu, p, c)}
+                                              className="wl-menu-item"
+                                              style={menuItemStyleForDropdown}
+                                            >
+                                              {c}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
                                     </div>
                                   </>
                                 )}
                               </div>
                             </td>
                           </tr>
-                        );
-                      })}
+                          );
+                        })}
                     </tbody>
                   </table>
-
-                  {selectedPod && (
-                    <div
-                      style={{
-                        marginTop: 20,
-                        border: "1px solid #1f2937",
-                        borderRadius: 8,
-                        padding: 12,
-                        backgroundColor: "#020617",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          marginBottom: 8,
-                          alignItems: "center",
-                        }}
-                      >
-                        <div style={{ fontSize: 14 }}>
-                          Pod 日志：{selectedPod.metadata.namespace}/{selectedPod.metadata.name}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedPod(null);
-                            setLogs("");
-                          }}
-                          style={btnStyle}
-                        >
-                          关闭
-                        </button>
-                      </div>
-                      <pre
-                        style={{
-                          maxHeight: 320,
-                          overflow: "auto",
-                          fontSize: 12,
-                          backgroundColor: "#020617",
-                          padding: 8,
-                          borderRadius: 4,
-                        }}
-                      >
-                        {logs || "（暂无日志内容）"}
-                      </pre>
-                    </div>
-                  )}
                 </>
               ) : (
                 <ResourceTable
                   title=""
                   columns={genericColumns}
-                  items={resourceItems}
+                  items={
+                    nameFilter.trim()
+                      ? resourceItems.filter((i) =>
+                          (i.metadata?.name ?? "").toLowerCase().includes(nameFilter.trim().toLowerCase()),
+                        )
+                      : resourceItems
+                  }
                   getKey={(i) => (i.metadata?.uid as string) ?? i.metadata?.name ?? ""}
                   loading={resourceLoading}
                 />
@@ -844,14 +1048,17 @@ export const App: React.FC = () => {
         </main>
       </div>
 
-      {shellPod && activeClusterId && (
-        <PodShell
-          wsUrl={podExecWsUrl(activeClusterId, shellPod.namespace, shellPod.name)}
-          podName={shellPod.name}
-          namespace={shellPod.namespace}
-          onClose={() => setShellPod(null)}
-        />
-      )}
+      <BottomPanel
+        tabs={panelTabs}
+        activeTabId={activePanelTabId}
+        onActiveTab={setActivePanelTabId}
+        onCloseTab={closePanelTab}
+        onCloseAll={() => { setPanelTabs([]); setActivePanelTabId(null); }}
+        heightRatio={panelHeightRatio}
+        onHeightRatioChange={setPanelHeightRatio}
+        minimized={panelMinimized}
+        onMinimizedChange={setPanelMinimized}
+      />
     </div>
   );
 };
@@ -874,6 +1081,17 @@ const menuItemStyle: React.CSSProperties = {
   border: "none",
   backgroundColor: "transparent",
   color: "#e2e8f0",
+  cursor: "pointer",
+  fontSize: 13,
+  textAlign: "left",
+};
+
+/** 三点菜单内按钮用此样式，不设 background/color，由 .wl-menu-item 的 CSS 控制悬停高亮 */
+const menuItemStyleForDropdown: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  padding: "8px 12px",
+  border: "none",
   cursor: "pointer",
   fontSize: 13,
   textAlign: "left",
