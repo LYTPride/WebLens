@@ -39,18 +39,17 @@ if [[ ! -f server/bin/weblens-server ]]; then
 fi
 chmod +x server/bin/weblens-server
 
-# 2. 构建前端
-echo ">> 构建 web/dist ..."
-if [[ ! -f web/dist/index.html ]]; then
-  (cd web && npm run build)
-fi
+# 2. 构建前端（先清空旧的 web/dist，避免历史遗留文件混入）
+echo ">> 清空 web/dist 并重新构建前端 ..."
+rm -rf web/dist
+(cd web && npm run build)
 if [[ ! -f web/dist/index.html ]]; then
   echo "Error: web/dist/index.html not found. Run: cd web && npm run build" >&2
   exit 1
 fi
 
-# 3. 准备打包目录（仅包含部署必要文件）
-echo ">> 准备打包目录 ..."
+# 3. 准备打包目录（仅包含部署必要文件，先清空临时打包空间）
+echo ">> 准备打包目录（清理旧的 staging） ..."
 rm -rf "${STAGING}"
 mkdir -p "${STAGING}/${RELEASE_NAME}"
 
