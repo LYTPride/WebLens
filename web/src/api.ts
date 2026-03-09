@@ -28,7 +28,16 @@ export interface Pod {
   };
   spec?: {
     nodeName?: string;
+    containers?: Array<{ name: string }>;
   };
+}
+
+/** 从 Pod 取容器名列表（用于 Shell/Logs 子菜单），优先 spec.containers，否则 status.containerStatuses */
+export function getPodContainerNames(pod: Pod): string[] {
+  const fromSpec = pod.spec?.containers?.map((c) => c.name) ?? [];
+  const fromStatus = pod.status?.containerStatuses?.map((c) => c.name) ?? [];
+  if (fromSpec.length > 0) return fromSpec;
+  return fromStatus.length > 0 ? fromStatus : ["default"];
 }
 
 // 与后端同源部署时，直接使用当前站点 origin（协议+主机+端口），避免写死 IP/端口。
@@ -100,6 +109,77 @@ export async function fetchPodLogs(
     },
   );
   return res.data;
+}
+
+/**
+ * 实时 follow Pod 日志流；返回取消函数，组件卸载时调用。
+ */
+export function streamPodLogs(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+  opts: {
+    container?: string;
+    tailLines?: number;
+    onChunk: (text: string) => void;
+    onError?: (err: Error) => void;
+  },
+): () => void {
+  const ac = new AbortController();
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const url = new URL(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/logs`,
+    base,
+  );
+  url.searchParams.set("follow", "true");
+  if (opts.container) url.searchParams.set("container", opts.container);
+  if (opts.tailLines != null) url.searchParams.set("tailLines", String(opts.tailLines));
+
+  fetch(url.toString(), { signal: ac.signal })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(res.statusText);
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No body");
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        opts.onChunk(decoder.decode(value, { stream: true }));
+      }
+    })
+    .catch((err) => {
+      if (err?.name === "AbortError") return;
+      opts.onError?.(err);
+    });
+
+  return () => ac.abort();
+}
+
+/** 获取 Pod 原始 YAML（用于编辑） */
+export async function fetchPodYaml(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+/** 应用 Pod YAML 更新 */
+export async function applyPodYaml(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+  yamlBody: string,
+): Promise<void> {
+  await api.put(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
 }
 
 /** 删除 Pod */

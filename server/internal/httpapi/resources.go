@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/gin-gonic/gin"
+	"sigs.k8s.io/yaml"
 )
 
 // isForbiddenClusterScope 判断是否为「无集群级权限」类错误
@@ -123,6 +124,61 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+	})
+
+	// Get Pod YAML（用于编辑）
+	r.GET("/api/clusters/:id/pods/:namespace/:pod/yaml", func(c *gin.Context) {
+		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("pod")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		pod, err := client.CoreV1().Pods(ns).Get(c.Request.Context(), name, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		raw, err := yaml.Marshal(pod)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Data(http.StatusOK, "text/yaml; charset=utf-8", raw)
+	})
+
+	// Apply Pod（从 YAML 更新）
+	r.PUT("/api/clusters/:id/pods/:namespace/:pod", func(c *gin.Context) {
+		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("pod")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		body, err := c.GetRawData()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var pod corev1.Pod
+		if err := yaml.Unmarshal(body, &pod); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid YAML: " + err.Error()})
+			return
+		}
+		existing, err := client.CoreV1().Pods(ns).Get(c.Request.Context(), name, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		pod.Namespace = ns
+		pod.Name = name
+		pod.ResourceVersion = existing.ResourceVersion
+		_, err = client.CoreV1().Pods(ns).Update(c.Request.Context(), &pod, metav1.UpdateOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusOK)
 	})
 
 	// Delete Pod
