@@ -41,13 +41,13 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
       - `tailLines`：返回尾部若干行（可选）
       - `follow`：是否跟随日志流（`true`/`false`）
   - 行为：
-    - `follow=false`：一次性返回文本日志。
-    - `follow=true`：后端使用 chunked 传输流式输出日志行，便于前端实现实时跟随。
-  - 前端：在 Pods 列表中点击「日志」按钮，在页面下方以可滚动区域展示。
+  - `follow=false`：一次性返回文本日志。
+  - `follow=true`：后端使用 chunked 传输流式输出日志行，便于前端实现实时跟随。
+  - 前端：在 Pods 列表行右侧三点菜单中选择 **Logs**，在底部多标签面板中以可滚动区域展示，可与 Shell 标签并存。
 
-- **Pod Shell（kubectl exec）（后端已实现，前端待完善）**
+- **Pod Shell（kubectl exec）**
   - 后端：`GET /api/clusters/:id/pods/:namespace/:pod/exec` 升级为 WebSocket，使用 `remotecommand.NewSPDYExecutor` 在容器内启动 `/bin/sh`，将 stdin/stdout/stderr 与 WebSocket 双向桥接。
-  - 前端：当前版本保留基础 Shell 终端组件（`PodShell`），后续将在 Pods 三点菜单 + 底部多标签面板中完成完整集成。
+  - 前端：在 Pods 列表三点菜单中选择 **Shell**，会在底部多标签面板中打开终端标签（支持多 Pod / 多容器并存切换）。
 
 - **可选 Basic 鉴权**
   - 环境变量 `WEBLENS_AUTH_USER` 与 `WEBLENS_AUTH_PASSWORD` 同时设置时，对所有请求（除 `/healthz`）启用 HTTP Basic 鉴权。
@@ -252,8 +252,8 @@ cd /appdata/soft/weblens
 
 3. **通过浏览器访问**
    - 在浏览器中访问 `http://服务器IP:8080/`。
-   - 在集群列表中选择一个集群。
-   - 查看 Pods 列表、点击“日志”按钮查看指定 Pod 的应用日志。
+   - 在集群列表中选择一个集群和命名空间。
+   - 在 Pods 列表中，通过行尾三点菜单打开 **Shell / Logs / Edit / Delete** 等操作；Logs/Shell 会在底部面板中以多标签形式展示。
 
 ---
 
