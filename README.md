@@ -25,11 +25,14 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
 
 - **资源浏览（对标 Freelens 左侧菜单）**
   - 后端提供以下接口（均支持 `namespace` 查询参数，Nodes/Namespaces 为集群级）：
-    - **工作负载**：`/pods`、`/deployments`、`/statefulsets`、`/daemonsets`、`/jobs`、`/cronjobs`
-    - **配置**：`/configmaps`、`/secrets`
-    - **网络**：`/services`、`/ingresses`
-    - **集群**：`/namespaces`、`/nodes`、`/events`
-  - 前端：左侧 **侧栏菜单**（工作负载 / 配置 / 网络 / 集群），主区域为「当前集群 + 命名空间选择」上方固定区域 + 下方可滚动的资源列表。Pods 视图中，每一行提供三点操作菜单（当前支持 Logs / Edit / Delete，Shell 将在后续版本中整合到底部面板）。
+  - **工作负载**：`/pods`、`/deployments`、`/statefulsets`、`/daemonsets`、`/jobs`、`/cronjobs`
+  - **配置**：`/configmaps`、`/secrets`
+  - **网络**：`/services`、`/ingresses`
+  - **集群**：`/namespaces`、`/nodes`、`/events`
+  - 前端：左侧 **侧栏菜单**（工作负载 / 配置 / 网络 / 集群），主区域为「当前集群 + 命名空间选择」上方固定区域 + 下方可滚动的资源列表。Pods 视图中：
+    - Name 列支持 **一键复制 Pod 名称**（小图标按钮）。
+    - 列表包含 **Age**（运行时长）、Status、Restarts、容器数等字段。
+    - 每一行提供三点操作菜单：Logs / Edit（YAML 编辑）/ Delete，Shell 将在后续版本中整合到底部面板。
 
 - **Pod 日志查看**
   - 接口：`GET /api/clusters/:id/pods/:namespace/:pod/logs`
@@ -38,13 +41,13 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
       - `tailLines`：返回尾部若干行（可选）
       - `follow`：是否跟随日志流（`true`/`false`）
   - 行为：
-    - `follow=false`：一次性返回文本日志。
-    - `follow=true`：后端使用 chunked 传输流式输出日志行，便于前端实现实时跟随。
-  - 前端：在 Pods 列表中点击「日志」按钮，在页面下方以可滚动区域展示。
+  - `follow=false`：一次性返回文本日志。
+  - `follow=true`：后端使用 chunked 传输流式输出日志行，便于前端实现实时跟随。
+  - 前端：在 Pods 列表行右侧三点菜单中选择 **Logs**，在底部多标签面板中以可滚动区域展示，可与 Shell 标签并存。
 
-- **Pod Shell（kubectl exec）（后端已实现，前端待完善）**
+- **Pod Shell（kubectl exec）**
   - 后端：`GET /api/clusters/:id/pods/:namespace/:pod/exec` 升级为 WebSocket，使用 `remotecommand.NewSPDYExecutor` 在容器内启动 `/bin/sh`，将 stdin/stdout/stderr 与 WebSocket 双向桥接。
-  - 前端：当前版本保留基础 Shell 终端组件（`PodShell`），后续将在 Pods 三点菜单 + 底部多标签面板中完成完整集成。
+  - 前端：在 Pods 列表三点菜单中选择 **Shell**，会在底部多标签面板中打开终端标签（支持多 Pod / 多容器并存切换）。
 
 - **可选 Basic 鉴权**
   - 环境变量 `WEBLENS_AUTH_USER` 与 `WEBLENS_AUTH_PASSWORD` 同时设置时，对所有请求（除 `/healthz`）启用 HTTP Basic 鉴权。
@@ -76,6 +79,25 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
 - **监控与告警集成**
   - 对接 Metrics Server / Prometheus 展示 CPU、内存等监控图。
   - 对接 Alertmanager 或其他告警系统。
+
+---
+
+## 当前前端交互特性（2026-03）
+
+- **Pods 列表增强**
+  - Name 列右侧提供「复制到剪贴板」按钮，方便在终端 / IM 中粘贴 Pod 名称。
+  - 新增 **Age** 列，展示 Pod 存活时长（秒 / 分钟 / 小时 / 天 / 周 / 月）。
+  - Pods 列表支持 Name 关键字过滤与 Age/Status 等核心信息一屏查看。
+- **Pod YAML 在线编辑**
+  - 在 Pods 列的三点菜单中点击 **Edit**，底部面板会打开 Pod YAML 编辑标签页。
+  - 编辑器支持：Cancel / Save / Save & Close，右侧带文档缩略图和视口高亮。
+  - 内置关键字搜索（带上下跳转和 minimap 同步）。
+- **实时刷新与性能优化**
+  - 当前选中集群 + 命名空间 + 资源视图采用 **3 秒轮询** 刷新，模拟 `watch` 效果。
+  - 浏览器标签页不可见时自动暂停轮询，重新激活时立即刷新一次。
+  - 后端对各类资源 List 接口增加 **1 秒软缓存**，多用户并发时减少对 kube‑apiserver 的压力。
+- **侧栏折叠**
+  - 左侧菜单支持一键 **收起/展开**，收起后主工作区横向空间增大，更适合宽屏查看 Pods 与 YAML。
 
 ---
 
@@ -230,8 +252,8 @@ cd /appdata/soft/weblens
 
 3. **通过浏览器访问**
    - 在浏览器中访问 `http://服务器IP:8080/`。
-   - 在集群列表中选择一个集群。
-   - 查看 Pods 列表、点击“日志”按钮查看指定 Pod 的应用日志。
+   - 在集群列表中选择一个集群和命名空间。
+   - 在 Pods 列表中，通过行尾三点菜单打开 **Shell / Logs / Edit / Delete** 等操作；Logs/Shell 会在底部面板中以多标签形式展示。
 
 ---
 

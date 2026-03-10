@@ -42,3 +42,40 @@ body {
   background-color: #6b7280;
 }
 
+/* 三点菜单：一级与二级菜单行高亮（背景仅由 class 控制，避免被内联覆盖） */
+.wl-menu-item {
+  background-color: transparent;
+  color: #e2e8f0;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+/* 当前展开子菜单的一级项（Shell/Logs）弱高亮 */
+.wl-menu-item.is-active {
+  background-color: #0f172a;
+}
+
+/* 鼠标悬停：深色主题下的高亮 */
+.wl-menu-item:hover {
+  background-color: #334155;
+  color: #e2e8f0;
+}
+
+/* Delete 项默认红色，悬停时与其它项一致 */
+.wl-menu-item.wl-menu-item-danger {
+  color: #f97373;
+}
+.wl-menu-item.wl-menu-item-danger:hover {
+  color: #e2e8f0;
+}
+
+/* 三点按钮：背景与文字色仅由 class 控制，悬停高亮才能生效 */
+.wl-pod-menu-trigger {
+  background-color: #1e293b;
+  color: #9ca3af;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.wl-pod-menu-trigger:hover {
+  background-color: #334155;
+  color: #e2e8f0;
+}
+

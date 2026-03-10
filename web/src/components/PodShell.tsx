@@ -1,19 +1,73 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Terminal } from "xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "xterm/css/xterm.css";
 
 interface PodShellProps {
   wsUrl: string;
   podName: string;
   namespace: string;
   onClose: () => void;
+  /** 内嵌模式：不占满屏，无遮罩，适合放在底部面板中 */
+  inline?: boolean;
 }
 
-export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, onClose }) => {
-  const [output, setOutput] = useState<string>("");
-  const [input, setInput] = useState("");
+export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, onClose, inline }) => {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const preRef = useRef<HTMLPreElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
+  // 初始化 xterm 终端
+  useEffect(() => {
+    const term = new Terminal({
+      fontFamily:
+        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+      fontSize: 14,
+      theme: {
+        background: "#020617",
+        foreground: "#e2e8f0",
+      },
+      cursorBlink: true,
+      scrollback: 2000,
+    });
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    fitAddonRef.current = fitAddon;
+    termRef.current = term;
+    if (containerRef.current) {
+      term.open(containerRef.current);
+      fitAddon.fit();
+      term.focus();
+    }
+
+    return () => {
+      fitAddonRef.current = null;
+      term.dispose();
+      termRef.current = null;
+    };
+  }, []);
+
+  // 当容器尺寸变化（包括拖动底部面板高度、浏览器窗口变化）时，自动让终端充满整个黑色区域
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const fit = fitAddonRef.current;
+    if (fit) {
+      fit.fit();
+    }
+    const ro = new ResizeObserver(() => {
+      const f = fitAddonRef.current;
+      if (f) f.fit();
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+    };
+  }, []);
+
+  // 建立 WebSocket 与容器内 /bin/sh 的双向连接
   useEffect(() => {
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -22,17 +76,22 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
     ws.onopen = () => setConnected(true);
     ws.onclose = () => {
       setConnected(false);
-      setOutput((prev) => prev + "\r\n[连接已关闭]");
+      termRef.current?.writeln("\r\n[连接已关闭]");
     };
-    ws.onerror = () => setOutput((prev) => prev + "\r\n[连接错误]");
+    ws.onerror = () => {
+      termRef.current?.writeln("\r\n[连接错误]");
+    };
     ws.onmessage = (ev) => {
       const data = ev.data;
+      let text: string;
       if (data instanceof ArrayBuffer) {
-        const decoder = new TextDecoder();
-        setOutput((prev) => prev + decoder.decode(data));
+        text = new TextDecoder().decode(data);
       } else if (typeof data === "string") {
-        setOutput((prev) => prev + data);
+        text = data;
+      } else {
+        return;
       }
+      termRef.current?.write(text);
     };
 
     return () => {
@@ -41,16 +100,20 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
     };
   }, [wsUrl]);
 
+  // 将用户在终端中的键盘输入直接转发到 WebSocket，支持 Tab 补全、方向键历史等
   useEffect(() => {
-    if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight;
-  }, [output]);
+    const term = termRef.current;
+    if (!term) return;
 
-  const send = () => {
-    if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    const toSend = input + "\r\n";
-    wsRef.current.send(toSend);
-    setInput("");
-  };
+    const disposable = term.onData((data) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+      wsRef.current.send(data);
+    });
+
+    return () => {
+      disposable.dispose();
+    };
+  }, []);
 
   const panelStyle: React.CSSProperties = {
     position: "fixed",
@@ -66,17 +129,26 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
     zIndex: 1000,
   };
 
-  const boxStyle: React.CSSProperties = {
-    width: "90%",
-    maxWidth: 900,
-    height: "70%",
-    backgroundColor: "#0f172a",
-    border: "1px solid #1e293b",
-    borderRadius: 8,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-  };
+  const boxStyle: React.CSSProperties = inline
+    ? {
+        flex: 1,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        backgroundColor: "#020617",
+      }
+    : {
+        width: "90%",
+        maxWidth: 900,
+        height: "70%",
+        backgroundColor: "#0f172a",
+        border: "1px solid #1e293b",
+        borderRadius: 8,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      };
 
   const headerStyle: React.CSSProperties = {
     padding: "10px 14px",
@@ -87,87 +159,35 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
     fontSize: 14,
   };
 
-  const preStyle: React.CSSProperties = {
+  const terminalStyle: React.CSSProperties = {
     flex: 1,
+    minHeight: 0,
     margin: 0,
-    padding: 12,
-    overflow: "auto",
-    fontSize: 13,
-    fontFamily: "monospace",
-    color: "#e2e8f0",
-    backgroundColor: "#020617",
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-all",
-  };
-
-  const inputRowStyle: React.CSSProperties = {
     padding: 8,
-    borderTop: "1px solid #1e293b",
+    backgroundColor: "#020617",
     display: "flex",
-    gap: 8,
   };
 
-  return (
-    <div style={panelStyle} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div style={boxStyle} onClick={(e) => e.stopPropagation()}>
+  const inner = (
+    <div style={boxStyle} onClick={(e) => e.stopPropagation()}>
         <div style={headerStyle}>
           <span>
             Shell: {namespace}/{podName} {connected ? "· 已连接" : "· 连接中…"}
           </span>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: "4px 10px",
-              borderRadius: 4,
-              border: "1px solid #1e293b",
-              backgroundColor: "#1e293b",
-              color: "#e2e8f0",
-              cursor: "pointer",
-            }}
-          >
-            关闭
-          </button>
         </div>
-        <pre ref={preRef} style={preStyle}>
-          {output || "(等待输出…)"}
-        </pre>
-        <div style={inputRowStyle}>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder={connected ? "输入命令回车执行" : "连接中…"}
-            disabled={!connected}
-            style={{
-              flex: 1,
-              padding: "8px 10px",
-              borderRadius: 4,
-              border: "1px solid #1e293b",
-              backgroundColor: "#020617",
-              color: "#e2e8f0",
-              fontFamily: "monospace",
-              fontSize: 13,
-            }}
+        <div style={terminalStyle} onClick={() => termRef.current?.focus()}>
+          <div
+            ref={containerRef}
+            style={{ flex: 1, minHeight: 0, width: "100%", height: "100%" }}
           />
-          <button
-            type="button"
-            onClick={send}
-            disabled={!connected}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 4,
-              border: "1px solid #1e293b",
-              backgroundColor: "#0f172a",
-              color: "#e2e8f0",
-              cursor: connected ? "pointer" : "not-allowed",
-            }}
-          >
-            发送
-          </button>
         </div>
       </div>
+  );
+
+  if (inline) return inner;
+  return (
+    <div style={panelStyle} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      {inner}
     </div>
   );
 };

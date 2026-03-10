@@ -39,9 +39,22 @@ func registerExecRoutes(r *gin.Engine, reg *cluster.Registry) {
 
 		req := client.CoreV1().RESTClient().Post().
 			Resource("pods").Namespace(ns).Name(podName).SubResource("exec")
+		// 优先进入 bash 交互 shell：设置 TERM 与 PS1，兼容方向键/历史命令（若容器内存在 bash）
+		// 若无 bash，则退回到 /bin/sh -i，同样设置 TERM 与 PS1。
 		opts := &corev1.PodExecOptions{
 			Container: container,
-			Command:   []string{"/bin/sh"},
+			Command: []string{
+				"/bin/sh", "-c",
+				"if command -v bash >/dev/null 2>&1; then " +
+					"export TERM=xterm-256color; " +
+					"export PS1='root@$(hostname 2>/dev/null || true):\\w# '; " +
+					"exec bash -li; " +
+				"else " +
+					"export TERM=xterm-256color; " +
+					"export PS1='root@$(hostname 2>/dev/null || true):\\w# '; " +
+					"exec /bin/sh -i; " +
+				"fi",
+			},
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
