@@ -8,6 +8,8 @@ interface LogsTabProps {
   container: string;
   containers: string[];
   onClose?: () => void;
+  /** 仅当标签激活时才建立日志流，避免与 Watch 等长连接争抢导致长时间等待 */
+  isActive?: boolean;
 }
 
 export const LogsTab: React.FC<LogsTabProps> = ({
@@ -16,6 +18,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   podName,
   container,
   containers,
+  isActive = true,
 }) => {
   const [content, setContent] = useState("");
   const [search, setSearch] = useState("");
@@ -26,6 +29,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   const currentMatchRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
+    if (!isActive) return;
     setContent("");
     setError(null);
     setCurrentMatchIndex(0);
@@ -36,7 +40,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
       onError: (err) => setError(err?.message ?? "加载失败"),
     });
     return cancel;
-  }, [clusterId, namespace, podName, currentContainer]);
+  }, [isActive, clusterId, namespace, podName, currentContainer]);
 
   useEffect(() => {
     if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight;

@@ -10,6 +10,8 @@ interface PodYamlEditTabProps {
   podName: string;
   onClose: () => void;
   onSaved?: () => void;
+  /** 仅当标签激活时才请求 YAML，避免与 Watch 等长连接争抢导致长时间等待 */
+  isActive?: boolean;
 }
 
 export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
@@ -18,10 +20,11 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   podName,
   onClose,
   onSaved,
+  isActive = true,
 }) => {
   const [yaml, setYaml] = useState("");
   const [initialYaml, setInitialYaml] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
@@ -47,8 +50,8 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   }, [clusterId, namespace, podName]);
 
   useEffect(() => {
-    loadYaml();
-  }, [loadYaml]);
+    if (isActive) loadYaml();
+  }, [isActive, loadYaml]);
 
   const updateViewportFromEditor = useCallback(() => {
     const el = editorRef.current;

@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +14,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/gin-gonic/gin"
@@ -59,6 +62,52 @@ func setListCache(key string, data interface{}) {
 	listCacheMu.Lock()
 	listCache[key] = listCacheEntry{ts: time.Now(), data: data}
 	listCacheMu.Unlock()
+}
+
+// PodDescribeResponse 封装 Pod 及其相关 Events，用于前端做「Describe Pod」视图
+type PodDescribeResponse struct {
+	Pod    *corev1.Pod    `json:"pod"`
+	Events []corev1.Event `json:"events"`
+}
+
+// watchAndStream 是通用的 Kubernetes Watch 封装：将 watch.Interface 输出为按行 JSON 事件流
+func watchAndStream(c *gin.Context, id, ns string, w watch.Interface) {
+	defer w.Stop()
+
+	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.WriteHeader(http.StatusOK)
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		log.Printf("watch cluster=%s namespace=%s: response writer does not support flush", id, ns)
+		return
+	}
+
+	enc := json.NewEncoder(c.Writer)
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case ev, ok := <-w.ResultChan():
+			if !ok {
+				return
+			}
+			out := struct {
+				Type   watch.EventType `json:"type"`
+				Object interface{}     `json:"object"`
+			}{
+				Type:   ev.Type,
+				Object: ev.Object,
+			}
+			if err := enc.Encode(&out); err != nil {
+				log.Printf("watch encode error cluster=%s namespace=%s: %v", id, ns, err)
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // defaultNamespaceForCluster 返回该集群在 kubeconfig 中的默认命名空间（无则空）
@@ -163,7 +212,10 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 					}
 				}
 				if err != nil {
-					if isForbiddenClusterScope(err) {
+					// 任意「forbidden」类型错误（无论 cluster-scope 还是 namespace 级）都视为无权限：
+					// 返回 200 + 空列表，避免前端持续重试导致 UI 卡死。
+					if strings.Contains(err.Error(), "forbidden") {
+						log.Printf("pods list cluster=%s namespace=%s forbidden: %v", id, ns, err)
 						c.JSON(http.StatusOK, gin.H{"items": []corev1.Pod{}})
 						return
 					}
@@ -175,6 +227,36 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+	})
+
+	// Pods Watch：基于 Kubernetes Watch API 的实时变更流（用于前端 Resource Watch）
+	r.GET("/api/clusters/:id/pods/watch", func(c *gin.Context) {
+		id := c.Param("id")
+		ns := c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+
+		// 使用 resourceVersion=0：从当前状态开始发送 ADDED 事件，然后持续推送变更
+		w, err := client.CoreV1().Pods(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			// 没有 watch 权限时返回 403，由前端决定是否回退到轮询
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
 	})
 
 	// Get Pod YAML（用于编辑）
@@ -196,6 +278,50 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 		c.Data(http.StatusOK, "text/yaml; charset=utf-8", raw)
+	})
+
+	// Describe Pod：返回 Pod 及其相关 Events，供前端做分区展示
+	r.GET("/api/clusters/:id/pods/:namespace/:pod/describe", func(c *gin.Context) {
+		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("pod")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+
+		ctx := c.Request.Context()
+		pod, err := client.CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		evList, err := client.CoreV1().Events(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			// describe 里 Events 不是强依赖，失败时仅返回 Pod
+			log.Printf("describe pod=%s/%s list events error: %v", ns, name, err)
+			c.JSON(http.StatusOK, &PodDescribeResponse{Pod: pod, Events: nil})
+			return
+		}
+
+		var related []corev1.Event
+		for i := range evList.Items {
+			ev := evList.Items[i]
+			if ev.InvolvedObject.UID == pod.UID {
+				related = append(related, ev)
+			}
+		}
+		// 事件按时间排序（最旧在前）
+		sort.Slice(related, func(i, j int) bool {
+			ti := related[i].LastTimestamp
+			tj := related[j].LastTimestamp
+			return ti.Time.Before(tj.Time)
+		})
+
+		c.JSON(http.StatusOK, &PodDescribeResponse{
+			Pod:    pod,
+			Events: related,
+		})
 	})
 
 	// Apply Pod（从 YAML 更新）
@@ -284,6 +410,32 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
+	// Deployments Watch
+	r.GET("/api/clusters/:id/deployments/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.AppsV1().Deployments(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
+	})
+
 	// StatefulSets
 	r.GET("/api/clusters/:id/statefulsets", func(c *gin.Context) {
 		id, ns := c.Param("id"), c.Query("namespace")
@@ -318,6 +470,32 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+	})
+
+	// StatefulSets Watch
+	r.GET("/api/clusters/:id/statefulsets/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.AppsV1().StatefulSets(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
 	})
 
 	// DaemonSets
@@ -356,6 +534,32 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
+	// DaemonSets Watch
+	r.GET("/api/clusters/:id/daemonsets/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.AppsV1().DaemonSets(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
+	})
+
 	// Jobs
 	r.GET("/api/clusters/:id/jobs", func(c *gin.Context) {
 		id, ns := c.Param("id"), c.Query("namespace")
@@ -390,6 +594,32 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+	})
+
+	// Jobs Watch
+	r.GET("/api/clusters/:id/jobs/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.BatchV1().Jobs(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
 	})
 
 	// CronJobs
@@ -428,6 +658,32 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
+	// CronJobs Watch
+	r.GET("/api/clusters/:id/cronjobs/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.BatchV1().CronJobs(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
+	})
+
 	// Events
 	r.GET("/api/clusters/:id/events", func(c *gin.Context) {
 		id, ns := c.Param("id"), c.Query("namespace")
@@ -462,6 +718,32 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+	})
+
+	// Events Watch
+	r.GET("/api/clusters/:id/events/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.CoreV1().Events(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
 	})
 
 	// ConfigMaps
@@ -500,6 +782,32 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
+	// ConfigMaps Watch
+	r.GET("/api/clusters/:id/configmaps/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.CoreV1().ConfigMaps(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
+	})
+
 	// Secrets
 	r.GET("/api/clusters/:id/secrets", func(c *gin.Context) {
 		id, ns := c.Param("id"), c.Query("namespace")
@@ -534,6 +842,32 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+	})
+
+	// Secrets Watch
+	r.GET("/api/clusters/:id/secrets/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.CoreV1().Secrets(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
 	})
 
 	// Services
@@ -572,6 +906,32 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
 	})
 
+	// Services Watch
+	r.GET("/api/clusters/:id/services/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.CoreV1().Services(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
+	})
+
 	// Ingresses
 	r.GET("/api/clusters/:id/ingresses", func(c *gin.Context) {
 		id, ns := c.Param("id"), c.Query("namespace")
@@ -606,6 +966,80 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		setListCache(cacheKey, list.Items)
 		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+	})
+
+	// Ingresses Watch
+	r.GET("/api/clusters/:id/ingresses/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.NetworkingV1().Ingresses(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
+	})
+
+	// Nodes Watch（节点无 namespace）
+	r.GET("/api/clusters/:id/nodes/watch", func(c *gin.Context) {
+		id := c.Param("id")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		ns := corev1.NamespaceAll
+		w, err := client.CoreV1().Nodes().Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
+	})
+
+	// Namespaces Watch
+	r.GET("/api/clusters/:id/namespaces/watch", func(c *gin.Context) {
+		id := c.Param("id")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		ns := corev1.NamespaceAll
+		w, err := client.CoreV1().Namespaces().Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
 	})
 }
 

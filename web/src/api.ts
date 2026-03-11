@@ -32,6 +32,30 @@ export interface Pod {
   };
 }
 
+export interface K8sEvent {
+  metadata: {
+    uid?: string;
+    name?: string;
+    namespace?: string;
+    creationTimestamp?: string;
+  };
+  type?: string;
+  reason?: string;
+  message?: string;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
+  count?: number;
+  source?: {
+    component?: string;
+    host?: string;
+  };
+}
+
+export interface PodDescribe {
+  pod: Pod;
+  events: K8sEvent[];
+}
+
 /** 从 Pod 取容器名列表（用于 Shell/Logs 子菜单），优先 spec.containers，否则 status.containerStatuses */
 export function getPodContainerNames(pod: Pod): string[] {
   const fromSpec = pod.spec?.containers?.map((c) => c.name) ?? [];
@@ -87,6 +111,154 @@ export async function fetchPods(clusterId: string, namespace?: string) {
     { params: namespace ? { namespace } : {} },
   );
   return res.data.items;
+}
+
+export type PodWatchEventType = "ADDED" | "MODIFIED" | "DELETED" | "ERROR";
+
+export interface PodWatchEvent {
+  type: PodWatchEventType;
+  object: Pod;
+}
+
+export interface ResourceWatchEvent<T = any> {
+  type: PodWatchEventType;
+  object: T;
+}
+
+/**
+ * 使用后端封装的 Kubernetes Watch API 做 Pod 实时变更监听。
+ * 基于 fetch + ReadableStream 逐行读取 JSON 事件。
+ */
+export function watchPods(
+  clusterId: string,
+  namespace: string | undefined,
+  opts: {
+    onEvent: (ev: PodWatchEvent) => void;
+    onError?: (err: Error) => void;
+  },
+): () => void {
+  const ac = new AbortController();
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const url = new URL(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/watch`,
+    base,
+  );
+  if (namespace && namespace !== "") {
+    url.searchParams.set("namespace", namespace);
+  }
+
+  fetch(url.toString(), { signal: ac.signal })
+    .then(async (res) => {
+      if (!res.ok) {
+        throw new Error(res.statusText || `HTTP ${res.status}`);
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        // 按行分割，每行一个 JSON 事件
+        while ((idx = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          try {
+            const ev = JSON.parse(line) as PodWatchEvent;
+            if (ev && ev.object && ev.object.metadata) {
+              opts.onEvent(ev);
+            }
+          } catch (e) {
+            // 单条事件解析失败不影响后续
+            // eslint-disable-next-line no-console
+            console.warn("Failed to parse pods watch event:", e);
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err?.name === "AbortError") return;
+      opts.onError?.(err);
+    });
+
+  return () => ac.abort();
+}
+
+/**
+ * 通用资源 Watch：基于 `/api/clusters/:id/:resourcePath/watch` 的 JSON 行流。
+ * 用于 Deployments / StatefulSets / ... 等列表。
+ */
+export function watchResourceList<T = any>(
+  clusterId: string,
+  kind: ResourceKind,
+  namespace: string | undefined,
+  opts: {
+    onEvent: (ev: ResourceWatchEvent<T>) => void;
+    onError?: (err: Error) => void;
+  },
+): () => void {
+  const ac = new AbortController();
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const path = resourcePath(kind);
+  const url = new URL(
+    `/api/clusters/${encodeURIComponent(clusterId)}/${path}/watch`,
+    base,
+  );
+  if (namespace && namespace !== "") {
+    url.searchParams.set("namespace", namespace);
+  }
+
+  fetch(url.toString(), { signal: ac.signal })
+    .then(async (res) => {
+      if (!res.ok) {
+        throw new Error(res.statusText || `HTTP ${res.status}`);
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          try {
+            const ev = JSON.parse(line) as ResourceWatchEvent<T>;
+            if (ev && ev.object) {
+              opts.onEvent(ev);
+            }
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.warn("Failed to parse resource watch event:", e);
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err?.name === "AbortError") return;
+      opts.onError?.(err);
+    });
+
+  return () => ac.abort();
+}
+
+/** 获取 Pod Describe 数据（Pod + Events） */
+export async function fetchPodDescribe(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+): Promise<PodDescribe> {
+  const res = await api.get<PodDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/describe`,
+  );
+  return res.data;
 }
 
 export async function fetchPodLogs(

@@ -6,6 +6,10 @@ const thStyle: React.CSSProperties = {
   borderBottom: "1px solid #1f2937",
   fontSize: 12,
   color: "#9ca3af",
+  position: "sticky",
+  top: 0,
+  zIndex: 1,
+  backgroundColor: "#0f172a",
 };
 
 const tdStyle: React.CSSProperties = {
@@ -41,34 +45,34 @@ export function ResourceTable<T extends { metadata: { name: string; namespace?: 
       {loading ? (
         <div style={{ color: "#9ca3af" }}>加载中…</div>
       ) : (
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            backgroundColor: "#020617",
-          }}
-        >
-          <thead>
-            <tr>
-              {columns.map((col) => (
-                <th key={col.key} style={thStyle}>
-                  {col.title}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={getKey(item)}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              backgroundColor: "#020617",
+            }}
+          >
+            <thead>
+              <tr>
                 {columns.map((col) => (
-                  <td key={col.key} style={tdStyle}>
-                    {col.render(item)}
-                  </td>
+                  <th key={col.key} style={thStyle}>
+                    {col.title}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={getKey(item)}>
+                  {columns.map((col) => (
+                    <td key={col.key} style={tdStyle}>
+                      {col.render(item)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
       )}
       {!loading && items.length === 0 && (
         <div style={{ color: "#64748b", padding: 12 }}>暂无数据</div>
