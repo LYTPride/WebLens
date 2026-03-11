@@ -98,6 +98,8 @@ export const App: React.FC = () => {
   const [pageVisible, setPageVisible] = useState(
     typeof document === "undefined" ? true : document.visibilityState === "visible",
   );
+  /** 左侧边栏是否收起 */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => {
     activeClusterNsRef.current = { clusterId: activeClusterId, namespace: activeNamespace };
   }, [activeClusterId, activeNamespace]);
@@ -525,7 +527,31 @@ export const App: React.FC = () => {
       )}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
-        <Sidebar currentView={currentView} onSelect={setCurrentView} />
+        {/* 左侧边栏：可折叠，收起后主工作区展宽 */}
+        <div style={{ display: "flex", flexDirection: "row", height: "100%" }}>
+          {!sidebarCollapsed && <Sidebar currentView={currentView} onSelect={setCurrentView} />}
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+            style={{
+              width: 20,
+              minWidth: 20,
+              border: "none",
+              outline: "none",
+              backgroundColor: "#020617",
+              borderRight: "1px solid #1e293b",
+              color: "#64748b",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 10,
+            }}
+          >
+            {sidebarCollapsed ? "▶" : "◀"}
+          </button>
+        </div>
 
         <main
           style={{
@@ -551,9 +577,21 @@ export const App: React.FC = () => {
             )}
             {!loading && clusters.length > 0 && activeClusterId && (
               <>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 14, color: "#9ca3af" }}>当前集群：</span>
-                  <div style={{ position: "relative" }}>
+                {/* 同一行：当前集群 + 刷新 后紧跟 命名空间，用圆点分隔 */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-start",
+                    gap: 8,
+                    marginBottom: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {/* 当前集群 + 下拉 + 刷新 */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 14, color: "#9ca3af" }}>当前集群：</span>
+                    <div style={{ position: "relative" }}>
                     <button
                       type="button"
                       onClick={() => setClusterDropdownOpen((o) => !o)}
@@ -676,22 +714,8 @@ export const App: React.FC = () => {
                     {reloading ? "刷新中..." : "刷新"}
                   </button>
                 </div>
-
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
-                  集群与命名空间 · 当前：
-                  {clusters.find((c) => c.id === activeClusterId)?.name ?? activeClusterId} · 配置文件：
-                  {clusters.find((c) => c.id === activeClusterId)?.filePath ?? ""}
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    marginBottom: 12,
-                    flexWrap: "wrap",
-                  }}
-                >
+                  <span style={{ color: "#64748b", marginLeft: 4, marginRight: 4 }}>·</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   <label style={{ fontSize: 14, color: "#9ca3af" }}>命名空间：</label>
                   {namespaces.length === 0 &&
                   !namespacesLoading &&
@@ -779,6 +803,13 @@ export const App: React.FC = () => {
                       )}
                     </>
                   )}
+                </div>
+                </div>
+
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
+                  集群与命名空间 · 当前：
+                  {clusters.find((c) => c.id === activeClusterId)?.name ?? activeClusterId} · 配置文件：
+                  {clusters.find((c) => c.id === activeClusterId)?.filePath ?? ""}
                 </div>
 
                 <div
