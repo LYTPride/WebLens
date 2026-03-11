@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ClusterSummary,
   fetchClusters,
@@ -12,10 +12,17 @@ import {
   saveConfig,
   deletePod,
   type ResourceKind,
+  watchPods,
+  type PodWatchEvent,
+  watchResourceList,
+  type ResourceWatchEvent,
+  fetchPodDescribe,
+  type PodDescribe,
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
 import { ResourceTable, type Column } from "../components/ResourceTable";
 import { BottomPanel, type PanelTab } from "../components/BottomPanel";
+import copyIcon from "../assets/icon-copy.png";
 
 const ALL_NAMESPACES = "";
 
@@ -45,18 +52,42 @@ const tdStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
+const copyNameButtonStyle: React.CSSProperties = {
+  marginLeft: 4,
+  width: 18,
+  height: 18,
+  padding: 0,
+  border: "none",
+  background: "none",
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+};
+
 type K8sItem = { metadata: { name: string; namespace?: string; uid?: string }; [k: string]: unknown };
 
 export const App: React.FC = () => {
   const [clusters, setClusters] = useState<ClusterSummary[]>([]);
+  /** 集群下拉当前选中的集群（待应用） */
   const [activeClusterId, setActiveClusterId] = useState<string | null>(null);
+  /** 实际用于加载数据的集群（点击「应用」后才生效） */
+  const [effectiveClusterId, setEffectiveClusterId] = useState<string | null>(null);
   const [namespaces, setNamespaces] = useState<string[]>([]);
+  /** 命名空间下拉当前选中的命名空间（待应用） */
   const [activeNamespace, setActiveNamespace] = useState<string>(ALL_NAMESPACES);
+  /** 实际用于加载数据的命名空间（点击「应用」后才生效） */
+  const [effectiveNamespace, setEffectiveNamespace] = useState<string>(ALL_NAMESPACES);
   const [currentView, setCurrentView] = useState<ResourceKind>("pods");
   const [pods, setPods] = useState<Pod[]>([]);
   const [resourceItems, setResourceItems] = useState<K8sItem[]>([]);
   const [resourceLoading, setResourceLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  /** 正在应用新的集群/命名空间选择，用于全局 loading 提示 */
+  const [applyingSelection, setApplyingSelection] = useState(false);
+  /** 最近一次复制名称的提示，如 “已复制 cloud-xxx” */
+  const [copyToast, setCopyToast] = useState<string | null>(null);
   /** 底部面板：Shell/Logs 多标签 */
   const [panelTabs, setPanelTabs] = useState<PanelTab[]>([]);
   const [activePanelTabId, setActivePanelTabId] = useState<string | null>(null);
@@ -98,11 +129,26 @@ export const App: React.FC = () => {
   const [pageVisible, setPageVisible] = useState(
     typeof document === "undefined" ? true : document.visibilityState === "visible",
   );
+  /** Pods Watch 取消函数，切换集群/命名空间/视图或标签页隐藏时终止 Watch 流 */
+  const podsWatchCancelRef = useRef<(() => void) | null>(null);
+  /** 通用资源 Watch 取消函数（非 Pods） */
+  const resourceWatchCancelRef = useRef<(() => void) | null>(null);
   /** 左侧边栏是否收起 */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  /** Pod Describe 右侧弹层：当前选中的 Pod key 及数据 */
+  const [describeTarget, setDescribeTarget] = useState<{ clusterId: string; namespace: string; name: string } | null>(
+    null,
+  );
+  const [describeData, setDescribeData] = useState<PodDescribe | null>(null);
+  const [describeLoading, setDescribeLoading] = useState(false);
+  const [describeError, setDescribeError] = useState<string | null>(null);
+  const [describeWidthRatio, setDescribeWidthRatio] = useState(0.5);
+  const [describeDragging, setDescribeDragging] = useState(false);
+  const describeDragStartX = useRef(0);
+  const describeDragStartRatio = useRef(0);
   useEffect(() => {
-    activeClusterNsRef.current = { clusterId: activeClusterId, namespace: activeNamespace };
-  }, [activeClusterId, activeNamespace]);
+    activeClusterNsRef.current = { clusterId: effectiveClusterId, namespace: effectiveNamespace };
+  }, [effectiveClusterId, effectiveNamespace]);
 
   // 监听浏览器标签页可见性变化：隐藏时暂停列表轮询，显示时再恢复
   useEffect(() => {
@@ -119,7 +165,7 @@ export const App: React.FC = () => {
   // 切换集群 / 视图 / 命名空间时，重置 Name 关键字搜索，避免带着上一次的关键字影响新视图
   useEffect(() => {
     setNameFilter("");
-  }, [activeClusterId, activeNamespace, currentView]);
+  }, [effectiveClusterId, effectiveNamespace, currentView]);
 
   useEffect(() => {
     if (!resizingCol) return;
@@ -138,6 +184,58 @@ export const App: React.FC = () => {
       window.removeEventListener("mouseup", onUp);
     };
   }, [resizingCol]);
+
+  const refreshDescribe = useCallback(() => {
+    if (!describeTarget) return;
+    setDescribeLoading(true);
+    setDescribeError(null);
+    fetchPodDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
+      .then((data) => {
+        setDescribeData(data);
+        setDescribeError(null);
+      })
+      .catch((e: any) => {
+        const status = e?.response?.status;
+        const backendMsg = e?.response?.data?.error;
+        if (status === 404) {
+          setDescribeData(null);
+          setDescribeError("Pod 已不存在或已被删除");
+        } else {
+          setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
+        }
+      })
+      .finally(() => setDescribeLoading(false));
+  }, [describeTarget]);
+
+  // Pod Describe：加载选中 Pod 的详细信息（Pod + Events），不跟随 Watch 变化，只在打开/刷新时请求一次
+  useEffect(() => {
+    if (!describeTarget) {
+      setDescribeData(null);
+      setDescribeError(null);
+      setDescribeLoading(false);
+      return;
+    }
+    refreshDescribe();
+  }, [describeTarget, refreshDescribe]);
+
+  // Pod Describe：拖拽宽度
+  useEffect(() => {
+    if (!describeDragging) return;
+    const onMove = (e: MouseEvent) => {
+      const delta = describeDragStartX.current - e.clientX;
+      const deltaRatio = delta / window.innerWidth;
+      let next = describeDragStartRatio.current + deltaRatio;
+      next = Math.max(0.25, Math.min(0.8, next));
+      setDescribeWidthRatio(next);
+    };
+    const onUp = () => setDescribeDragging(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [describeDragging]);
 
   const openPanelTab = (type: "shell" | "logs", pod: Pod, container: string) => {
     if (!activeClusterId) return;
@@ -198,11 +296,19 @@ export const App: React.FC = () => {
     });
   };
 
+  const openDescribeForPod = (pod: Pod) => {
+    if (!effectiveClusterId) return;
+    setDescribeTarget({
+      clusterId: effectiveClusterId,
+      namespace: pod.metadata.namespace,
+      name: pod.metadata.name,
+    });
+  };
+
   const loadClusters = async () => {
     const items = await fetchClusters();
     setClusters(items);
     setError(null);
-    if (!activeClusterId && items.length > 0) setActiveClusterId(items[0].id);
   };
 
   const reloadClusters = async () => {
@@ -210,13 +316,68 @@ export const App: React.FC = () => {
     try {
       const items = await reloadClustersFromBackend();
       setClusters(items);
-      if (items.length > 0 && !items.find((c) => c.id === activeClusterId)) setActiveClusterId(items[0].id);
       setError(null);
     } catch (err: any) {
       setError(err?.message || "Failed to reload clusters");
     } finally {
       setReloading(false);
     }
+  };
+
+  const copyName = (value: string) => {
+    const v = value?.trim();
+    if (!v) return;
+
+    const fallbackExecCommand = () => {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = v;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        const ok = document.execCommand && document.execCommand("copy");
+        document.body.removeChild(textarea);
+        setCopyToast(ok ? `已复制 ${v}` : "复制失败");
+      } catch {
+        setCopyToast("复制失败");
+      }
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(v)
+        .then(() => setCopyToast(`已复制 ${v}`))
+        .catch(() => fallbackExecCommand());
+    } else {
+      fallbackExecCommand();
+    }
+  };
+
+  /** 应用当前选中的集群与命名空间（唯一入口：手动输入命名空间时取输入框值，否则取下拉值） */
+  const applyClusterAndNamespace = () => {
+    if (!activeClusterId) return;
+    const isManualNs =
+      namespaces.length === 0 &&
+      !namespacesLoading &&
+      !clusters.find((c) => c.id === activeClusterId)?.defaultNamespace;
+    if (isManualNs && !manualNamespaceInput.trim()) {
+      setError("请先输入命名空间后再点击「应用」");
+      return;
+    }
+    const nsToApply =
+      isManualNs && manualNamespaceInput.trim() ? manualNamespaceInput.trim() : activeNamespace;
+    if (isManualNs && manualNamespaceInput.trim()) {
+      manualNamespaceRef.current = { clusterId: activeClusterId, namespace: nsToApply };
+      setNamespaces([nsToApply]);
+      setActiveNamespace(nsToApply);
+    }
+    setApplyingSelection(true);
+    setEffectiveClusterId(activeClusterId);
+    setEffectiveNamespace(nsToApply);
+    setError(null);
   };
 
   const loadPods = async (clusterId: string, namespace: string) => {
@@ -227,14 +388,16 @@ export const App: React.FC = () => {
       return;
     }
     setPods(items);
+    setApplyingSelection(false);
     setError(null);
   };
 
-  const loadResourceList = async () => {
-    if (!activeClusterId) return;
+  const loadResourceList = useCallback(async () => {
+    if (!effectiveClusterId) return;
     setResourceLoading(true);
-    const ns = currentView === "nodes" || currentView === "namespaces" ? undefined : (activeNamespace || undefined);
-    fetchResourceList(activeClusterId, currentView, ns)
+    const ns =
+      currentView === "nodes" || currentView === "namespaces" ? undefined : (effectiveNamespace || undefined);
+    fetchResourceList(effectiveClusterId, currentView, ns)
       .then((items) => {
         setResourceItems(items as K8sItem[]);
         setError(null);
@@ -247,8 +410,11 @@ export const App: React.FC = () => {
         else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
         else setError(err?.message || "加载失败");
       })
-      .finally(() => setResourceLoading(false));
-  };
+      .finally(() => {
+        setResourceLoading(false);
+        setApplyingSelection(false);
+      });
+  }, [effectiveClusterId, currentView, effectiveNamespace]);
 
   useEffect(() => {
     loadClusters().catch((e: any) => setError(e?.message || "Failed to load clusters")).finally(() => setLoading(false));
@@ -302,33 +468,161 @@ export const App: React.FC = () => {
       .finally(() => setNamespacesLoading(false));
   }, [activeClusterId, clusters]);
 
+  // Pods 使用 Kubernetes Watch API 做 Resource Watch（基于「已应用」的 effectiveClusterId/effectiveNamespace）
   useEffect(() => {
-    if (!activeClusterId) return;
+    if (!effectiveClusterId) return;
     if (!pageVisible) return;
+    const isPods = currentView === "pods";
 
-    const loadOnce = () => {
-      if (currentView === "pods") {
-        loadPods(activeClusterId, activeNamespace).catch((err: any) => {
-          const status = err?.response?.status;
-          const backendMsg = err?.response?.data?.error;
-          if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
-          else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
-          else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
-          else setError(err?.message || "Failed to load pods");
-        });
-      } else {
-        loadResourceList();
+    // 切换视图时先清理对应的 Watch
+    if (!isPods && podsWatchCancelRef.current) {
+      podsWatchCancelRef.current();
+      podsWatchCancelRef.current = null;
+    }
+    if (isPods && resourceWatchCancelRef.current) {
+      resourceWatchCancelRef.current();
+      resourceWatchCancelRef.current = null;
+    }
+
+    if (!isPods) return;
+
+    // 如果存在旧的 Watch，先关闭
+    if (podsWatchCancelRef.current) {
+      podsWatchCancelRef.current();
+      podsWatchCancelRef.current = null;
+    }
+
+    // 切换集群/命名空间/视图时先获取一次当前列表，再通过 Watch 增量更新
+    loadPods(effectiveClusterId, effectiveNamespace).catch((e: any) => {
+      const status = e?.response?.status;
+      const backendMsg = e?.response?.data?.error;
+      if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
+      else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
+      else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+      else setError(e?.message || "Failed to load pods");
+    });
+
+    const applyEvent = (prev: Pod[], ev: PodWatchEvent): Pod[] => {
+      const obj = ev.object;
+      if (!obj?.metadata?.uid) return prev;
+      const uid = obj.metadata.uid;
+      const ns = obj.metadata.namespace;
+      // 仅应用当前命名空间（或「所有命名空间」）下的事件
+      if (activeNamespace && activeNamespace !== "" && ns !== activeNamespace) {
+        return prev;
       }
+      if (ev.type === "DELETED") {
+        return prev.filter((p) => p.metadata.uid !== uid);
+      }
+      // ADDED / MODIFIED：按 uid 覆盖或追加
+      let replaced = false;
+      const next = prev.map((p) => {
+        if (p.metadata.uid === uid) {
+          replaced = true;
+          return obj;
+        }
+        return p;
+      });
+      if (!replaced) {
+        next.push(obj);
+      }
+      return next;
     };
 
-    // 初次加载一次
-    loadOnce();
+    const cancel = watchPods(effectiveClusterId, effectiveNamespace || undefined, {
+      onEvent: (ev) => {
+        setPods((prev) => applyEvent(prev, ev));
+      },
+      onError: (err) => {
+        // Watch 失败时仅记录错误并提示，不再重复触发列表加载，避免在无权限场景下形成错误风暴
+        // eslint-disable-next-line no-console
+        console.error("pods watch error:", err);
+        setError(err?.message || "Pods Watch 失败，请检查集群权限或稍后重试");
+      },
+    });
+    podsWatchCancelRef.current = cancel;
 
-    // 对当前选中的 cluster + namespace + 视图 做持续轮询，起到「watch」效果
-    // 间隔从 5 秒调整为 3 秒，并在标签页隐藏时暂停（依赖 pageVisible）
-    const timer = window.setInterval(loadOnce, 3000);
-    return () => window.clearInterval(timer);
-  }, [activeClusterId, activeNamespace, currentView, pageVisible]);
+    return () => {
+      if (podsWatchCancelRef.current) {
+        podsWatchCancelRef.current();
+        podsWatchCancelRef.current = null;
+      }
+    };
+  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible, loadPods]);
+
+  // 非 Pods 资源统一通过 Watch API 实时监听
+  useEffect(() => {
+    if (!effectiveClusterId) return;
+    if (!pageVisible) return;
+    if (currentView === "pods") return;
+
+    // 清理旧的 Watch
+    if (resourceWatchCancelRef.current) {
+      resourceWatchCancelRef.current();
+      resourceWatchCancelRef.current = null;
+    }
+
+    // 切换集群/命名空间/视图时先获取一次当前资源列表，再通过 Watch 增量更新
+    loadResourceList();
+
+    const applyEvent = (prev: K8sItem[], ev: ResourceWatchEvent<K8sItem>): K8sItem[] => {
+      const obj = ev.object as K8sItem;
+      const meta = (obj as any).metadata || {};
+      const name: string = meta.name;
+      const ns: string | undefined = meta.namespace;
+      if (!name) return prev;
+      // 按已应用的命名空间过滤（Nodes / Namespaces 等无 namespace 的资源会全部保留）
+      if (effectiveNamespace && effectiveNamespace !== "" && ns && ns !== effectiveNamespace) {
+        return prev;
+      }
+      const key = `${ns || ""}/${name}`;
+      if (ev.type === "DELETED") {
+        return prev.filter((i) => {
+          const m = (i as any).metadata || {};
+          const k = `${m.namespace || ""}/${m.name}`;
+          return k !== key;
+        });
+      }
+      let replaced = false;
+      const next = prev.map((i) => {
+        const m = (i as any).metadata || {};
+        const k = `${m.namespace || ""}/${m.name}`;
+        if (k === key) {
+          replaced = true;
+          return obj;
+        }
+        return i;
+      });
+      if (!replaced) {
+        next.push(obj);
+      }
+      return next;
+    };
+
+    const cancel = watchResourceList<K8sItem>(
+      effectiveClusterId,
+      currentView,
+      currentView === "nodes" || currentView === "namespaces" ? undefined : effectiveNamespace || undefined,
+      {
+      onEvent: (ev) => {
+        setResourceItems((prev) => applyEvent(prev, ev));
+      },
+      onError: (err) => {
+        // Watch 失败时退回一次性加载当前资源列表
+        // eslint-disable-next-line no-console
+        console.error("resource watch error:", err);
+        loadResourceList();
+      },
+    });
+    resourceWatchCancelRef.current = cancel;
+
+    return () => {
+      if (resourceWatchCancelRef.current) {
+        resourceWatchCancelRef.current();
+        resourceWatchCancelRef.current = null;
+      }
+    };
+  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible]);
 
   const viewTitle: Record<ResourceKind, string> = {
     pods: "Pods",
@@ -346,8 +640,56 @@ export const App: React.FC = () => {
     namespaces: "Namespaces",
   };
 
+  const filteredPods = useMemo(
+    () =>
+      pods.filter((p) => {
+        const k = nameFilter.trim().toLowerCase();
+        if (!k) return true;
+        return p.metadata.name.toLowerCase().includes(k);
+      }),
+    [pods, nameFilter],
+  );
+
+  const filteredResourceItems = useMemo(
+    () =>
+      nameFilter.trim()
+        ? resourceItems.filter((i) =>
+            (i.metadata?.name ?? "").toLowerCase().includes(nameFilter.trim().toLowerCase()),
+          )
+        : resourceItems,
+    [resourceItems, nameFilter],
+  );
+
+  const describeEvents = describeData?.events ?? [];
+
   const genericColumns: Column<K8sItem>[] = [
-    { key: "name", title: "Name", render: (i) => i.metadata?.name ?? "-" },
+    {
+      key: "name",
+      title: "Name",
+      render: (i) => {
+        const name = i.metadata?.name ?? "-";
+        const canCopy = !!i.metadata?.name;
+        return (
+          <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+            {canCopy && (
+              <button
+                type="button"
+                onClick={() => copyName(i.metadata.name as string)}
+                style={copyNameButtonStyle}
+                title="复制名称"
+              >
+                <img
+                  src={copyIcon}
+                  alt="复制"
+                  style={{ height: 14, width: "auto", display: "block" }}
+                />
+              </button>
+            )}
+          </span>
+        );
+      },
+    },
     { key: "namespace", title: "Namespace", render: (i) => (i.metadata?.namespace as string) ?? "-" },
   ];
 
@@ -365,6 +707,27 @@ export const App: React.FC = () => {
         pointerEvents: "auto",
       }}
     >
+      {copyToast && (
+        <div
+          style={{
+            position: "fixed",
+            top: 56,
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "6px 14px",
+            borderRadius: 999,
+            backgroundColor: "rgba(15,23,42,0.95)",
+            color: "#e5e7eb",
+            fontSize: 12,
+            zIndex: 200,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.45)",
+            animation: "wl-toast-fadeout 3s ease-out forwards",
+          }}
+          onAnimationEnd={() => setCopyToast(null)}
+        >
+          {copyToast}
+        </div>
+      )}
       <header
         style={{
           flexShrink: 0,
@@ -575,7 +938,7 @@ export const App: React.FC = () => {
             {!loading && !error && clusters.length === 0 && (
               <div>未发现任何集群，请检查 kubeconfig 目录配置。</div>
             )}
-            {!loading && clusters.length > 0 && activeClusterId && (
+            {!loading && clusters.length > 0 && (
               <>
                 {/* 同一行：当前集群 + 刷新 后紧跟 命名空间，用圆点分隔 */}
                 <div
@@ -717,8 +1080,9 @@ export const App: React.FC = () => {
                   <span style={{ color: "#64748b", marginLeft: 4, marginRight: 4 }}>·</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   <label style={{ fontSize: 14, color: "#9ca3af" }}>命名空间：</label>
-                  {namespaces.length === 0 &&
-                  !namespacesLoading &&
+                  {!activeClusterId ? (
+                    <span style={{ fontSize: 12, color: "#9ca3af" }}>请先选择集群</span>
+                  ) : namespaces.length === 0 &&
                   !clusters.find((c) => c.id === activeClusterId)?.defaultNamespace ? (
                     <>
                       <input
@@ -736,42 +1100,11 @@ export const App: React.FC = () => {
                           minWidth: 200,
                         }}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            const ns = manualNamespaceInput.trim();
-                            if (ns && activeClusterId) {
-                              manualNamespaceRef.current = { clusterId: activeClusterId, namespace: ns };
-                              setNamespaces([ns]);
-                              setActiveNamespace(ns);
-                              setError(null);
-                            }
-                          }
+                          if (e.key === "Enter") applyClusterAndNamespace();
                         }}
                       />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const ns = manualNamespaceInput.trim();
-                          if (ns && activeClusterId) {
-                            manualNamespaceRef.current = { clusterId: activeClusterId, namespace: ns };
-                            setNamespaces([ns]);
-                            setActiveNamespace(ns);
-                            setError(null);
-                          }
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 6,
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
-                          color: "#e5e7eb",
-                          cursor: "pointer",
-                          fontSize: 13,
-                        }}
-                      >
-                        应用
-                      </button>
                       <span style={{ fontSize: 12, color: "#9ca3af" }}>
-                        无集群级命名空间权限时，可在此输入后应用
+                        无列表权限或命名空间列表较慢时，可在此提前输入命名空间，输入后点击右侧「应用」生效
                       </span>
                     </>
                   ) : (
@@ -804,12 +1137,31 @@ export const App: React.FC = () => {
                     </>
                   )}
                 </div>
+                  <button
+                    type="button"
+                    onClick={applyClusterAndNamespace}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 6,
+                      border: "1px solid #334155",
+                      backgroundColor: "#1e293b",
+                      color: "#e5e7eb",
+                      cursor: !activeClusterId ? "not-allowed" : "pointer",
+                      fontSize: 13,
+                    }}
+                    title="点击后，选中的集群和命名空间才会真正生效（手动输入命名空间时取输入框内容）"
+                    disabled={!activeClusterId}
+                  >
+                    应用
+                  </button>
                 </div>
 
                 <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
                   集群与命名空间 · 当前：
-                  {clusters.find((c) => c.id === activeClusterId)?.name ?? activeClusterId} · 配置文件：
-                  {clusters.find((c) => c.id === activeClusterId)?.filePath ?? ""}
+                  {clusters.find((c) => c.id === effectiveClusterId)?.name ?? effectiveClusterId ?? "未应用"}
+                  {" "}· 配置文件：
+                  {clusters.find((c) => c.id === effectiveClusterId)?.filePath ?? ""}
+                  {" "}（仅点击「应用」后才生效）
                 </div>
 
                 <div
@@ -822,14 +1174,22 @@ export const App: React.FC = () => {
                     flexWrap: "wrap",
                   }}
                 >
-                  <h3 style={{ fontSize: 15, margin: 0 }}>
-                    {viewTitle[currentView]}（{activeClusterId ?? "未选择"}）
-                    {activeNamespace && currentView !== "nodes" && currentView !== "namespaces"
-                      ? ` · ${activeNamespace}`
-                      : currentView !== "nodes" && currentView !== "namespaces"
-                        ? " · 所有命名空间"
-                        : ""}
-                  </h3>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <h3 style={{ fontSize: 15, margin: 0 }}>
+                      {viewTitle[currentView]}（{effectiveClusterId ?? "未应用"}）
+                      {currentView !== "nodes" && currentView !== "namespaces" && (
+                        effectiveNamespace && effectiveNamespace !== ""
+                          ? ` · ${effectiveNamespace}`
+                          : " · 所有命名空间"
+                      )}{" "}
+                      / {currentView === "pods" ? filteredPods.length : filteredResourceItems.length}
+                    </h3>
+                    {applyingSelection && (
+                      <span style={{ fontSize: 12, color: "#38bdf8" }}>
+                        正在根据新的集群与命名空间加载资源…
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={nameFilter}
@@ -926,13 +1286,7 @@ export const App: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {pods
-                        .filter((p) => {
-                          const k = nameFilter.trim().toLowerCase();
-                          if (!k) return true;
-                          return p.metadata.name.toLowerCase().includes(k);
-                        })
-                        .map((p) => {
+                      {filteredPods.map((p) => {
                         const status = p.status?.phase ?? "-";
                         const node = p.spec?.nodeName ?? "-";
                         const restarts = p.status?.containerStatuses?.reduce((s, cs) => s + cs.restartCount, 0) ?? 0;
@@ -943,7 +1297,39 @@ export const App: React.FC = () => {
                         const cellStyle: React.CSSProperties = { ...tdStyle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 0 };
                           return (
                           <tr key={p.metadata.uid}>
-                            <td style={cellStyle} title={p.metadata.name}>{p.metadata.name}</td>
+                            <td style={cellStyle} title={p.metadata.name}>
+                              <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => openDescribeForPod(p)}
+                                  style={{
+                                    padding: 0,
+                                    margin: 0,
+                                    border: "none",
+                                    background: "none",
+                                    color: "inherit",
+                                    cursor: "pointer",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {p.metadata.name}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => copyName(p.metadata.name)}
+                                  style={copyNameButtonStyle}
+                                  title="复制 Pod 名称"
+                                >
+                                  <img
+                                    src={copyIcon}
+                                    alt="复制"
+                                    style={{ height: 14, width: "auto", display: "block" }}
+                                  />
+                                </button>
+                              </span>
+                            </td>
                             <td style={cellStyle} title={p.metadata.namespace}>{p.metadata.namespace}</td>
                             <td style={cellStyle} title={node}>{node}</td>
                             <td style={cellStyle} title={status}>{status}</td>
@@ -1091,13 +1477,7 @@ export const App: React.FC = () => {
                 <ResourceTable
                   title=""
                   columns={genericColumns}
-                  items={
-                    nameFilter.trim()
-                      ? resourceItems.filter((i) =>
-                          (i.metadata?.name ?? "").toLowerCase().includes(nameFilter.trim().toLowerCase()),
-                        )
-                      : resourceItems
-                  }
+                  items={filteredResourceItems}
                   getKey={(i) => (i.metadata?.uid as string) ?? i.metadata?.name ?? ""}
                   loading={resourceLoading}
                 />
@@ -1118,6 +1498,276 @@ export const App: React.FC = () => {
         minimized={panelMinimized}
         onMinimizedChange={setPanelMinimized}
       />
+
+      {/* Pod Describe 右侧弹层 */}
+      {describeTarget && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 150,
+            pointerEvents: "none",
+          }}
+        >
+          {/* 半透明遮罩，点击关闭 Describe 视图 */}
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              backgroundColor: "rgba(0,0,0,0.45)",
+              pointerEvents: "auto",
+            }}
+            onClick={() => setDescribeTarget(null)}
+          />
+
+          {/* 可拖拽调整宽度的 Describe 面板 */}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: `${Math.round(describeWidthRatio * 100)}vw`,
+              backgroundColor: "#020617",
+              borderLeft: "1px solid #1e293b",
+              pointerEvents: "auto",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            {/* 左侧拖拽条 */}
+            <div
+              role="presentation"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setDescribeDragging(true);
+                describeDragStartX.current = e.clientX;
+                describeDragStartRatio.current = describeWidthRatio;
+              }}
+              style={{
+                position: "absolute",
+                left: -4,
+                top: 0,
+                bottom: 0,
+                width: 8,
+                cursor: "ew-resize",
+              }}
+              title="拖拽调整宽度"
+            />
+
+            {/* 标题栏：Pod 名称 + 关闭按钮 */}
+            <div
+              style={{
+                position: "sticky",
+                top: 0,
+                zIndex: 1,
+                padding: "10px 16px",
+                borderBottom: "1px solid #1e293b",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                backgroundColor: "#020617",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>
+                  Pod: {describeTarget.namespace}/{describeTarget.name}
+                </span>
+                {describeError && (
+                  <span style={{ fontSize: 12, color: "#f97373", marginTop: 2 }}>错误：{describeError}</span>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => copyName(`${describeTarget.namespace}/${describeTarget.name}`)}
+                  style={{
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    border: "1px solid #334155",
+                    backgroundColor: "#020617",
+                    color: "#e5e7eb",
+                    cursor: "pointer",
+                    fontSize: 12,
+                  }}
+                  title="复制 Namespace/Pod 名称"
+                >
+                  复制
+                </button>
+                <button
+                  type="button"
+                  onClick={refreshDescribe}
+                  style={{
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    border: "1px solid #334155",
+                    backgroundColor: "#020617",
+                    color: "#e5e7eb",
+                    cursor: describeLoading ? "not-allowed" : "pointer",
+                    fontSize: 12,
+                  }}
+                  disabled={describeLoading}
+                  title="手动刷新 Describe 信息"
+                >
+                  {describeLoading ? "刷新中…" : "刷新"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDescribeTarget(null)}
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: 4,
+                    border: "1px solid #334155",
+                    backgroundColor: "#1e293b",
+                    color: "#e5e7eb",
+                    cursor: "pointer",
+                    fontSize: 12,
+                  }}
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+
+            {/* 内容区：可滚动 */}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                padding: "10px 16px 16px",
+              }}
+            >
+              {describeLoading && <div style={{ color: "#9ca3af" }}>加载 Describe 中…</div>}
+              {!describeLoading && describeData && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* 基本信息 */}
+                  <section>
+                    <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>基本信息</h4>
+                    <div style={{ fontSize: 12, color: "#cbd5f5", lineHeight: 1.6 }}>
+                      <div>Namespace：{describeData.pod.metadata.namespace}</div>
+                      <div>Name：{describeData.pod.metadata.name}</div>
+                      <div>
+                        Node：{describeData.pod.spec?.nodeName ?? "-"}
+                        {describeData.pod.status?.hostIP ? ` (${describeData.pod.status.hostIP})` : ""}
+                      </div>
+                      <div>Pod IP：{describeData.pod.status?.podIP ?? "-"}</div>
+                      <div>Phase：{describeData.pod.status?.phase ?? "-"}</div>
+                    </div>
+                  </section>
+
+                  {/* 标签 / 注解 */}
+                  {(describeData.pod.metadata.labels || describeData.pod.metadata.annotations) && (
+                    <section>
+                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Labels & Annotations</h4>
+                      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 12, lineHeight: 1.6 }}>
+                        {describeData.pod.metadata.labels && (
+                          <div>
+                            <div style={{ marginBottom: 4, color: "#9ca3af" }}>Labels</div>
+                            {Object.entries(describeData.pod.metadata.labels).map(([k, v]) => (
+                              <div key={k}>
+                                <span style={{ color: "#9ca3af" }}>{k}</span>: {v}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {describeData.pod.metadata.annotations && (
+                          <div>
+                            <div style={{ marginBottom: 4, color: "#9ca3af" }}>Annotations</div>
+                            {Object.entries(describeData.pod.metadata.annotations).map(([k, v]) => (
+                              <div key={k}>
+                                <span style={{ color: "#9ca3af" }}>{k}</span>: {v}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* 容器 */}
+                  {describeData.pod.spec?.containers && describeData.pod.spec.containers.length > 0 && (
+                    <section>
+                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Containers</h4>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
+                        {describeData.pod.spec.containers.map((c) => (
+                          <div
+                            key={c.name}
+                            style={{
+                              border: "1px solid #1f2937",
+                              borderRadius: 6,
+                              padding: 8,
+                              backgroundColor: "#020617",
+                            }}
+                          >
+                            <div style={{ fontWeight: 600, marginBottom: 4 }}>{c.name}</div>
+                            <div style={{ color: "#cbd5f5", lineHeight: 1.6 }}>
+                              <div>Image：{c.image ?? "-"}</div>
+                              {c.ports && c.ports.length > 0 && (
+                                <div>
+                                  Ports：{" "}
+                                  {c.ports
+                                    .map((p) => `${p.containerPort}/${p.protocol ?? "TCP"}`)
+                                    .join(", ")}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Events */}
+                  <section>
+                    <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Events</h4>
+                    {describeEvents.length === 0 && (
+                      <div style={{ fontSize: 12, color: "#64748b" }}>暂无 Events</div>
+                    )}
+                    {describeEvents.length > 0 && (
+                      <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+                        {describeEvents.map((ev) => {
+                          const isWarning =
+                            (ev.type && ev.type.toLowerCase() === "warning") ||
+                            (ev.reason && ev.reason.toLowerCase().includes("fail"));
+                          return (
+                            <div
+                              key={ev.metadata.uid || `${ev.lastTimestamp}-${ev.reason}-${ev.message}`}
+                              style={{
+                                padding: "4px 6px",
+                                borderRadius: 4,
+                                marginBottom: 4,
+                                backgroundColor: isWarning ? "rgba(127,29,29,0.2)" : "transparent",
+                              }}
+                            >
+                              <div>
+                                <span
+                                  style={{
+                                    fontWeight: isWarning ? 700 : 500,
+                                    color: isWarning ? "#f97373" : "#e5e7eb",
+                                  }}
+                                >
+                                  {ev.type ?? "-"} {ev.reason ?? ""}
+                                </span>{" "}
+                                <span style={{ color: "#9ca3af" }}>
+                                  {ev.lastTimestamp ?? ev.firstTimestamp ?? ""}
+                                </span>
+                              </div>
+                              <div style={{ whiteSpace: "pre-wrap", color: isWarning ? "#fecaca" : "#cbd5f5" }}>
+                                {ev.message}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
