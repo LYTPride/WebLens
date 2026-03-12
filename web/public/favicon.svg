@@ -1,14 +1,13 @@
 <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0f172a"/>
-      <stop offset="1" stop-color="#1e293b"/>
+    <linearGradient id="wg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#020617"/>
+      <stop offset="1" stop-color="#0b1120"/>
     </linearGradient>
   </defs>
-  <rect x="2" y="2" width="28" height="28" rx="6" fill="url(#g)"/>
-  <rect x="6" y="8" width="20" height="12" rx="2" fill="#020617" stroke="#38bdf8" stroke-width="1.4"/>
-  <circle cx="10" cy="14" r="2" fill="#38bdf8"/>
-  <path d="M15 14h7" stroke="#e5e7eb" stroke-width="1.4" stroke-linecap="round"/>
-  <path d="M8 22h16" stroke="#4b5563" stroke-width="1.2" stroke-linecap="round"/>
+  <rect x="2" y="2" width="28" height="28" rx="7" fill="url(#wg)"/>
+  <circle cx="16" cy="10" r="5" fill="#0ea5e9" opacity="0.9"/>
+  <path d="M6 22c2-3 5-5 10-5s8 2 10 5" fill="none" stroke="#e5e7eb" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M10 20c1-1.4 3-2.5 6-2.5s5 1.1 6 2.5" fill="none" stroke="#38bdf8" stroke-width="1.6" stroke-linecap="round"/>
 </svg>
 

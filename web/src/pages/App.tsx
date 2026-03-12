@@ -32,16 +32,33 @@ import copyIcon from "../assets/icon-copy.png";
 
 const ALL_NAMESPACES = "";
 
-const POD_COLUMN_KEYS = ["name", "namespace", "node", "status", "restarts", "containers", "actions"] as const;
+const POD_COLUMN_KEYS = ["name", "namespace", "node", "age", "status", "restarts", "containers", "actions"] as const;
 const POD_COLUMN_DEFAULTS: Record<(typeof POD_COLUMN_KEYS)[number], number> = {
   name: 180,
   namespace: 120,
   node: 140,
+  age: 90,
   status: 80,
   restarts: 70,
   containers: 70,
   actions: 80,
 };
+
+/** 根据 creationTimestamp 计算并格式化为存活时间（如 2d、3h、45m） */
+function formatPodAge(creationTimestamp?: string): string {
+  if (!creationTimestamp) return "-";
+  const start = new Date(creationTimestamp).getTime();
+  const now = Date.now();
+  const sec = Math.floor((now - start) / 1000);
+  if (sec < 0) return "-";
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h${min % 60 ? `${min % 60}m` : ""}`;
+  const d = Math.floor(h / 24);
+  return `${d}d${h % 24 ? `${h % 24}h` : ""}`;
+}
 const MIN_COL_WIDTH = 40;
 
 const thStyle: React.CSSProperties = {
@@ -948,7 +965,10 @@ export const App: React.FC = () => {
                     setConfigActiveTab("combos");
                     setConfigModalOpen(true);
                     setConfigError(null);
-                    setClusterCombosLoading(true);
+                    // 如果已加载过组合，优先展示现有列表，再后台刷新，避免长时间空白
+                    if (clusterCombos.length === 0) {
+                      setClusterCombosLoading(true);
+                    }
                     try {
                       const items = await fetchClusterCombos();
                       setClusterCombos(items);
@@ -1234,15 +1254,14 @@ export const App: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {clusterCombosLoading && (
+                      {clusterCombosLoading && clusterCombos.length === 0 && (
                         <tr>
                           <td colSpan={4} style={{ ...tdStyle, textAlign: "center" }}>
                             加载组合中…
                           </td>
                         </tr>
                       )}
-                      {!clusterCombosLoading &&
-                        clusterCombos
+                      {clusterCombos
                           .filter((combo) => {
                             const k = comboSearchKeyword.trim().toLowerCase();
                             if (!k) return true;
@@ -1729,7 +1748,7 @@ export const App: React.FC = () => {
                     </colgroup>
                     <thead>
                       <tr>
-                        {(["Name", "Namespace", "Node", "Status", "Restarts", "容器数", "操作"] as const).map(
+                        {(["Name", "Namespace", "Node", "存活时间", "Status", "Restarts", "容器数", "操作"] as const).map(
                           (label, i) => {
                             const key = POD_COLUMN_KEYS[i];
                             const w = podColumnWidths[key] ?? POD_COLUMN_DEFAULTS[key];
@@ -1781,6 +1800,7 @@ export const App: React.FC = () => {
                       {filteredPods.map((p) => {
                         const status = p.status?.phase ?? "-";
                         const node = p.spec?.nodeName ?? "-";
+                        const age = formatPodAge(p.metadata.creationTimestamp);
                         const restarts = p.status?.containerStatuses?.reduce((s, cs) => s + cs.restartCount, 0) ?? 0;
                         const containerCount = getPodContainerNames(p).length;
                         const menuKey = `${p.metadata.namespace}/${p.metadata.name}`;
@@ -1824,6 +1844,7 @@ export const App: React.FC = () => {
                             </td>
                             <td style={cellStyle} title={p.metadata.namespace}>{p.metadata.namespace}</td>
                             <td style={cellStyle} title={node}>{node}</td>
+                            <td style={cellStyle} title={age}>{age}</td>
                             <td style={cellStyle} title={status}>{status}</td>
                             <td style={cellStyle}>{restarts}</td>
                             <td style={cellStyle}>{containerCount}</td>
