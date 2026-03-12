@@ -14,6 +14,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 
@@ -38,6 +39,18 @@ var (
 	listCache   = make(map[string]listCacheEntry)
 	listCacheMu sync.Mutex
 	listTTL     = time.Second
+)
+
+// Pod Describe 缓存：极短 TTL，用于吸收用户连续刷新 Describe 的请求，保护 apiserver
+type podDescribeCacheEntry struct {
+	ts   time.Time
+	data PodDescribeResponse
+}
+
+var (
+	podDescribeCache   = make(map[string]podDescribeCacheEntry)
+	podDescribeCacheMu sync.Mutex
+	podDescribeTTL     = 3 * time.Second
 )
 
 func listCacheKey(parts ...string) string {
@@ -68,6 +81,30 @@ func setListCache(key string, data interface{}) {
 type PodDescribeResponse struct {
 	Pod    *corev1.Pod    `json:"pod"`
 	Events []corev1.Event `json:"events"`
+}
+
+func podDescribeCacheKey(clusterID, ns, name string) string {
+	return strings.Join([]string{clusterID, ns, name}, "|")
+}
+
+func getPodDescribeFromCache(key string) (PodDescribeResponse, bool) {
+	podDescribeCacheMu.Lock()
+	defer podDescribeCacheMu.Unlock()
+	entry, ok := podDescribeCache[key]
+	if !ok {
+		return PodDescribeResponse{}, false
+	}
+	if time.Since(entry.ts) > podDescribeTTL {
+		delete(podDescribeCache, key)
+		return PodDescribeResponse{}, false
+	}
+	return entry.data, true
+}
+
+func setPodDescribeCache(key string, data PodDescribeResponse) {
+	podDescribeCacheMu.Lock()
+	podDescribeCache[key] = podDescribeCacheEntry{ts: time.Now(), data: data}
+	podDescribeCacheMu.Unlock()
 }
 
 // watchAndStream 是通用的 Kubernetes Watch 封装：将 watch.Interface 输出为按行 JSON 事件流
@@ -272,6 +309,8 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		// 去掉 ManagedFields 等极大字段，避免 YAML 过大影响前端加载速度
+		pod.ManagedFields = nil
 		raw, err := yaml.Marshal(pod)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -280,7 +319,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		c.Data(http.StatusOK, "text/yaml; charset=utf-8", raw)
 	})
 
-	// Describe Pod：返回 Pod 及其相关 Events，供前端做分区展示
+	// Describe Pod：返回 Pod 及其相关 Events，供前端做分区展示（带极短 TTL 的本地缓存）
 	r.GET("/api/clusters/:id/pods/:namespace/:pod/describe", func(c *gin.Context) {
 		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("pod")
 		client, ok := reg.Client(id)
@@ -290,13 +329,29 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 
 		ctx := c.Request.Context()
+
+		cacheKey := podDescribeCacheKey(id, ns, name)
+		if data, ok := getPodDescribeFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, &data)
+			return
+		}
+
 		pod, err := client.CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		evList, err := client.CoreV1().Events(ns).List(ctx, metav1.ListOptions{})
+		// 使用 FieldSelector 只拉取与该 Pod 相关的 Events，减少无关数据和传输量
+		selector := fields.AndSelectors(
+			fields.OneTermEqualSelector("involvedObject.kind", "Pod"),
+			fields.OneTermEqualSelector("involvedObject.namespace", ns),
+			fields.OneTermEqualSelector("involvedObject.name", name),
+		).String()
+
+		evList, err := client.CoreV1().Events(ns).List(ctx, metav1.ListOptions{
+			FieldSelector: selector,
+		})
 		if err != nil {
 			// describe 里 Events 不是强依赖，失败时仅返回 Pod
 			log.Printf("describe pod=%s/%s list events error: %v", ns, name, err)
@@ -318,10 +373,12 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return ti.Time.Before(tj.Time)
 		})
 
-		c.JSON(http.StatusOK, &PodDescribeResponse{
+		resp := PodDescribeResponse{
 			Pod:    pod,
 			Events: related,
-		})
+		}
+		setPodDescribeCache(cacheKey, resp)
+		c.JSON(http.StatusOK, &resp)
 	})
 
 	// Apply Pod（从 YAML 更新）
