@@ -10,6 +10,12 @@ import {
   fetchResourceList,
   fetchConfig,
   saveConfig,
+  fetchClusterCombos,
+  addClusterCombo,
+  updateClusterComboAlias,
+  deleteClusterComboApi,
+  testClusterCombo,
+  type ClusterCombo,
   deletePod,
   type ResourceKind,
   watchPods,
@@ -86,8 +92,8 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   /** 正在应用新的集群/命名空间选择，用于全局 loading 提示 */
   const [applyingSelection, setApplyingSelection] = useState(false);
-  /** 最近一次复制名称的提示，如 “已复制 cloud-xxx” */
-  const [copyToast, setCopyToast] = useState<string | null>(null);
+  /** 顶部全局提示（复制成功 / 测试结果 / 组合操作等） */
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   /** 底部面板：Shell/Logs 多标签 */
   const [panelTabs, setPanelTabs] = useState<PanelTab[]>([]);
   const [activePanelTabId, setActivePanelTabId] = useState<string | null>(null);
@@ -102,12 +108,24 @@ export const App: React.FC = () => {
   const [manualNamespaceInput, setManualNamespaceInput] = useState("");
   /** 平台配置弹窗 */
   const [configModalOpen, setConfigModalOpen] = useState(false);
+  const [configActiveTab, setConfigActiveTab] = useState<"kubeconfig" | "combos">("kubeconfig");
   const [configKubeconfigDir, setConfigKubeconfigDir] = useState("");
   const [configError, setConfigError] = useState<string | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
+  const [platformMenuOpen, setPlatformMenuOpen] = useState(false);
+  /** 集群组合配置 */
+  const [clusterCombos, setClusterCombos] = useState<ClusterCombo[]>([]);
+  const [clusterCombosLoading, setClusterCombosLoading] = useState(false);
+  const [comboClusterId, setComboClusterId] = useState<string>("");
+  const [comboNamespace, setComboNamespace] = useState("");
+  const [comboSearchKeyword, setComboSearchKeyword] = useState("");
+  const [comboAliasDrafts, setComboAliasDrafts] = useState<Record<string, string>>({});
   /** 集群下拉：展开状态与搜索关键字 */
   const [clusterDropdownOpen, setClusterDropdownOpen] = useState(false);
   const [clusterSearchKeyword, setClusterSearchKeyword] = useState("");
+  /** 集群组合选择：当前选中的组合（待应用） + 已应用组合 */
+  const [activeComboId, setActiveComboId] = useState<string | null>(null);
+  const [effectiveComboId, setEffectiveComboId] = useState<string | null>(null);
   /** 当前打开操作菜单的 Pod（namespace/name），null 表示未打开 */
   const [podMenuOpenKey, setPodMenuOpenKey] = useState<string | null>(null);
   /** 列表区按 Name 关键字搜索（Pods / Deployments / Ingresses 等共用） */
@@ -146,6 +164,10 @@ export const App: React.FC = () => {
   const [describeDragging, setDescribeDragging] = useState(false);
   const describeDragStartX = useRef(0);
   const describeDragStartRatio = useRef(0);
+  /** 是否正在从 sessionStorage 恢复页面状态（cluster/namespace/view/filter） */
+  const [restoringSession, setRestoringSession] = useState(true);
+  /** 每次点击“应用”都会自增，用于在 cluster/namespace 不变时也强制重新加载 Pods/资源 */
+  const [applyRevision, setApplyRevision] = useState(0);
   useEffect(() => {
     activeClusterNsRef.current = { clusterId: effectiveClusterId, namespace: effectiveNamespace };
   }, [effectiveClusterId, effectiveNamespace]);
@@ -164,8 +186,27 @@ export const App: React.FC = () => {
 
   // 切换集群 / 视图 / 命名空间时，重置 Name 关键字搜索，避免带着上一次的关键字影响新视图
   useEffect(() => {
+    if (restoringSession) return;
     setNameFilter("");
-  }, [effectiveClusterId, effectiveNamespace, currentView]);
+  }, [effectiveClusterId, effectiveNamespace, currentView, restoringSession]);
+
+  // 将当前页面会话状态写入 sessionStorage，便于用户切换页面/集群后回到原上下文
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (restoringSession) return;
+    const payload = {
+      ts: Date.now(),
+      clusterId: effectiveClusterId,
+      namespace: effectiveNamespace,
+      view: currentView,
+      nameFilter,
+    };
+    try {
+      window.sessionStorage.setItem("weblens_session_v1", JSON.stringify(payload));
+    } catch {
+      // ignore quota / privacy errors
+    }
+  }, [effectiveClusterId, effectiveNamespace, currentView, nameFilter]);
 
   useEffect(() => {
     if (!resizingCol) return;
@@ -238,7 +279,7 @@ export const App: React.FC = () => {
   }, [describeDragging]);
 
   const openPanelTab = (type: "shell" | "logs", pod: Pod, container: string) => {
-    if (!activeClusterId) return;
+    if (!effectiveClusterId) return;
     const ns = pod.metadata.namespace;
     const name = pod.metadata.name;
     const containers = getPodContainerNames(pod);
@@ -249,7 +290,7 @@ export const App: React.FC = () => {
       const tab: PanelTab = {
         id,
         type,
-        clusterId: activeClusterId,
+        clusterId: effectiveClusterId,
         namespace: ns,
         pod: name,
         container,
@@ -264,7 +305,7 @@ export const App: React.FC = () => {
   };
 
   const openEditTab = (pod: Pod) => {
-    if (!activeClusterId) return;
+    if (!effectiveClusterId) return;
     const ns = pod.metadata.namespace;
     const name = pod.metadata.name;
     const id = `edit-${ns}-${name}`;
@@ -274,7 +315,7 @@ export const App: React.FC = () => {
       const tab: PanelTab = {
         id,
         type: "edit",
-        clusterId: activeClusterId,
+        clusterId: effectiveClusterId,
         namespace: ns,
         pod: name,
         container: "",
@@ -340,44 +381,43 @@ export const App: React.FC = () => {
         textarea.select();
         const ok = document.execCommand && document.execCommand("copy");
         document.body.removeChild(textarea);
-        setCopyToast(ok ? `已复制 ${v}` : "复制失败");
+        setToastMessage(ok ? `已复制 ${v}` : "复制失败");
       } catch {
-        setCopyToast("复制失败");
+        setToastMessage("复制失败");
       }
     };
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard
         .writeText(v)
-        .then(() => setCopyToast(`已复制 ${v}`))
+        .then(() => setToastMessage(`已复制 ${v}`))
         .catch(() => fallbackExecCommand());
     } else {
       fallbackExecCommand();
     }
   };
 
-  /** 应用当前选中的集群与命名空间（唯一入口：手动输入命名空间时取输入框值，否则取下拉值） */
+  /** 应用当前选中的“集群组合”，内部仍然映射为 effectiveClusterId / effectiveNamespace */
   const applyClusterAndNamespace = () => {
-    if (!activeClusterId) return;
-    const isManualNs =
-      namespaces.length === 0 &&
-      !namespacesLoading &&
-      !clusters.find((c) => c.id === activeClusterId)?.defaultNamespace;
-    if (isManualNs && !manualNamespaceInput.trim()) {
-      setError("请先输入命名空间后再点击「应用」");
+    if (!activeComboId) {
+      setError("请先选择一个集群组合后再点击「应用」");
       return;
     }
-    const nsToApply =
-      isManualNs && manualNamespaceInput.trim() ? manualNamespaceInput.trim() : activeNamespace;
-    if (isManualNs && manualNamespaceInput.trim()) {
-      manualNamespaceRef.current = { clusterId: activeClusterId, namespace: nsToApply };
-      setNamespaces([nsToApply]);
-      setActiveNamespace(nsToApply);
+    const combo = clusterCombos.find((c) => c.id === activeComboId);
+    if (!combo) {
+      setError("当前选择的组合已不存在，请重新选择");
+      return;
     }
+    const nsToApply = combo.namespace || ALL_NAMESPACES;
     setApplyingSelection(true);
-    setEffectiveClusterId(activeClusterId);
+    setEffectiveClusterId(combo.clusterId);
     setEffectiveNamespace(nsToApply);
+    setEffectiveComboId(combo.id);
+    setActiveClusterId(combo.clusterId);
+    setActiveNamespace(nsToApply);
     setError(null);
+    // 记录一次新的“应用”动作，即便组合未变化也会触发重新加载
+    setApplyRevision((v) => v + 1);
   };
 
   const loadPods = async (clusterId: string, namespace: string) => {
@@ -403,12 +443,12 @@ export const App: React.FC = () => {
         setError(null);
       })
       .catch((err: any) => {
-        setResourceItems([]);
         const status = err?.response?.status;
         const backendMsg = err?.response?.data?.error;
         if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
         else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
-        else setError(err?.message || "加载失败");
+        else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+        else setError(err?.message || "加载失败，请稍后重试");
       })
       .finally(() => {
         setResourceLoading(false);
@@ -418,6 +458,58 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     loadClusters().catch((e: any) => setError(e?.message || "Failed to load clusters")).finally(() => setLoading(false));
+  }, []);
+
+  // 初始化时加载已配置的集群组合
+  useEffect(() => {
+    fetchClusterCombos()
+      .then((items) => setClusterCombos(items))
+      .catch(() => {
+        // 组合配置缺失不影响主流程，静默忽略
+      });
+  }, []);
+
+  // 从 sessionStorage 恢复上次的页面会话状态（cluster / namespace / view / filter），提升回访体验
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      setRestoringSession(false);
+      return;
+    }
+    try {
+      const raw = window.sessionStorage.getItem("weblens_session_v1");
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw) as {
+        ts: number;
+        clusterId?: string | null;
+        namespace?: string;
+        view?: ResourceKind;
+        nameFilter?: string;
+      };
+      // 过期保护：超过 30 分钟视为无效
+      if (!parsed || !parsed.ts || Date.now() - parsed.ts > 30 * 60 * 1000) {
+        return;
+      }
+      if (parsed.clusterId != null) {
+        setActiveClusterId(parsed.clusterId);
+        setEffectiveClusterId(parsed.clusterId);
+      }
+      if (parsed.namespace != null) {
+        setActiveNamespace(parsed.namespace);
+        setEffectiveNamespace(parsed.namespace);
+      }
+      if (parsed.view) {
+        setCurrentView(parsed.view);
+      }
+      if (parsed.nameFilter != null) {
+        setNameFilter(parsed.nameFilter);
+      }
+    } catch {
+      // ignore parse errors
+    } finally {
+      setRestoringSession(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -495,11 +587,29 @@ export const App: React.FC = () => {
     // 切换集群/命名空间/视图时先获取一次当前列表，再通过 Watch 增量更新
     loadPods(effectiveClusterId, effectiveNamespace).catch((e: any) => {
       const status = e?.response?.status;
-      const backendMsg = e?.response?.data?.error;
-      if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
-      else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
-      else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
-      else setError(e?.message || "Failed to load pods");
+      const backendMsg = e?.response?.data?.error as string | undefined;
+
+      // 命名空间不存在或无法访问：给出明确提示，并回退到“所有命名空间”以避免持续错误
+      if (
+        status === 500 &&
+        backendMsg &&
+        (backendMsg.includes("namespaces") && backendMsg.includes("not found"))
+      ) {
+        setError("当前命名空间在该集群中不存在或不可访问，请检查 cluster + namespace 组合。已回退到所有命名空间。");
+        setActiveNamespace(ALL_NAMESPACES);
+        setEffectiveNamespace(ALL_NAMESPACES);
+      } else if (status === 404) {
+        setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
+      } else if (status === 500 && backendMsg) {
+        setError(`集群 API 调用失败：${backendMsg}`);
+      } else if (status === 500) {
+        setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+      } else {
+        setError(e?.message || "加载 Pods 失败，请稍后重试");
+      }
+
+      // 保留上一状态下的 Pods 列表，只展示错误提示，并结束“正在应用”状态
+      setApplyingSelection(false);
     });
 
     const applyEvent = (prev: Pod[], ev: PodWatchEvent): Pod[] => {
@@ -548,7 +658,7 @@ export const App: React.FC = () => {
         podsWatchCancelRef.current = null;
       }
     };
-  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible, loadPods]);
+  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible, loadPods, applyRevision]);
 
   // 非 Pods 资源统一通过 Watch API 实时监听
   useEffect(() => {
@@ -604,16 +714,17 @@ export const App: React.FC = () => {
       currentView,
       currentView === "nodes" || currentView === "namespaces" ? undefined : effectiveNamespace || undefined,
       {
-      onEvent: (ev) => {
-        setResourceItems((prev) => applyEvent(prev, ev));
+        onEvent: (ev) => {
+          setResourceItems((prev) => applyEvent(prev, ev));
+        },
+        onError: (err) => {
+          // Watch 失败时退回一次性加载当前资源列表
+          // eslint-disable-next-line no-console
+          console.error("resource watch error:", err);
+          loadResourceList();
+        },
       },
-      onError: (err) => {
-        // Watch 失败时退回一次性加载当前资源列表
-        // eslint-disable-next-line no-console
-        console.error("resource watch error:", err);
-        loadResourceList();
-      },
-    });
+    );
     resourceWatchCancelRef.current = cancel;
 
     return () => {
@@ -622,7 +733,7 @@ export const App: React.FC = () => {
         resourceWatchCancelRef.current = null;
       }
     };
-  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible]);
+  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible, loadResourceList, applyRevision]);
 
   const viewTitle: Record<ResourceKind, string> = {
     pods: "Pods",
@@ -707,7 +818,7 @@ export const App: React.FC = () => {
         pointerEvents: "auto",
       }}
     >
-      {copyToast && (
+      {toastMessage && (
         <div
           style={{
             position: "fixed",
@@ -723,24 +834,30 @@ export const App: React.FC = () => {
             boxShadow: "0 4px 12px rgba(0,0,0,0.45)",
             animation: "wl-toast-fadeout 3s ease-out forwards",
           }}
-          onAnimationEnd={() => setCopyToast(null)}
+          onAnimationEnd={() => setToastMessage(null)}
         >
-          {copyToast}
+          {toastMessage}
         </div>
       )}
       <header
         style={{
           flexShrink: 0,
-          padding: "12px 20px",
           borderBottom: "1px solid #1f2937",
           display: "flex",
-          alignItems: "center",
+          alignItems: "stretch",
           justifyContent: "space-between",
           position: "relative",
           zIndex: 2,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "12px 20px",
+          }}
+        >
           <span
             style={{
               padding: "2px 8px",
@@ -756,28 +873,98 @@ export const App: React.FC = () => {
           </span>
           <span style={{ fontSize: 18, fontWeight: 600 }}>Lens</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "stretch",
+            marginLeft: "auto",
+            marginRight: 0,
+            backgroundColor: "#020617",
+            borderLeft: "1px solid #1f2937",
+          }}
+        >
           <button
             type="button"
-            onClick={() => {
-              setConfigModalOpen(true);
-              setConfigError(null);
-              fetchConfig()
-                .then((c) => setConfigKubeconfigDir(c.kubeconfigDir))
-                .catch(() => setConfigKubeconfigDir(""));
-            }}
+            onClick={() => setPlatformMenuOpen((o) => !o)}
             style={{
-              padding: "6px 12px",
-              borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#1e293b",
+              padding: "0 18px",
+              borderRadius: 0,
+              border: "none",
+              backgroundColor: "transparent",
               color: "#e5e7eb",
               cursor: "pointer",
-              fontSize: 13,
+              fontSize: 14,
+              fontWeight: 500,
             }}
           >
             平台配置
           </button>
+          {platformMenuOpen && (
+            <>
+              <div
+                style={{ position: "fixed", inset: 0, zIndex: 40 }}
+                onClick={() => setPlatformMenuOpen(false)}
+                aria-hidden
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  top: "100%",
+                  marginTop: 4,
+                  minWidth: 180,
+                  backgroundColor: "#020617",
+                  border: "1px solid #1e293b",
+                  borderRadius: 8,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.45)",
+                  zIndex: 41,
+                  padding: 4,
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlatformMenuOpen(false);
+                    setConfigActiveTab("kubeconfig");
+                    setConfigModalOpen(true);
+                    setConfigError(null);
+                    fetchConfig()
+                      .then((c) => setConfigKubeconfigDir(c.kubeconfigDir))
+                      .catch(() => setConfigKubeconfigDir(""));
+                  }}
+                  style={{
+                    ...menuItemStyle,
+                    borderBottom: "1px solid rgba(248,250,252,0.16)",
+                  }}
+                >
+                  kubeconfig目录
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setPlatformMenuOpen(false);
+                    setConfigActiveTab("combos");
+                    setConfigModalOpen(true);
+                    setConfigError(null);
+                    setClusterCombosLoading(true);
+                    try {
+                      const items = await fetchClusterCombos();
+                      setClusterCombos(items);
+                    } catch (e: any) {
+                      setConfigError(e?.message || "加载集群组合失败");
+                    } finally {
+                      setClusterCombosLoading(false);
+                    }
+                  }}
+                  style={menuItemStyle}
+                >
+                  集群设置
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </header>
 
@@ -800,91 +987,426 @@ export const App: React.FC = () => {
               border: "1px solid #1e293b",
               borderRadius: 8,
               padding: 20,
-              minWidth: 400,
+              minWidth: 520,
               maxWidth: "90vw",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>平台配置</h3>
-            <label style={{ display: "block", fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
-              kubeconfig 存放目录（仅支持绝对路径）
-            </label>
-            <input
-              type="text"
-              value={configKubeconfigDir}
-              onChange={(e) => setConfigKubeconfigDir(e.target.value)}
-              placeholder="例如 /appdata/soft/weblens/kubeconfigs"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "1px solid #1f2937",
-                backgroundColor: "#020617",
-                color: "#e5e7eb",
-                fontSize: 13,
-                marginBottom: 12,
-              }}
-            />
-            {configError && (
-              <div style={{ color: "#f97373", fontSize: 13, marginBottom: 12 }}>{configError}</div>
+            <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
+              平台配置 · {configActiveTab === "kubeconfig" ? "kubeconfig 存放目录" : "集群组合设置"}
+            </h3>
+
+            {configActiveTab === "kubeconfig" && (
+              <>
+                <label style={{ display: "block", fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
+                  kubeconfig 存放目录（仅支持绝对路径）
+                </label>
+                <input
+                  type="text"
+                  value={configKubeconfigDir}
+                  onChange={(e) => setConfigKubeconfigDir(e.target.value)}
+                  placeholder="例如 /appdata/soft/weblens/kubeconfigs"
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #1f2937",
+                    backgroundColor: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: 13,
+                    marginBottom: 12,
+                  }}
+                />
+                {configError && (
+                  <div style={{ color: "#f97373", fontSize: 13, marginBottom: 12 }}>{configError}</div>
+                )}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => !configSaving && setConfigModalOpen(false)}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 6,
+                      border: "1px solid #334155",
+                      backgroundColor: "transparent",
+                      color: "#e5e7eb",
+                      cursor: configSaving ? "not-allowed" : "pointer",
+                      fontSize: 13,
+                    }}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    disabled={configSaving}
+                    onClick={() => {
+                      const dir = configKubeconfigDir.trim();
+                      if (!dir) {
+                        setConfigError("请填写目录路径");
+                        return;
+                      }
+                      if (!dir.startsWith("/")) {
+                        setConfigError("仅支持绝对路径，请填写以 / 开头的完整路径");
+                        return;
+                      }
+                      setConfigSaving(true);
+                      setConfigError(null);
+                      saveConfig(dir)
+                        .then((data) => {
+                          setClusters(data.items);
+                          setConfigModalOpen(false);
+                          setError(null);
+                        })
+                        .catch((err: any) => {
+                          const msg = err?.response?.data?.error ?? err?.message ?? "保存失败";
+                          setConfigError(msg);
+                        })
+                        .finally(() => setConfigSaving(false));
+                    }}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 6,
+                      border: "1px solid #334155",
+                      backgroundColor: "#1e293b",
+                      color: "#e5e7eb",
+                      cursor: configSaving ? "not-allowed" : "pointer",
+                      fontSize: 13,
+                    }}
+                  >
+                    {configSaving ? "保存中…" : "确定"}
+                  </button>
+                </div>
+              </>
             )}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => !configSaving && setConfigModalOpen(false)}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  border: "1px solid #334155",
-                  backgroundColor: "transparent",
-                  color: "#e5e7eb",
-                  cursor: configSaving ? "not-allowed" : "pointer",
-                  fontSize: 13,
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                disabled={configSaving}
-                onClick={() => {
-                  const dir = configKubeconfigDir.trim();
-                  if (!dir) {
-                    setConfigError("请填写目录路径");
-                    return;
-                  }
-                  if (!dir.startsWith("/")) {
-                    setConfigError("仅支持绝对路径，请填写以 / 开头的完整路径");
-                    return;
-                  }
-                  setConfigSaving(true);
-                  setConfigError(null);
-                  saveConfig(dir)
-                    .then((data) => {
-                      setClusters(data.items);
-                      setConfigModalOpen(false);
-                      setError(null);
-                    })
-                    .catch((err: any) => {
-                      const msg = err?.response?.data?.error ?? err?.message ?? "保存失败";
-                      setConfigError(msg);
-                    })
-                    .finally(() => setConfigSaving(false));
-                }}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  border: "1px solid #334155",
-                  backgroundColor: "#1e293b",
-                  color: "#e5e7eb",
-                  cursor: configSaving ? "not-allowed" : "pointer",
-                  fontSize: 13,
-                }}
-              >
-                {configSaving ? "保存中…" : "确定"}
-              </button>
-            </div>
+
+            {configActiveTab === "combos" && (
+              <>
+                <div style={{ marginBottom: 12, fontSize: 13, color: "#9ca3af" }}>
+                  通过预设 “集群 + 命名空间” 组合，简化主界面切换操作。
+                </div>
+                <div
+                  style={{
+                    borderRadius: 8,
+                    border: "1px solid #1e293b",
+                    padding: 12,
+                    marginBottom: 12,
+                    backgroundColor: "#020617",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, color: "#9ca3af" }}>集群选择</span>
+                    <select
+                      value={comboClusterId}
+                      onChange={(e) => setComboClusterId(e.target.value)}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 6,
+                        border: "1px solid #1f2937",
+                        backgroundColor: "#0f172a",
+                        color: "#e5e7eb",
+                        fontSize: 13,
+                        minWidth: 220,
+                      }}
+                    >
+                      <option value="">请选择集群</option>
+                      {clusters.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}（{c.filePath.replace(/^.*[/\\]/, "")}）
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={reloadClusters}
+                      disabled={reloading}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 6,
+                        border: "1px solid #1f2937",
+                        backgroundColor: reloading ? "#0b1220" : "#0f172a",
+                        color: "#e5e7eb",
+                        cursor: reloading ? "not-allowed" : "pointer",
+                        fontSize: 13,
+                      }}
+                    >
+                      {reloading ? "刷新中..." : "刷新"}
+                    </button>
+                    <span style={{ fontSize: 13, color: "#9ca3af" }}>命名空间</span>
+                    <input
+                      type="text"
+                      value={comboNamespace}
+                      onChange={(e) => setComboNamespace(e.target.value)}
+                      placeholder="请填写命名空间"
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 6,
+                        border: "1px solid #1f2937",
+                        backgroundColor: "#0f172a",
+                        color: "#e5e7eb",
+                        fontSize: 13,
+                        minWidth: 180,
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={!comboClusterId || !comboNamespace.trim()}
+                      onClick={async () => {
+                        if (!comboClusterId || !comboNamespace.trim()) return;
+                        try {
+                          const list = await addClusterCombo(comboClusterId, comboNamespace.trim(), "");
+                          setClusterCombos(list);
+                          setToastMessage("组合已添加");
+                          setComboNamespace("");
+                        } catch (e: any) {
+                          setConfigError(e?.response?.data?.error ?? e?.message ?? "添加组合失败");
+                        }
+                      }}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 6,
+                        border: "1px solid #334155",
+                        backgroundColor:
+                          !comboClusterId || !comboNamespace.trim() ? "#020617" : "#1e293b",
+                        color: "#e5e7eb",
+                        cursor:
+                          !comboClusterId || !comboNamespace.trim() ? "not-allowed" : "pointer",
+                        fontSize: 13,
+                      }}
+                    >
+                      添加
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    集群不存在或命名空间无权限时，可先通过“测试”按钮验证。
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontSize: 13, color: "#9ca3af" }}>已添加组合</span>
+                  <input
+                    type="text"
+                    value={comboSearchKeyword}
+                    onChange={(e) => setComboSearchKeyword(e.target.value)}
+                    placeholder="搜索 kubeconfig 文件名 / 命名空间 / 别名 关键字"
+                    style={{
+                      padding: "4px 8px",
+                      borderRadius: 6,
+                      border: "1px solid #1f2937",
+                      backgroundColor: "#020617",
+                      color: "#e5e7eb",
+                      fontSize: 12,
+                      minWidth: 220,
+                    }}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    maxHeight: 260,
+                    overflowY: "auto",
+                    borderRadius: 6,
+                    border: "1px solid #1f2937",
+                    backgroundColor: "#020617",
+                  }}
+                >
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: 12,
+                    }}
+                  >
+                    <thead>
+                      <tr>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                          集群 kubeconfig
+                        </th>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                          命名空间
+                        </th>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                          别名
+                        </th>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                          操作
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {clusterCombosLoading && (
+                        <tr>
+                          <td colSpan={4} style={{ ...tdStyle, textAlign: "center" }}>
+                            加载组合中…
+                          </td>
+                        </tr>
+                      )}
+                      {!clusterCombosLoading &&
+                        clusterCombos
+                          .filter((combo) => {
+                            const k = comboSearchKeyword.trim().toLowerCase();
+                            if (!k) return true;
+                            const cluster = clusters.find((c) => c.id === combo.clusterId);
+                            const fileName = cluster?.filePath.replace(/^.*[/\\]/, "") || "";
+                            const text = [
+                              cluster?.name,
+                              fileName,
+                              combo.namespace,
+                              combo.alias,
+                            ]
+                              .join(" ")
+                              .toLowerCase();
+                            return text.includes(k);
+                          })
+                          .map((combo) => {
+                            const cluster = clusters.find((c) => c.id === combo.clusterId);
+                            const fileName = cluster?.filePath.replace(/^.*[/\\]/, "") || "";
+                            const aliasDraft = comboAliasDrafts[combo.id] ?? combo.alias ?? "";
+                            return (
+                              <tr key={combo.id}>
+                                <td style={tdStyle}>
+                                  {cluster ? (
+                                    <>
+                                      <div>{cluster.name}</div>
+                                      <div style={{ fontSize: 11, color: "#64748b" }}>{fileName}</div>
+                                    </>
+                                  ) : (
+                                    <span style={{ color: "#f97373" }}>集群未找到：{combo.clusterId}</span>
+                                  )}
+                                </td>
+                                <td style={tdStyle}>{combo.namespace}</td>
+                                <td style={tdStyle}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                    <input
+                                      type="text"
+                                      value={aliasDraft}
+                                      onChange={(e) =>
+                                        setComboAliasDrafts((prev) => ({
+                                          ...prev,
+                                          [combo.id]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="可选：为组合起个别名"
+                                      style={{
+                                        flex: 1,
+                                        padding: "4px 6px",
+                                        borderRadius: 4,
+                                        border: "1px solid #1f2937",
+                                        backgroundColor: "#020617",
+                                        color: "#e5e7eb",
+                                      }}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          const list = await updateClusterComboAlias(combo.id, aliasDraft.trim());
+                                          setClusterCombos(list);
+                                          setToastMessage("别名已保存");
+                                        } catch (e: any) {
+                                          setConfigError(
+                                            e?.response?.data?.error ?? e?.message ?? "保存别名失败",
+                                          );
+                                        }
+                                      }}
+                                      style={{
+                                        ...btnStyle,
+                                        padding: "2px 6px",
+                                        marginRight: 0,
+                                      }}
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          const list = await updateClusterComboAlias(combo.id, "");
+                                          setClusterCombos(list);
+                                          setComboAliasDrafts((prev) => {
+                                            const next = { ...prev };
+                                            delete next[combo.id];
+                                            return next;
+                                          });
+                                          setToastMessage("别名已清除");
+                                        } catch (e: any) {
+                                          setConfigError(
+                                            e?.response?.data?.error ?? e?.message ?? "清除别名失败",
+                                          );
+                                        }
+                                      }}
+                                      style={{
+                                        ...btnStyle,
+                                        padding: "2px 6px",
+                                        marginRight: 0,
+                                      }}
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                </td>
+                                <td style={tdStyle}>
+                                  <div style={{ display: "flex", gap: 6 }}>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          const res = await testClusterCombo(combo.id);
+                                          if (res.ok) {
+                                            setToastMessage("测试通过，组合可用");
+                                          } else {
+                                            setToastMessage(
+                                              `组合不可用，请删除后重新添加：${res.error || ""}`,
+                                            );
+                                          }
+                                        } catch (e: any) {
+                                          setToastMessage(
+                                            `组合不可用，请删除后重新添加：${
+                                              e?.response?.data?.error ?? e?.message ?? ""
+                                            }`,
+                                          );
+                                        }
+                                      }}
+                                      style={btnStyle}
+                                    >
+                                      测试
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          const list = await deleteClusterComboApi(combo.id);
+                                          setClusterCombos(list);
+                                          setToastMessage("组合已删除");
+                                        } catch (e: any) {
+                                          setToastMessage(
+                                            `删除失败：${
+                                              e?.response?.data?.error ?? e?.message ?? "未知错误"
+                                            }`,
+                                          );
+                                        }
+                                      }}
+                                      style={btnStyle}
+                                    >
+                                      删除
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      {!clusterCombosLoading && clusterCombos.length === 0 && (
+                        <tr>
+                          <td colSpan={4} style={{ ...tdStyle, textAlign: "center" }}>
+                            暂未添加任何组合
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -940,7 +1462,7 @@ export const App: React.FC = () => {
             )}
             {!loading && clusters.length > 0 && (
               <>
-                {/* 同一行：当前集群 + 刷新 后紧跟 命名空间，用圆点分隔 */}
+                {/* 组合选择：只需选中预设的“集群 + 命名空间”组合 */}
                 <div
                   style={{
                     display: "flex",
@@ -951,10 +1473,8 @@ export const App: React.FC = () => {
                     flexWrap: "wrap",
                   }}
                 >
-                  {/* 当前集群 + 下拉 + 刷新 */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 14, color: "#9ca3af" }}>当前集群：</span>
-                    <div style={{ position: "relative" }}>
+                  <span style={{ fontSize: 14, color: "#9ca3af" }}>组合选择：</span>
+                  <div style={{ position: "relative" }}>
                     <button
                       type="button"
                       onClick={() => setClusterDropdownOpen((o) => !o)}
@@ -965,23 +1485,26 @@ export const App: React.FC = () => {
                         backgroundColor: "#0f172a",
                         color: "#e5e7eb",
                         fontSize: 13,
-                        minWidth: 220,
+                        minWidth: 260,
                         textAlign: "left",
                         cursor: "pointer",
                       }}
                     >
-                      {activeClusterId
-                        ? (clusters.find((c) => c.id === activeClusterId)?.name ?? activeClusterId)
-                        : "请选择集群"}
+                      {activeComboId
+                        ? (() => {
+                            const combo = clusterCombos.find((c) => c.id === activeComboId);
+                            if (!combo) return "请选择集群组合";
+                            const cluster = clusters.find((cl) => cl.id === combo.clusterId);
+                            const name = cluster?.name ?? combo.clusterId;
+                            const ns = combo.namespace || "所有命名空间";
+                            return combo.alias ? `${combo.alias}（${name} · ${ns}）` : `${name} · ${ns}`;
+                          })()
+                        : "请选择集群组合"}
                     </button>
                     {clusterDropdownOpen && (
                       <>
                         <div
-                          style={{
-                            position: "fixed",
-                            inset: 0,
-                            zIndex: 50,
-                          }}
+                          style={{ position: "fixed", inset: 0, zIndex: 40 }}
                           onClick={() => setClusterDropdownOpen(false)}
                           aria-hidden
                         />
@@ -997,7 +1520,7 @@ export const App: React.FC = () => {
                             border: "1px solid #1e293b",
                             borderRadius: 8,
                             boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-                            zIndex: 51,
+                            zIndex: 41,
                             overflow: "hidden",
                             display: "flex",
                             flexDirection: "column",
@@ -1008,7 +1531,7 @@ export const App: React.FC = () => {
                             type="text"
                             value={clusterSearchKeyword}
                             onChange={(e) => setClusterSearchKeyword(e.target.value)}
-                            placeholder="搜索集群名称或 kubeconfig 文件名关键字"
+                            placeholder="搜索 kubeconfig 文件名 / 命名空间 / 组合别名关键字"
                             style={{
                               margin: 8,
                               padding: "6px 10px",
@@ -1020,45 +1543,85 @@ export const App: React.FC = () => {
                             }}
                           />
                           <div style={{ overflowY: "auto", flex: 1, maxHeight: 260 }}>
-                            {clusters
-                              .filter((c) => {
+                            {clusterCombos
+                              .filter((combo) => {
                                 const k = clusterSearchKeyword.trim().toLowerCase();
                                 if (!k) return true;
-                                const fileName = c.filePath.replace(/^.*[/\\]/, "") || c.filePath;
-                                const s = [c.id, c.name, c.filePath, fileName].join(" ").toLowerCase();
-                                return s.includes(k);
+                                const cluster = clusters.find((c) => c.id === combo.clusterId);
+                                const fileName = cluster?.filePath.replace(/^.*[/\\]/, "") || "";
+                                const text = [
+                                  cluster?.name,
+                                  fileName,
+                                  combo.namespace,
+                                  combo.alias,
+                                ]
+                                  .join(" ")
+                                  .toLowerCase();
+                                return text.includes(k);
                               })
-                              .map((c) => (
-                                <button
-                                  key={c.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveClusterId(c.id);
-                                    setClusterDropdownOpen(false);
-                                    setClusterSearchKeyword("");
-                                  }}
-                                  style={{
-                                    display: "block",
-                                    width: "100%",
-                                    padding: "8px 12px",
-                                    textAlign: "left",
-                                    fontSize: 13,
-                                    color: c.id === activeClusterId ? "#38bdf8" : "#e2e8f0",
-                                    backgroundColor: c.id === activeClusterId ? "#1e293b" : "transparent",
-                                    border: "none",
-                                    cursor: "pointer",
-                                    borderBottom: "1px solid #1e293b",
-                                  }}
-                                >
-                                  <div>{c.name}</div>
-                                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{c.filePath}</div>
-                                </button>
-                              ))}
+                              .map((combo) => {
+                                const cluster = clusters.find((c) => c.id === combo.clusterId);
+                                const fileName = cluster?.filePath.replace(/^.*[/\\]/, "") || "";
+                                const ns = combo.namespace || "所有命名空间";
+                                const title = combo.alias
+                                  ? `${combo.alias}（${cluster?.name ?? combo.clusterId} · ${ns}）`
+                                  : `${cluster?.name ?? combo.clusterId} · ${ns}`;
+                                return (
+                                  <button
+                                    key={combo.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveComboId(combo.id);
+                                      setClusterDropdownOpen(false);
+                                      setClusterSearchKeyword("");
+                                    }}
+                                    style={{
+                                      display: "block",
+                                      width: "100%",
+                                      padding: "8px 12px",
+                                      textAlign: "left",
+                                      fontSize: 13,
+                                      color: combo.id === activeComboId ? "#38bdf8" : "#e2e8f0",
+                                      backgroundColor: combo.id === activeComboId ? "#1e293b" : "transparent",
+                                      border: "none",
+                                      cursor: "pointer",
+                                      borderBottom: "1px solid #1e293b",
+                                    }}
+                                  >
+                                    <div>{title}</div>
+                                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                                      {cluster ? fileName : `集群未找到：${combo.clusterId}`}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            {clusterCombos.length === 0 && (
+                              <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
+                                暂未添加组合，请先在右上角“平台配置 · 集群组合设置”中添加。
+                              </div>
+                            )}
                           </div>
                         </div>
                       </>
                     )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={applyClusterAndNamespace}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 6,
+                      border: "1px solid #334155",
+                      backgroundColor: "#1e293b",
+                      color: "#e5e7eb",
+                      cursor: !activeComboId ? "not-allowed" : "pointer",
+                      fontSize: 13,
+                    }}
+                    title="点击后，选中的组合才会真正生效"
+                    disabled={!activeComboId}
+                  >
+                    应用
+                  </button>
                   <button
                     type="button"
                     onClick={reloadClusters}
@@ -1074,93 +1637,22 @@ export const App: React.FC = () => {
                     }}
                     title="当 kubeconfig 目录增删改后，点击手动刷新"
                   >
-                    {reloading ? "刷新中..." : "刷新"}
-                  </button>
-                </div>
-                  <span style={{ color: "#64748b", marginLeft: 4, marginRight: 4 }}>·</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <label style={{ fontSize: 14, color: "#9ca3af" }}>命名空间：</label>
-                  {!activeClusterId ? (
-                    <span style={{ fontSize: 12, color: "#9ca3af" }}>请先选择集群</span>
-                  ) : namespaces.length === 0 &&
-                  !clusters.find((c) => c.id === activeClusterId)?.defaultNamespace ? (
-                    <>
-                      <input
-                        type="text"
-                        value={manualNamespaceInput}
-                        onChange={(e) => setManualNamespaceInput(e.target.value)}
-                        placeholder="输入命名空间（无列表权限时）"
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: 6,
-                          border: "1px solid #1f2937",
-                          backgroundColor: "#0f172a",
-                          color: "#e5e7eb",
-                          fontSize: 13,
-                          minWidth: 200,
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") applyClusterAndNamespace();
-                        }}
-                      />
-                      <span style={{ fontSize: 12, color: "#9ca3af" }}>
-                        无列表权限或命名空间列表较慢时，可在此提前输入命名空间，输入后点击右侧「应用」生效
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <select
-                        value={activeNamespace}
-                        onChange={(e) => setActiveNamespace(e.target.value)}
-                        disabled={namespacesLoading}
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: 6,
-                          border: "1px solid #1f2937",
-                          backgroundColor: "#0f172a",
-                          color: "#e5e7eb",
-                          fontSize: 13,
-                          minWidth: 180,
-                          cursor: namespacesLoading ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        <option value={ALL_NAMESPACES}>所有命名空间</option>
-                        {namespaces.map((ns) => (
-                          <option key={ns} value={ns}>
-                            {ns}
-                          </option>
-                        ))}
-                      </select>
-                      {namespacesLoading && (
-                        <span style={{ fontSize: 12, color: "#9ca3af" }}>加载命名空间中…</span>
-                      )}
-                    </>
-                  )}
-                </div>
-                  <button
-                    type="button"
-                    onClick={applyClusterAndNamespace}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 6,
-                      border: "1px solid #334155",
-                      backgroundColor: "#1e293b",
-                      color: "#e5e7eb",
-                      cursor: !activeClusterId ? "not-allowed" : "pointer",
-                      fontSize: 13,
-                    }}
-                    title="点击后，选中的集群和命名空间才会真正生效（手动输入命名空间时取输入框内容）"
-                    disabled={!activeClusterId}
-                  >
-                    应用
+                    {reloading ? "刷新中..." : "刷新集群列表"}
                   </button>
                 </div>
 
                 <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
                   集群与命名空间 · 当前：
-                  {clusters.find((c) => c.id === effectiveClusterId)?.name ?? effectiveClusterId ?? "未应用"}
-                  {" "}· 配置文件：
-                  {clusters.find((c) => c.id === effectiveClusterId)?.filePath ?? ""}
+                  {effectiveComboId
+                    ? (() => {
+                        const combo = clusterCombos.find((c) => c.id === effectiveComboId);
+                        if (!combo) return "未应用";
+                        const cluster = clusters.find((c) => c.id === combo.clusterId);
+                        const name = cluster?.name ?? combo.clusterId;
+                        const ns = combo.namespace || "所有命名空间";
+                        return combo.alias ? `${combo.alias}（${name} · ${ns}）` : `${name} · ${ns}`;
+                      })()
+                    : "未应用"}
                   {" "}（仅点击「应用」后才生效）
                 </div>
 
@@ -1429,15 +1921,15 @@ export const App: React.FC = () => {
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            if (!activeClusterId || !window.confirm(`确定删除 Pod ${p.metadata.namespace}/${p.metadata.name}？`)) {
+                                            if (!effectiveClusterId || !window.confirm(`确定删除 Pod ${p.metadata.namespace}/${p.metadata.name}？`)) {
                                               setPodMenuOpenKey(null); setPodMenuSubmenu(null);
                                               return;
                                             }
-                                            deletePod(activeClusterId, p.metadata.namespace, p.metadata.name)
+                                            deletePod(effectiveClusterId, p.metadata.namespace, p.metadata.name)
                                               .then(() => {
                                                 setPodMenuOpenKey(null); setPodMenuSubmenu(null);
                                                 setError(null);
-                                                loadPods(activeClusterId!, activeNamespace);
+                                                loadPods(effectiveClusterId!, effectiveNamespace);
                                               })
                                               .catch((err: any) => setError(err?.response?.data?.error ?? err?.message ?? "删除失败"));
                                           }}

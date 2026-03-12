@@ -107,5 +107,8 @@ func NewRouter(reg *cluster.Registry) *gin.Engine {
 	// pod exec (WebSocket)
 	registerExecRoutes(r, reg)
 
+	// cluster combos (preset cluster + namespace)
+	registerClusterComboRoutes(r, reg)
+
 	return r
 }

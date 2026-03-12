@@ -27,6 +27,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   const [error, setError] = useState<string | null>(null);
   const preRef = useRef<HTMLPreElement>(null);
   const currentMatchRef = useRef<HTMLSpanElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
 
   useEffect(() => {
     if (!isActive) return;
@@ -43,8 +44,9 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   }, [isActive, clusterId, namespace, podName, currentContainer]);
 
   useEffect(() => {
+    if (!autoScroll) return;
     if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight;
-  }, [content]);
+  }, [content, autoScroll]);
 
   const keyword = search.trim();
   const { matches, total } = useMemo(() => {
@@ -127,6 +129,36 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           ))}
         </select>
         <div style={{ flex: 1, minWidth: 0 }} />
+        <button
+          type="button"
+          onClick={() => {
+            setSearch("error");
+            setCurrentMatchIndex(0);
+          }}
+          style={navBtnStyle}
+          title="快速匹配 error"
+        >
+          error
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setSearch("warn");
+            setCurrentMatchIndex(0);
+          }}
+          style={navBtnStyle}
+          title="快速匹配 warn"
+        >
+          warn
+        </button>
+        <button
+          type="button"
+          onClick={() => setAutoScroll((v) => !v)}
+          style={navBtnStyle}
+          title={autoScroll ? "暂停自动滚动" : "恢复自动滚动"}
+        >
+          {autoScroll ? "暂停滚动" : "自动滚动"}
+        </button>
         <input
           type="text"
           value={search}

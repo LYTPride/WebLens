@@ -56,6 +56,13 @@ export interface PodDescribe {
   events: K8sEvent[];
 }
 
+export interface ClusterCombo {
+  id: string;
+  clusterId: string;
+  namespace: string;
+  alias?: string;
+}
+
 /** 从 Pod 取容器名列表（用于 Shell/Logs 子菜单），优先 spec.containers，否则 status.containerStatuses */
 export function getPodContainerNames(pod: Pod): string[] {
   const fromSpec = pod.spec?.containers?.map((c) => c.name) ?? [];
@@ -81,6 +88,49 @@ export async function fetchClusters() {
 export async function reloadClustersFromBackend() {
   const res = await api.post<{ items: ClusterSummary[] }>("/api/clusters/reload");
   return res.data.items;
+}
+
+/** 获取所有预设的集群组合（clusterId + namespace） */
+export async function fetchClusterCombos(): Promise<ClusterCombo[]> {
+  const res = await api.get<{ items: ClusterCombo[] }>("/api/cluster-combos");
+  return res.data.items;
+}
+
+/** 新增或更新一个集群组合 */
+export async function addClusterCombo(
+  clusterId: string,
+  namespace: string,
+  alias: string,
+): Promise<ClusterCombo[]> {
+  const res = await api.post<{ items: ClusterCombo[] }>("/api/cluster-combos", {
+    clusterId,
+    namespace,
+    alias,
+  });
+  return res.data.items;
+}
+
+/** 更新组合别名 */
+export async function updateClusterComboAlias(id: string, alias: string): Promise<ClusterCombo[]> {
+  const res = await api.put<{ items: ClusterCombo[] }>(`/api/cluster-combos/${encodeURIComponent(id)}`, {
+    alias,
+  });
+  return res.data.items;
+}
+
+/** 删除一个组合 */
+export async function deleteClusterComboApi(id: string): Promise<ClusterCombo[]> {
+  const res = await api.delete<{ items: ClusterCombo[] }>(`/api/cluster-combos/${encodeURIComponent(id)}`);
+  return res.data.items;
+}
+
+/** 测试组合可用性（返回 ok + 可选错误信息） */
+export async function testClusterCombo(id: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await api.post<{ ok: boolean; error?: string }>(
+    `/api/cluster-combos/${encodeURIComponent(id)}/test`,
+    {},
+  );
+  return res.data;
 }
 
 /** 获取平台配置（当前 kubeconfig 目录） */
