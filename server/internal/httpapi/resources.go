@@ -328,13 +328,13 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 
-		ctx := c.Request.Context()
-
 		cacheKey := podDescribeCacheKey(id, ns, name)
 		if data, ok := getPodDescribeFromCache(cacheKey); ok {
 			c.JSON(http.StatusOK, &data)
 			return
 		}
+
+		ctx := c.Request.Context()
 
 		pod, err := client.CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
@@ -349,7 +349,12 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			fields.OneTermEqualSelector("involvedObject.name", name),
 		).String()
 
-		evList, err := client.CoreV1().Events(ns).List(ctx, metav1.ListOptions{
+		// Events 相比单个 Pod 获取更容易受命名空间体量影响，这里单独加一个较短的超时，
+		// 保证 Describe 最长等待时间有限：超时时仍然返回 Pod 基本信息。
+		evCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+
+		evList, err := client.CoreV1().Events(ns).List(evCtx, metav1.ListOptions{
 			FieldSelector: selector,
 		})
 		if err != nil {
