@@ -44,20 +44,41 @@ const POD_COLUMN_DEFAULTS: Record<(typeof POD_COLUMN_KEYS)[number], number> = {
   actions: 80,
 };
 
-/** 根据 creationTimestamp 计算并格式化为存活时间（如 2d、3h、45m） */
+/** 根据 creationTimestamp 计算并格式化为存活时间
+ *  < 1 分钟：按秒显示（Xs）
+ *  < 1 小时：按整分和秒显示（XmYs）
+ *  < 1 天：按整小时和分显示（XhYm）
+ *  >= 1 天：按整天和小时显示（XdYh）
+ */
 function formatPodAge(creationTimestamp?: string): string {
   if (!creationTimestamp) return "-";
   const start = new Date(creationTimestamp).getTime();
   const now = Date.now();
   const sec = Math.floor((now - start) / 1000);
   if (sec < 0) return "-";
-  if (sec < 60) return `${sec}s`;
+  if (sec < 60) {
+    // 小于 1 分钟，按秒
+    return `${sec}s`;
+  }
+
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}h${min % 60 ? `${min % 60}m` : ""}`;
-  const d = Math.floor(h / 24);
-  return `${d}d${h % 24 ? `${h % 24}h` : ""}`;
+  const remainSec = sec % 60;
+  if (sec < 3600) {
+    // 小于 1 小时，按“整分钟+秒”
+    return `${min}m${remainSec ? `${remainSec}s` : ""}`;
+  }
+
+  const h = Math.floor(sec / 3600);
+  const remainMin = Math.floor((sec % 3600) / 60);
+  if (sec < 24 * 3600) {
+    // 小于 1 天，按“整小时+分钟”
+    return `${h}h${remainMin ? `${remainMin}m` : ""}`;
+  }
+
+  const d = Math.floor(sec / (24 * 3600));
+  const remainHour = Math.floor((sec % (24 * 3600)) / 3600);
+  // 大于等于 1 天，按“整天 + 小时”（上限）
+  return `${d}d${remainHour ? `${remainHour}h` : ""}`;
 }
 const MIN_COL_WIDTH = 40;
 

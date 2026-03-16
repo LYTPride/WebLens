@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { streamPodLogs } from "../api";
+import { fetchPodLogs, streamPodLogs } from "../api";
 
 interface LogsTabProps {
   clusterId: string;
@@ -25,6 +25,12 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [currentContainer, setCurrentContainer] = useState(container);
   const [error, setError] = useState<string | null>(null);
+  const [showPrevious, setShowPrevious] = useState(false);
+  const [showTimestamps, setShowTimestamps] = useState(false);
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [loadedAllHistory, setLoadedAllHistory] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [sinceTime, setSinceTime] = useState<string | null>(null);
   const preRef = useRef<HTMLPreElement>(null);
   const currentMatchRef = useRef<HTMLSpanElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -34,14 +40,18 @@ export const LogsTab: React.FC<LogsTabProps> = ({
     setContent("");
     setError(null);
     setCurrentMatchIndex(0);
+    const nowIso = new Date().toISOString();
+    setSinceTime(nowIso);
     const cancel = streamPodLogs(clusterId, namespace, podName, {
       container: currentContainer || undefined,
       tailLines: 500,
+      previous: showPrevious,
+      timestamps: showTimestamps,
       onChunk: (text) => setContent((prev) => prev + text),
       onError: (err) => setError(err?.message ?? "加载失败"),
     });
     return cancel;
-  }, [isActive, clusterId, namespace, podName, currentContainer]);
+  }, [isActive, clusterId, namespace, podName, currentContainer, showPrevious, showTimestamps]);
 
   useEffect(() => {
     if (!autoScroll) return;
@@ -81,6 +91,41 @@ export const LogsTab: React.FC<LogsTabProps> = ({
     }
   };
 
+  const downloadAsFile = async (mode: "visible" | "all") => {
+    try {
+      let data = content;
+      if (mode === "all") {
+        data = await fetchPodLogs(
+          clusterId,
+          namespace,
+          podName,
+          currentContainer || undefined,
+          false,
+          showPrevious,
+          showTimestamps,
+          undefined, // all logs: 不带 sinceTime
+        );
+      }
+      // 统一换行符为 CRLF，避免在部分编辑器（如 Windows 记事本）中显示为单行
+      const normalized = data.replace(/\r?\n/g, "\r\n");
+      const blob = new Blob([normalized], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const containerPart = currentContainer ? `-${currentContainer}` : "";
+      const suffix = mode === "visible" ? "visible" : "all";
+      a.href = url;
+      a.download = `${podName}${containerPart}-${suffix}-logs.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setDownloadMenuOpen(false);
+    } catch (e: any) {
+      setError(e?.message ?? "下载日志失败");
+      setDownloadMenuOpen(false);
+    }
+  };
+
   const segments = useMemo(() => {
     if (!keyword || matches.length === 0) {
       return [{ type: "text" as const, value: content }];
@@ -95,6 +140,55 @@ export const LogsTab: React.FC<LogsTabProps> = ({
     if (last < content.length) list.push({ type: "text", value: content.slice(last) });
     return list;
   }, [content, keyword, matches]);
+
+  const handleScroll = () => {
+    const el = preRef.current;
+    if (!el) return;
+    if (loadedAllHistory || loadingOlder) return;
+    // 当用户滚动到顶部附近时，尝试加载更早的日志
+    if (el.scrollTop <= 40) {
+      setLoadingOlder(true);
+      const oldScrollHeight = el.scrollHeight;
+      const oldScrollTop = el.scrollTop;
+      fetchPodLogs(
+        clusterId,
+        namespace,
+        podName,
+        currentContainer || undefined,
+        false,
+        showPrevious,
+        showTimestamps,
+        undefined, // load older: 明确拉全量，再做前缀合并
+      )
+        .then((full) => {
+          if (!full) return;
+          // 尝试在完整日志中找到当前内容的最后一次出现位置，以避免重复
+          const idx = full.lastIndexOf(content);
+          let merged: string;
+          if (idx >= 0) {
+            merged = full.slice(0, idx) + content;
+          } else {
+            merged = full;
+          }
+          setContent(merged);
+          setLoadedAllHistory(true);
+          // 在下一帧调整 scrollTop，尽量保持当前视图位置不跳动
+          setTimeout(() => {
+            const node = preRef.current;
+            if (!node) return;
+            const newHeight = node.scrollHeight;
+            node.scrollTop = newHeight - oldScrollHeight + oldScrollTop;
+          }, 0);
+        })
+        .catch((e: any) => {
+          // 加载更早日志失败不影响现有内容，只提示错误一次
+          setError((prev) => prev ?? e?.message ?? "加载更早日志失败");
+        })
+        .finally(() => {
+          setLoadingOlder(false);
+        });
+    }
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -128,7 +222,39 @@ export const LogsTab: React.FC<LogsTabProps> = ({
             </option>
           ))}
         </select>
+        {sinceTime && (
+          <span style={{ fontSize: 12, color: "#64748b", marginLeft: 8, whiteSpace: "nowrap" }}>
+            Logs from{" "}
+            {(() => {
+              const d = new Date(sinceTime);
+              if (Number.isNaN(d.getTime())) return sinceTime;
+              return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
+                d.getDate(),
+              ).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(
+                d.getMinutes(),
+              ).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+            })()}
+          </span>
+        )}
         <div style={{ flex: 1, minWidth: 0 }} />
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#94a3b8" }}>
+          <input
+            type="checkbox"
+            checked={showPrevious}
+            onChange={(e) => setShowPrevious(e.target.checked)}
+            style={{ margin: 0 }}
+          />
+          previous 容器日志
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#94a3b8" }}>
+          <input
+            type="checkbox"
+            checked={showTimestamps}
+            onChange={(e) => setShowTimestamps(e.target.checked)}
+            style={{ margin: 0 }}
+          />
+          显示时间戳
+        </label>
         <button
           type="button"
           onClick={() => {
@@ -208,9 +334,65 @@ export const LogsTab: React.FC<LogsTabProps> = ({
         >
           To bottom ▼
         </button>
+        <div style={{ position: "relative" }}>
+          <button
+            type="button"
+            onClick={() => setDownloadMenuOpen((v) => !v)}
+            title="下载日志"
+            style={{ ...navBtnStyle, padding: "4px 10px", marginLeft: 4 }}
+          >
+            Download
+          </button>
+          {downloadMenuOpen && (
+            <div
+              style={{
+                position: "absolute",
+                right: 0,
+                top: "100%",
+                marginTop: 4,
+                minWidth: 140,
+                backgroundColor: "#020617",
+                borderRadius: 6,
+                border: "1px solid #1e293b",
+                boxShadow: "0 4px 10px rgba(0,0,0,0.5)",
+                zIndex: 10,
+                overflow: "hidden",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => downloadAsFile("visible")}
+                style={{
+                  ...navBtnStyle,
+                  display: "block",
+                  width: "100%",
+                  borderRadius: 0,
+                  textAlign: "left",
+                }}
+              >
+                Visible logs
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadAsFile("all")}
+                style={{
+                  ...navBtnStyle,
+                  display: "block",
+                  width: "100%",
+                  borderRadius: 0,
+                  borderTop: "1px solid #1e293b",
+                  textAlign: "left",
+                }}
+              >
+                All logs
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       <pre
         ref={preRef}
+        onScroll={handleScroll}
         style={{
           flex: 1,
           margin: 0,
