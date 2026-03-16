@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"net/http"
 	"strconv"
+	"time"
 
 	"weblens/server/internal/cluster"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,7 +23,10 @@ func registerLogRoutes(r *gin.Engine, reg *cluster.Registry) {
 		pod := c.Param("pod")
 		container := c.Query("container")
 		follow, _ := strconv.ParseBool(c.DefaultQuery("follow", "false"))
+		previous, _ := strconv.ParseBool(c.DefaultQuery("previous", "false"))
+		timestamps, _ := strconv.ParseBool(c.DefaultQuery("timestamps", "false"))
 		tailLinesStr := c.Query("tailLines")
+		sinceTimeStr := c.Query("sinceTime")
 
 		var tailLines *int64
 		if tailLinesStr != "" {
@@ -37,9 +42,17 @@ func registerLogRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 
 		opts := &corev1.PodLogOptions{
-			Container: container,
-			Follow:    follow,
-			TailLines: tailLines,
+			Container:  container,
+			Follow:     follow,
+			TailLines:  tailLines,
+			Previous:   previous,
+			Timestamps: timestamps,
+		}
+
+		if sinceTimeStr != "" {
+			if parsed, err := time.Parse(time.RFC3339, sinceTimeStr); err == nil {
+				opts.SinceTime = &metav1.Time{Time: parsed}
+			}
 		}
 
 		req := client.CoreV1().Pods(ns).GetLogs(pod, opts)

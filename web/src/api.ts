@@ -317,6 +317,9 @@ export async function fetchPodLogs(
   pod: string,
   container?: string,
   follow = false,
+  previous = false,
+  timestamps = false,
+  sinceTime?: string,
 ) {
   const res = await api.get<string>(
     `/api/clusters/${encodeURIComponent(
@@ -326,6 +329,9 @@ export async function fetchPodLogs(
       params: {
         container,
         follow,
+        previous,
+        timestamps,
+        ...(sinceTime ? { sinceTime } : {}),
       },
       responseType: "text",
     },
@@ -343,6 +349,9 @@ export function streamPodLogs(
   opts: {
     container?: string;
     tailLines?: number;
+    previous?: boolean;
+    timestamps?: boolean;
+    sinceTime?: string;
     onChunk: (text: string) => void;
     onError?: (err: Error) => void;
   },
@@ -356,6 +365,9 @@ export function streamPodLogs(
   url.searchParams.set("follow", "true");
   if (opts.container) url.searchParams.set("container", opts.container);
   if (opts.tailLines != null) url.searchParams.set("tailLines", String(opts.tailLines));
+  if (opts.previous) url.searchParams.set("previous", "true");
+  if (opts.timestamps) url.searchParams.set("timestamps", "true");
+   if (opts.sinceTime) url.searchParams.set("sinceTime", opts.sinceTime);
 
   fetch(url.toString(), { signal: ac.signal })
     .then(async (res) => {

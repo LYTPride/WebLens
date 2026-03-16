@@ -19,8 +19,10 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
   - 后端启动时扫描目录，解析其中的所有 context，每个 context 视为一个逻辑集群。
   - `GET /api/clusters` 返回所有可用集群（ID、context 名称、kubeconfig 路径等），前端以列表方式展示，可点击选择当前集群。
   - **默认命名空间**：当 kubeconfig 中 context 未设置 namespace 或当前账号无集群级 list namespaces 权限时，可采用两种方式之一：（1）在 `config/weblens.env` 或环境中设置 `WEBLENS_DEFAULT_NAMESPACE=你的命名空间`，对该服务器上所有未在 kubeconfig 中指定 namespace 的 context 生效；（2）在前端命名空间下拉为空时，使用「输入命名空间」输入框填写后点击「应用」。
-  - **平台配置**：顶栏右侧提供「平台配置」按钮，可在界面中指定 kubeconfig 存放目录（仅支持绝对路径，无需在服务器上 export 环境变量）。若目录不存在或非绝对路径会提示；配置会持久化到 `config/kubeconfig-dir.override`，重启后仍生效。
-  - **集群选择**：主区使用下拉框选择当前集群，下拉框顶部带搜索框，输入关键字可过滤 ID/名称/配置文件路径；选中后仅显示该集群的一条摘要及命名空间与资源列表，无需长表滚动。
+  - **平台配置**：顶栏右上角提供「平台配置」菜单：
+    - **kubeconfig 目录**：在界面中指定 kubeconfig 存放目录（仅支持绝对路径，无需在服务器上 export 环境变量）。若目录不存在或非绝对路径会提示；配置会持久化到 `config/kubeconfig-dir.override`，重启后仍生效。
+    - **集群组合设置**：预设「集群 + 命名空间」组合（可配置别名、测试可用性、删除），主界面只需通过「组合选择 + 应用」实现一键切换，避免反复手动选集群/命名空间。
+  - **集群选择**：主区使用「组合选择」下拉框选择当前集群+命名空间组合，下拉框顶部带搜索框，输入关键字可过滤 ID/名称/kubeconfig 文件名/组合别名；选中后仅显示该组合下的资源列表。
   - 支持前端“刷新”按钮重新从后端获取最新集群列表。
 
 - **资源浏览（对标 Freelens 左侧菜单）**
@@ -29,7 +31,7 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
   - **配置**：`/configmaps`、`/secrets`
   - **网络**：`/services`、`/ingresses`
   - **集群**：`/namespaces`、`/nodes`、`/events`
-  - 前端：左侧 **侧栏菜单**（工作负载 / 配置 / 网络 / 集群），主区域为「当前集群 + 命名空间选择」上方固定区域 + 下方可滚动的资源列表。Pods 视图中：
+  - 前端：左侧 **侧栏菜单**（工作负载 / 配置 / 网络 / 集群），主区域为「集群与命名空间组合选择」上方固定区域 + 下方可滚动的资源列表。Pods 视图中：
     - Name 列支持 **一键复制 Pod 名称**（小图标按钮）。
     - 列表包含 **Age**（运行时长）、Status、Restarts、容器数等字段。
     - 每一行提供三点操作菜单：Logs / Edit（YAML 编辑）/ Delete，Shell 将在后续版本中整合到底部面板。
@@ -40,10 +42,23 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
       - `container`：容器名（可选）
       - `tailLines`：返回尾部若干行（可选）
       - `follow`：是否跟随日志流（`true`/`false`）
+      - `previous`：是否读取上一个已退出容器的日志（`true`/`false`）
+      - `timestamps`：是否在每行前输出时间戳（`true`/`false`）
+      - `sinceTime`：时间下限（RFC3339，可选，用于一次性查询/下载时限制起始时间）
   - 行为：
-  - `follow=false`：一次性返回文本日志。
-  - `follow=true`：后端使用 chunked 传输流式输出日志行，便于前端实现实时跟随。
-  - 前端：在 Pods 列表行右侧三点菜单中选择 **Logs**，在底部多标签面板中以可滚动区域展示，可与 Shell 标签并存。
+    - `follow=false`：一次性返回文本日志。
+    - `follow=true`：后端使用 chunked 传输流式输出日志行，便于前端实现实时跟随。
+  - 前端：
+    - 在 Pods 列表行右侧三点菜单中选择 **Logs**，在底部多标签面板中以可滚动区域展示，可与 Shell 标签并存。
+    - 支持容器切换、quick filter（error/warn）、关键字高亮搜索、自动滚动开关。
+    - 可勾选：
+      - **previous 容器日志**：切换到前一个容器实例的日志。
+      - **显示时间戳**：在每行日志前显示 Kubernetes 日志时间戳。
+    - 顶部展示 `Logs from YYYY/MM/DD HH:MM:SS`，表示本次日志会话的起始时间下限（即本次查看从哪个时间点之后开始取日志），与业务日志内容的第一条时间戳无强绑定。
+    - 向上滚动至日志顶部时会自动尝试从后端拉取更早的日志，并无缝拼接在现有内容之前，做到「边滚边加载」的体验。
+    - **Download** 按钮提供两种下载方式：
+      - **Visible logs**：下载当前页面已加载并显示的全部日志（包含通过向上滚动自动加载进来的历史部分）。
+      - **All logs**：重新发起一次不带 `sinceTime` 和 `tailLines` 的请求，尽可能从日志开头拉取全部内容后下载。
 
 - **Pod Shell（kubectl exec）**
   - 后端：`GET /api/clusters/:id/pods/:namespace/:pod/exec` 升级为 WebSocket，使用 `remotecommand.NewSPDYExecutor` 在容器内启动 `/bin/sh`，将 stdin/stdout/stderr 与 WebSocket 双向桥接。
@@ -93,7 +108,7 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
   - 编辑器支持：Cancel / Save / Save & Close，右侧带文档缩略图和视口高亮。
   - 内置关键字搜索（带上下跳转和 minimap 同步）。
 - **实时刷新与性能优化**
-  - 当前选中集群 + 命名空间 + 资源视图采用 **3 秒轮询** 刷新，模拟 `watch` 效果。
+  - 当前选中集群 + 命名空间 + 资源视图采用 **Kubernetes Watch API** 做实时监听，Pods 及大部分工作负载/配置/网络资源均通过后端 watch → 前端流式处理的方式增量更新；在 watch 权限不足时自动退回短间隔列表刷新。
   - 浏览器标签页不可见时自动暂停轮询，重新激活时立即刷新一次。
   - 后端对各类资源 List 接口增加 **1 秒软缓存**，多用户并发时减少对 kube‑apiserver 的压力。
 - **侧栏折叠**
