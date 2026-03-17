@@ -62,7 +62,13 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
 
 - **Pod Shell（kubectl exec）**
   - 后端：`GET /api/clusters/:id/pods/:namespace/:pod/exec` 升级为 WebSocket，使用 `remotecommand.NewSPDYExecutor` 在容器内启动 `/bin/sh`，将 stdin/stdout/stderr 与 WebSocket 双向桥接。
-  - 前端：在 Pods 列表三点菜单中选择 **Shell**，会在底部多标签面板中打开终端标签（支持多 Pod / 多容器并存切换）。
+  - 前端：
+    - 在 Pods 列表三点菜单中选择 **Shell**，会在底部多标签面板中打开终端标签（支持多 Pod / 多容器并存切换）。
+    - 终端使用 xterm 渲染，自动适配窗口大小，命令行在到达窗口右侧后自动换行，不会覆盖 prompt。
+    - 支持鼠标右键菜单：
+      - **复制**：复制当前选中文本到剪贴板。
+      - **粘贴**：尝试通过 Clipboard API 读取剪贴板并将内容注入到终端；在浏览器限制 Clipboard API 时，会在终端内提示「请使用 Ctrl+V 粘贴」。
+    - 支持键盘 **Ctrl+V**：在终端窗口中不会发送 `^V` 控制字符，而是触发浏览器原生粘贴行为，将剪贴板内容直接注入到 Shell。
 
 - **可选 Basic 鉴权**
   - 环境变量 `WEBLENS_AUTH_USER` 与 `WEBLENS_AUTH_PASSWORD` 同时设置时，对所有请求（除 `/healthz`）启用 HTTP Basic 鉴权。

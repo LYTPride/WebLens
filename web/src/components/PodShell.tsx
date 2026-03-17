@@ -18,6 +18,12 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; visible: boolean }>({
+    x: 0,
+    y: 0,
+    visible: false,
+  });
+  const [hoverMenuItem, setHoverMenuItem] = useState<"copy" | "paste" | null>(null);
 
   // 初始化 xterm 终端
   useEffect(() => {
@@ -110,6 +116,16 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
       wsRef.current.send(data);
     });
 
+    // 自定义按键处理：拦截 Ctrl+V，改为触发浏览器原生粘贴
+    const keyHandler = (ev: KeyboardEvent): boolean => {
+      if ((ev.ctrlKey || ev.metaKey) && (ev.key === "v" || ev.key === "V")) {
+        // 让浏览器处理 Ctrl+V 粘贴，避免发送 ^V 到容器
+        return false;
+      }
+      return true;
+    };
+    term.attachCustomKeyEventHandler(keyHandler);
+
     return () => {
       disposable.dispose();
     };
@@ -163,25 +179,173 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
     flex: 1,
     minHeight: 0,
     margin: 0,
-    padding: 8,
+    padding: 0,
     backgroundColor: "#020617",
     display: "flex",
   };
 
+  const handleContextMenu: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    e.preventDefault();
+    const menuWidth = 160;
+    const menuHeight = 80;
+    let x = e.clientX;
+    let y = e.clientY;
+    const vw = window.innerWidth || document.documentElement.clientWidth;
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    if (x + menuWidth > vw) x = Math.max(0, vw - menuWidth - 4);
+    if (y + menuHeight > vh) y = Math.max(0, vh - menuHeight - 4);
+    setContextMenu({
+      x,
+      y,
+      visible: true,
+    });
+  };
+
+  const hideContextMenu = () => {
+    setContextMenu((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+  };
+
+  const handleCopySelection = async () => {
+    const term = termRef.current;
+    if (!term) return;
+    const text = term.getSelection();
+    if (!text) {
+      hideContextMenu();
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand && document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+    } finally {
+      hideContextMenu();
+    }
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      let text = "";
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        text = await navigator.clipboard.readText();
+      }
+      if (!text) {
+        termRef.current?.writeln("\r\n[粘贴失败：剪贴板为空或浏览器未允许访问，请使用 Ctrl+V 粘贴]");
+        hideContextMenu();
+        return;
+      }
+      // 去掉复制时可能带上的换行/空白，避免将独立的换行当作多条命令执行
+      text = text.replace(/\r?\n/g, " ").trim();
+      if (!text) {
+        hideContextMenu();
+        return;
+      }
+      const term = termRef.current;
+      if (term) {
+        term.focus();
+        // 使用 xterm 的 paste：本地立即回显，并通过 onData 管道转发到 WebSocket
+        term.paste(text);
+      }
+    } catch {
+      termRef.current?.writeln("\r\n[粘贴失败：浏览器拒绝访问剪贴板，请使用 Ctrl+V 粘贴]");
+    } finally {
+      hideContextMenu();
+    }
+  };
+
   const inner = (
     <div style={boxStyle} onClick={(e) => e.stopPropagation()}>
-        <div style={headerStyle}>
-          <span>
-            Shell: {namespace}/{podName} {connected ? "· 已连接" : "· 连接中…"}
-          </span>
-        </div>
-        <div style={terminalStyle} onClick={() => termRef.current?.focus()}>
-          <div
-            ref={containerRef}
-            style={{ flex: 1, minHeight: 0, width: "100%", height: "100%" }}
-          />
-        </div>
+      <div style={headerStyle}>
+        <span>
+          Shell: {namespace}/{podName} {connected ? "· 已连接" : "· 连接中…"}
+        </span>
       </div>
+      <div
+        style={terminalStyle}
+        onClick={() => termRef.current?.focus()}
+        onContextMenu={handleContextMenu}
+      >
+        <div
+          ref={containerRef}
+          style={{ flex: 1, minHeight: 0, width: "100%", height: "100%" }}
+        />
+      </div>
+      {contextMenu.visible && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1100,
+          }}
+          onClick={hideContextMenu}
+        >
+          <div
+            style={{
+              position: "fixed",
+              top: contextMenu.y,
+              left: contextMenu.x,
+              backgroundColor: "#020617",
+              border: "1px solid #1e293b",
+              borderRadius: 6,
+              boxShadow: "0 8px 20px rgba(0,0,0,0.6)",
+              padding: 4,
+              minWidth: 120,
+              zIndex: 1101,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={handleCopySelection}
+              onMouseEnter={() => setHoverMenuItem("copy")}
+              onMouseLeave={() => setHoverMenuItem((v) => (v === "copy" ? null : v))}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "6px 10px",
+                border: "none",
+                background: hoverMenuItem === "copy" ? "#1e293b" : "transparent",
+                color: "#e5e7eb",
+                fontSize: 13,
+                textAlign: "left",
+                cursor: "pointer",
+              }}
+            >
+              复制
+            </button>
+            <button
+              type="button"
+              onClick={handlePasteFromClipboard}
+              onMouseEnter={() => setHoverMenuItem("paste")}
+              onMouseLeave={() => setHoverMenuItem((v) => (v === "paste" ? null : v))}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "6px 10px",
+                border: "none",
+                background: hoverMenuItem === "paste" ? "#1e293b" : "transparent",
+                color: "#e5e7eb",
+                fontSize: 13,
+                textAlign: "left",
+                cursor: "pointer",
+              }}
+            >
+              粘贴
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 
   if (inline) return inner;
