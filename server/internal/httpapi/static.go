@@ -23,7 +23,12 @@ func registerStaticFrontend(r *gin.Engine, distDir string) {
 
 	// Serve assets and any static files under dist.
 	r.StaticFS("/assets", http.Dir(filepath.Join(distDir, "assets")))
+	// favicon 相关静态文件：显式暴露，避免被 SPA fallback 捕获成 index.html
 	r.StaticFile("/favicon.ico", filepath.Join(distDir, "favicon.ico"))
+	r.StaticFile("/favicon.svg", filepath.Join(distDir, "favicon.svg"))
+	r.StaticFile("/favicon.png", filepath.Join(distDir, "favicon.png"))
+	r.StaticFile("/favicon-32x32.png", filepath.Join(distDir, "favicon-32x32.png"))
+	r.StaticFile("/favicon-16x16.png", filepath.Join(distDir, "favicon-16x16.png"))
 
 	indexPath := filepath.Join(distDir, "index.html")
 

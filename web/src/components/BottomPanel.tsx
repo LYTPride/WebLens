@@ -227,6 +227,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   container={tab.container}
                   containers={tab.containers}
                   onClose={() => onCloseTab(tab.id)}
+                  isActive={activeTabId === tab.id}
                 />
               ) : (
                 <PodYamlEditTab
@@ -234,6 +235,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   namespace={tab.namespace}
                   podName={tab.pod}
                   onClose={() => onCloseTab(tab.id)}
+                  isActive={activeTabId === tab.id}
                 />
               )}
             </div>

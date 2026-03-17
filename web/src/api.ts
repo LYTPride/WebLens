@@ -32,6 +32,37 @@ export interface Pod {
   };
 }
 
+export interface K8sEvent {
+  metadata: {
+    uid?: string;
+    name?: string;
+    namespace?: string;
+    creationTimestamp?: string;
+  };
+  type?: string;
+  reason?: string;
+  message?: string;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
+  count?: number;
+  source?: {
+    component?: string;
+    host?: string;
+  };
+}
+
+export interface PodDescribe {
+  pod: Pod;
+  events: K8sEvent[];
+}
+
+export interface ClusterCombo {
+  id: string;
+  clusterId: string;
+  namespace: string;
+  alias?: string;
+}
+
 /** 从 Pod 取容器名列表（用于 Shell/Logs 子菜单），优先 spec.containers，否则 status.containerStatuses */
 export function getPodContainerNames(pod: Pod): string[] {
   const fromSpec = pod.spec?.containers?.map((c) => c.name) ?? [];
@@ -57,6 +88,49 @@ export async function fetchClusters() {
 export async function reloadClustersFromBackend() {
   const res = await api.post<{ items: ClusterSummary[] }>("/api/clusters/reload");
   return res.data.items;
+}
+
+/** 获取所有预设的集群组合（clusterId + namespace） */
+export async function fetchClusterCombos(): Promise<ClusterCombo[]> {
+  const res = await api.get<{ items: ClusterCombo[] }>("/api/cluster-combos");
+  return res.data.items;
+}
+
+/** 新增或更新一个集群组合 */
+export async function addClusterCombo(
+  clusterId: string,
+  namespace: string,
+  alias: string,
+): Promise<ClusterCombo[]> {
+  const res = await api.post<{ items: ClusterCombo[] }>("/api/cluster-combos", {
+    clusterId,
+    namespace,
+    alias,
+  });
+  return res.data.items;
+}
+
+/** 更新组合别名 */
+export async function updateClusterComboAlias(id: string, alias: string): Promise<ClusterCombo[]> {
+  const res = await api.put<{ items: ClusterCombo[] }>(`/api/cluster-combos/${encodeURIComponent(id)}`, {
+    alias,
+  });
+  return res.data.items;
+}
+
+/** 删除一个组合 */
+export async function deleteClusterComboApi(id: string): Promise<ClusterCombo[]> {
+  const res = await api.delete<{ items: ClusterCombo[] }>(`/api/cluster-combos/${encodeURIComponent(id)}`);
+  return res.data.items;
+}
+
+/** 测试组合可用性（返回 ok + 可选错误信息） */
+export async function testClusterCombo(id: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await api.post<{ ok: boolean; error?: string }>(
+    `/api/cluster-combos/${encodeURIComponent(id)}/test`,
+    {},
+  );
+  return res.data;
 }
 
 /** 获取平台配置（当前 kubeconfig 目录） */
@@ -89,12 +163,163 @@ export async function fetchPods(clusterId: string, namespace?: string) {
   return res.data.items;
 }
 
+export type PodWatchEventType = "ADDED" | "MODIFIED" | "DELETED" | "ERROR";
+
+export interface PodWatchEvent {
+  type: PodWatchEventType;
+  object: Pod;
+}
+
+export interface ResourceWatchEvent<T = any> {
+  type: PodWatchEventType;
+  object: T;
+}
+
+/**
+ * 使用后端封装的 Kubernetes Watch API 做 Pod 实时变更监听。
+ * 基于 fetch + ReadableStream 逐行读取 JSON 事件。
+ */
+export function watchPods(
+  clusterId: string,
+  namespace: string | undefined,
+  opts: {
+    onEvent: (ev: PodWatchEvent) => void;
+    onError?: (err: Error) => void;
+  },
+): () => void {
+  const ac = new AbortController();
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const url = new URL(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/watch`,
+    base,
+  );
+  if (namespace && namespace !== "") {
+    url.searchParams.set("namespace", namespace);
+  }
+
+  fetch(url.toString(), { signal: ac.signal })
+    .then(async (res) => {
+      if (!res.ok) {
+        throw new Error(res.statusText || `HTTP ${res.status}`);
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        // 按行分割，每行一个 JSON 事件
+        while ((idx = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          try {
+            const ev = JSON.parse(line) as PodWatchEvent;
+            if (ev && ev.object && ev.object.metadata) {
+              opts.onEvent(ev);
+            }
+          } catch (e) {
+            // 单条事件解析失败不影响后续
+            // eslint-disable-next-line no-console
+            console.warn("Failed to parse pods watch event:", e);
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err?.name === "AbortError") return;
+      opts.onError?.(err);
+    });
+
+  return () => ac.abort();
+}
+
+/**
+ * 通用资源 Watch：基于 `/api/clusters/:id/:resourcePath/watch` 的 JSON 行流。
+ * 用于 Deployments / StatefulSets / ... 等列表。
+ */
+export function watchResourceList<T = any>(
+  clusterId: string,
+  kind: ResourceKind,
+  namespace: string | undefined,
+  opts: {
+    onEvent: (ev: ResourceWatchEvent<T>) => void;
+    onError?: (err: Error) => void;
+  },
+): () => void {
+  const ac = new AbortController();
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const path = resourcePath(kind);
+  const url = new URL(
+    `/api/clusters/${encodeURIComponent(clusterId)}/${path}/watch`,
+    base,
+  );
+  if (namespace && namespace !== "") {
+    url.searchParams.set("namespace", namespace);
+  }
+
+  fetch(url.toString(), { signal: ac.signal })
+    .then(async (res) => {
+      if (!res.ok) {
+        throw new Error(res.statusText || `HTTP ${res.status}`);
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          try {
+            const ev = JSON.parse(line) as ResourceWatchEvent<T>;
+            if (ev && ev.object) {
+              opts.onEvent(ev);
+            }
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.warn("Failed to parse resource watch event:", e);
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err?.name === "AbortError") return;
+      opts.onError?.(err);
+    });
+
+  return () => ac.abort();
+}
+
+/** 获取 Pod Describe 数据（Pod + Events） */
+export async function fetchPodDescribe(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+): Promise<PodDescribe> {
+  const res = await api.get<PodDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/describe`,
+  );
+  return res.data;
+}
+
 export async function fetchPodLogs(
   clusterId: string,
   namespace: string,
   pod: string,
   container?: string,
   follow = false,
+  previous = false,
+  timestamps = false,
+  sinceTime?: string,
 ) {
   const res = await api.get<string>(
     `/api/clusters/${encodeURIComponent(
@@ -104,6 +329,9 @@ export async function fetchPodLogs(
       params: {
         container,
         follow,
+        previous,
+        timestamps,
+        ...(sinceTime ? { sinceTime } : {}),
       },
       responseType: "text",
     },
@@ -121,6 +349,9 @@ export function streamPodLogs(
   opts: {
     container?: string;
     tailLines?: number;
+    previous?: boolean;
+    timestamps?: boolean;
+    sinceTime?: string;
     onChunk: (text: string) => void;
     onError?: (err: Error) => void;
   },
@@ -134,6 +365,9 @@ export function streamPodLogs(
   url.searchParams.set("follow", "true");
   if (opts.container) url.searchParams.set("container", opts.container);
   if (opts.tailLines != null) url.searchParams.set("tailLines", String(opts.tailLines));
+  if (opts.previous) url.searchParams.set("previous", "true");
+  if (opts.timestamps) url.searchParams.set("timestamps", "true");
+   if (opts.sinceTime) url.searchParams.set("sinceTime", opts.sinceTime);
 
   fetch(url.toString(), { signal: ac.signal })
     .then(async (res) => {
