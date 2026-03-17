@@ -1460,18 +1460,22 @@ export const App: React.FC = () => {
             onClick={() => setSidebarCollapsed((v) => !v)}
             title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
             style={{
-              width: 20,
-              minWidth: 20,
+              width: 24,
+              minWidth: 24,
+              height: 64,
+              margin: "auto 0",
               border: "none",
               outline: "none",
               backgroundColor: "#020617",
               borderRight: "1px solid #1e293b",
-              color: "#64748b",
+              color: "#e5e7eb",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 10,
+              fontSize: 11,
+              borderRadius: 999,
+              boxShadow: "0 0 0 1px rgba(15,23,42,0.8)",
             }}
           >
             {sidebarCollapsed ? "▶" : "◀"}

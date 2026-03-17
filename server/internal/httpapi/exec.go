@@ -77,13 +77,23 @@ func registerExecRoutes(r *gin.Engine, reg *cluster.Registry) {
 		pipeR, pipeW := io.Pipe()
 		defer pipeW.Close()
 
+		// 终端大小：为避免 shell 认为列宽过小导致长命令/历史行频繁回到行首覆盖，
+		// 这里提供一个固定的、略大的 TerminalSizeQueue，至少让容器侧认为有足够宽度。
+		sizeQueue := &fixedSizeQueue{
+			size: remotecommand.TerminalSize{
+				Width:  200,
+				Height: 40,
+			},
+		}
+
 		go func() {
 			defer pipeR.Close()
 			_ = exec.StreamWithContext(c.Request.Context(), remotecommand.StreamOptions{
-				Stdin:  pipeR,
-				Stdout: &wsWriter{conn: conn},
-				Stderr: &wsWriter{conn: conn},
-				Tty:    true,
+				Stdin:             pipeR,
+				Stdout:            &wsWriter{conn: conn},
+				Stderr:            &wsWriter{conn: conn},
+				Tty:               true,
+				TerminalSizeQueue: sizeQueue,
 			})
 		}()
 
@@ -107,4 +117,19 @@ func (w *wsWriter) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// fixedSizeQueue implements remotecommand.TerminalSizeQueue with a single fixed size.
+// 这里只需要在会话开始时给容器一个相对宽裕的终端尺寸，后续不再动态调整。
+type fixedSizeQueue struct {
+	size remotecommand.TerminalSize
+	sent bool
+}
+
+func (q *fixedSizeQueue) Next() *remotecommand.TerminalSize {
+	if q.sent {
+		return nil
+	}
+	q.sent = true
+	return &q.size
 }
