@@ -50,6 +50,18 @@ export interface Pod {
   healthScore?: number;
 }
 
+export interface ContainerFileEntry {
+  name: string;
+  type: "file" | "dir";
+  /** bytes; -1 表示未知 */
+  size: number;
+}
+
+export interface ListContainerFilesResponse {
+  path: string;
+  items: ContainerFileEntry[];
+}
+
 export interface K8sEvent {
   metadata: {
     uid?: string;
@@ -179,6 +191,106 @@ export async function fetchPods(clusterId: string, namespace?: string) {
     { params: namespace ? { namespace } : {} },
   );
   return res.data.items;
+}
+
+export async function listContainerFiles(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+  container: string,
+  path: string,
+): Promise<ListContainerFilesResponse> {
+  const res = await api.get<ListContainerFilesResponse>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/files`,
+    {
+      params: {
+        container,
+        path,
+      },
+    },
+  );
+  return res.data;
+}
+
+export async function mkdirInContainer(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+  container: string,
+  path: string,
+): Promise<void> {
+  await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/files/mkdir`,
+    { path },
+    { params: { container } },
+  );
+}
+
+export async function renameInContainer(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+  container: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/files/rename`,
+    { from, to },
+    { params: { container } },
+  );
+}
+
+export async function deleteInContainer(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+  container: string,
+  paths: string[],
+): Promise<void> {
+  await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/files/delete`,
+    { paths },
+    { params: { container } },
+  );
+}
+
+export function downloadContainerFilesUrl(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+  container: string,
+  paths: string[],
+): string {
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const url = new URL(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/files/download`,
+    base,
+  );
+  url.searchParams.set("container", container);
+  paths.forEach((p) => url.searchParams.append("path", p));
+  return url.toString();
+}
+
+export async function uploadContainerFile(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+  container: string,
+  dstPath: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.set("path", dstPath);
+  form.set("file", file);
+  await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/files/upload`,
+    form,
+    {
+      params: { container },
+      headers: { "Content-Type": "multipart/form-data" },
+    },
+  );
 }
 
 export type PodWatchEventType = "ADDED" | "MODIFIED" | "DELETED" | "ERROR";

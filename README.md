@@ -67,10 +67,30 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
   - 前端：
     - 在 Pods 列表三点菜单中选择 **Shell**，会在底部多标签面板中打开终端标签（支持多 Pod / 多容器并存切换）。
     - 终端使用 xterm 渲染，自动适配窗口大小，命令行在到达窗口右侧后自动换行，不会覆盖 prompt。
+    - 终端标题栏提供 **重连** 按钮：无论当前是否已连接，点击都会立刻打断当前连接并重新建立会话；不会清空历史输出，新会话的 prompt 会出现在历史记录下方。
     - 支持鼠标右键菜单：
       - **复制**：复制当前选中文本到剪贴板。
       - **粘贴**：尝试通过 Clipboard API 读取剪贴板并将内容注入到终端；在浏览器限制 Clipboard API 时，会在终端内提示「请使用 Ctrl+V 粘贴」。
     - 支持键盘 **Ctrl+V**：在终端窗口中不会发送 `^V` 控制字符，而是触发浏览器原生粘贴行为，将剪贴板内容直接注入到 Shell。
+
+- **Shell + 文件传输双栏工作区（第一版）**
+  - 位置：底部面板的 Shell 标签页内，左侧为 Shell 区，右侧为文件传输窗口。
+  - 默认：文件窗口 **收起** 为窄侧边栏（仅显示一个向左箭头），展开后 Shell 区自动变窄。
+  - 支持：中间分隔条拖拽调整宽度（每个 Shell tab 独立记忆展开状态/宽度/当前路径）。
+  - 文件传输能力（基于容器 exec 执行命令实现）：
+    - 路径面包屑点击切换目录、手动输入路径并进入
+    - 上一级、刷新
+    - 多选：下载（打包为 tar）、删除
+    - 单选：重命名
+    - 新建文件夹、上传文件到当前目录
+  - 后端接口（均需提供 cluster/namespace/pod/container，上下文与 Shell tab 绑定）：
+    - 列目录：`GET /api/clusters/:id/pods/:namespace/:pod/files?container=xxx&path=/path`
+    - 新建文件夹：`POST /api/clusters/:id/pods/:namespace/:pod/files/mkdir?container=xxx`（JSON: `{path}`）
+    - 重命名：`POST /api/clusters/:id/pods/:namespace/:pod/files/rename?container=xxx`（JSON: `{from,to}`）
+    - 删除：`POST /api/clusters/:id/pods/:namespace/:pod/files/delete?container=xxx`（JSON: `{paths:[]}`）
+    - 下载：`GET /api/clusters/:id/pods/:namespace/:pod/files/download?container=xxx&path=/a&path=/b`（返回 `application/x-tar`）
+    - 上传：`POST /api/clusters/:id/pods/:namespace/:pod/files/upload?container=xxx`（multipart: `path` + `file`）
+  - 注意：第一版依赖容器内 `/bin/sh`；下载依赖 `tar`，极简镜像缺失命令时会在界面显示错误提示。
 
 - **可选 Basic 鉴权**
   - 环境变量 `WEBLENS_AUTH_USER` 与 `WEBLENS_AUTH_PASSWORD` 同时设置时，对所有请求（除 `/healthz`）启用 HTTP Basic 鉴权。
