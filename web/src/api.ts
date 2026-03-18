@@ -18,18 +18,36 @@ export interface Pod {
   };
   status?: {
     phase?: string;
+    reason?: string;
     podIP?: string;
     hostIP?: string;
     containerStatuses?: Array<{
       name: string;
       restartCount: number;
       ready: boolean;
+      state?: {
+        waiting?: { reason?: string; message?: string };
+        terminated?: { reason?: string; message?: string };
+      };
+    }>;
+    initContainerStatuses?: Array<{
+      name: string;
+      restartCount: number;
+      ready: boolean;
+      state?: {
+        waiting?: { reason?: string; message?: string };
+        terminated?: { reason?: string; message?: string };
+      };
     }>;
   };
   spec?: {
     nodeName?: string;
     containers?: Array<{ name: string }>;
   };
+  // 后端计算得到的健康信息，仅用于前端标签展示与解释
+  healthLabel?: "健康" | "关注" | "警告" | "严重";
+  healthReasons?: string[];
+  healthScore?: number;
 }
 
 export interface K8sEvent {
