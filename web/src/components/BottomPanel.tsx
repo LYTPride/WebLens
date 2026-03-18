@@ -3,6 +3,7 @@ import { PodShell } from "./PodShell";
 import { LogsTab } from "./LogsTab";
 import { PodYamlEditTab } from "./PodYamlEditTab";
 import { podExecWsUrl } from "../api";
+import { FileManagerPanel } from "./FileManagerPanel";
 
 export interface PanelTab {
   id: string;
@@ -46,6 +47,34 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
   const [dragging, setDragging] = useState(false);
   const dragStartY = useRef(0);
   const dragStartRatio = useRef(0);
+
+  // Shell 工作区：右侧文件面板（按 tab 维度记忆展开状态/宽度/路径）
+  const [fileOpenByTab, setFileOpenByTab] = useState<Record<string, boolean>>({});
+  const [fileWidthByTab, setFileWidthByTab] = useState<Record<string, number>>({});
+  const [filePathByTab, setFilePathByTab] = useState<Record<string, string>>({});
+  const [fileDragging, setFileDragging] = useState(false);
+  const fileDragStartX = useRef(0);
+  const fileDragStartW = useRef(0);
+  const fileDragTabId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!fileDragging) return;
+    const onMove = (e: MouseEvent) => {
+      const id = fileDragTabId.current;
+      if (!id) return;
+      const delta = fileDragStartX.current - e.clientX; // 向左拖 => 面板更宽
+      let next = fileDragStartW.current + delta;
+      next = Math.max(280, Math.min(720, next));
+      setFileWidthByTab((prev) => ({ ...prev, [id]: next }));
+    };
+    const onUp = () => setFileDragging(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [fileDragging]);
 
   const handleDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -212,13 +241,123 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
               }}
             >
               {tab.type === "shell" ? (
-                <PodShell
-                  wsUrl={podExecWsUrl(tab.clusterId, tab.namespace, tab.pod, tab.container)}
-                  podName={tab.pod}
-                  namespace={tab.namespace}
-                  onClose={() => onCloseTab(tab.id)}
-                  inline
-                />
+                <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+                  <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
+                    <PodShell
+                      wsUrl={podExecWsUrl(tab.clusterId, tab.namespace, tab.pod, tab.container)}
+                      podName={tab.pod}
+                      namespace={tab.namespace}
+                      onClose={() => onCloseTab(tab.id)}
+                      inline
+                    />
+                  </div>
+
+                  {/* 右侧文件面板：默认收起为窄条 */}
+                  {fileOpenByTab[tab.id] ? (
+                    <>
+                      {/* 分隔拖拽条 */}
+                      <div
+                        role="presentation"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          fileDragTabId.current = tab.id;
+                          fileDragStartX.current = e.clientX;
+                          fileDragStartW.current = fileWidthByTab[tab.id] ?? 400;
+                          setFileDragging(true);
+                        }}
+                        title="拖拽调整 Shell / 文件窗口宽度"
+                        style={{
+                          width: 6,
+                          cursor: "col-resize",
+                          background: fileDragging ? "#334155" : "transparent",
+                          borderLeft: "1px solid rgba(30,41,59,0.6)",
+                          borderRight: "1px solid rgba(30,41,59,0.6)",
+                        }}
+                      />
+                      <div
+                        style={{
+                          width: fileWidthByTab[tab.id] ?? 400,
+                          minWidth: 280,
+                          maxWidth: 720,
+                          display: "flex",
+                          flexDirection: "column",
+                          backgroundColor: "#020617",
+                          borderLeft: "1px solid #1e293b",
+                        }}
+                      >
+                        <div
+                          style={{
+                            padding: "10px 12px",
+                            borderBottom: "1px solid #1e293b",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            backgroundColor: "#020617",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>文件传输</div>
+                          <button
+                            type="button"
+                            onClick={() => setFileOpenByTab((prev) => ({ ...prev, [tab.id]: false }))}
+                            title="收起文件窗口"
+                            style={{
+                              padding: "2px 6px",
+                              borderRadius: 6,
+                              border: "1px solid #334155",
+                              backgroundColor: "#1e293b",
+                              color: "#e2e8f0",
+                              cursor: "pointer",
+                              fontSize: 12,
+                            }}
+                          >
+                            ▶
+                          </button>
+                        </div>
+                        <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+                          <FileManagerPanel
+                            clusterId={tab.clusterId}
+                            namespace={tab.namespace}
+                            pod={tab.pod}
+                            container={tab.container}
+                            path={filePathByTab[tab.id] ?? "/"}
+                            onPathChange={(p) => setFilePathByTab((prev) => ({ ...prev, [tab.id]: p }))}
+                          />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div
+                      style={{
+                        width: 24,
+                        minWidth: 24,
+                        borderLeft: "1px solid #1e293b",
+                        backgroundColor: "#020617",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setFileOpenByTab((prev) => ({ ...prev, [tab.id]: true }))}
+                        title="展开文件窗口"
+                        style={{
+                          width: 20,
+                          height: 48,
+                          borderRadius: 10,
+                          border: "1px solid #334155",
+                          backgroundColor: "#1e293b",
+                          color: "#e2e8f0",
+                          cursor: "pointer",
+                          fontSize: 12,
+                        }}
+                      >
+                        ◀
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : tab.type === "logs" ? (
                 <LogsTab
                   clusterId={tab.clusterId}

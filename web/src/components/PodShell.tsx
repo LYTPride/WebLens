@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
@@ -18,6 +18,8 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const manualCloseRef = useRef(false);
+  const [reconnectSeq, setReconnectSeq] = useState(0);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; visible: boolean }>({
     x: 0,
     y: 0,
@@ -73,19 +75,30 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
     };
   }, []);
 
-  // 建立 WebSocket 与容器内 /bin/sh 的双向连接
+  // 建立 WebSocket 与容器内 /bin/sh 的双向连接（支持手动重连，不清空历史输出）
   useEffect(() => {
+    manualCloseRef.current = false;
+    setConnected(false);
+
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
     ws.binaryType = "arraybuffer";
 
-    ws.onopen = () => setConnected(true);
+    ws.onopen = () => {
+      setConnected(true);
+      termRef.current?.writeln("\r\n[已重连，新的会话已开始]");
+    };
     ws.onclose = () => {
+      const manual = manualCloseRef.current;
       setConnected(false);
-      termRef.current?.writeln("\r\n[连接已关闭]");
+      if (!manual) {
+        termRef.current?.writeln("\r\n[连接已关闭]");
+      }
     };
     ws.onerror = () => {
-      termRef.current?.writeln("\r\n[连接错误]");
+      if (!manualCloseRef.current) {
+        termRef.current?.writeln("\r\n[连接错误]");
+      }
     };
     ws.onmessage = (ev) => {
       const data = ev.data;
@@ -101,10 +114,35 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
     };
 
     return () => {
-      ws.close();
-      wsRef.current = null;
+      manualCloseRef.current = true;
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
     };
-  }, [wsUrl]);
+  }, [wsUrl, reconnectSeq]);
+
+  const reconnectNow = useCallback(() => {
+    // 先在历史输出末尾插入分隔，让新 prompt 出现在下方
+    termRef.current?.writeln("\r\n────────── [手动重连] ──────────");
+    // 立刻打断当前连接
+    const ws = wsRef.current;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      manualCloseRef.current = true;
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+      wsRef.current = null;
+    }
+    // 触发重新连接（复用同一个 xterm 实例，不清空输出）
+    setReconnectSeq((v) => v + 1);
+  }, []);
 
   // 将用户在终端中的键盘输入直接转发到 WebSocket，支持 Tab 补全、方向键历史等
   useEffect(() => {
@@ -266,8 +304,26 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
   const inner = (
     <div style={boxStyle} onClick={(e) => e.stopPropagation()}>
       <div style={headerStyle}>
-        <span>
-          Shell: {namespace}/{podName} {connected ? "· 已连接" : "· 连接中…"}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+          <span>
+            Shell: {namespace}/{podName} {connected ? "· 已连接" : "· 连接中…"}
+          </span>
+          <button
+            type="button"
+            onClick={reconnectNow}
+            style={{
+              padding: "4px 8px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#1e293b",
+              color: "#e2e8f0",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+            title="立刻断开并重新建立连接（不清空历史输出）"
+          >
+            重连
+          </button>
         </span>
       </div>
       <div
