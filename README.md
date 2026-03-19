@@ -73,16 +73,18 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
       - **粘贴**：尝试通过 Clipboard API 读取剪贴板并将内容注入到终端；在浏览器限制 Clipboard API 时，会在终端内提示「请使用 Ctrl+V 粘贴」。
     - 支持键盘 **Ctrl+V**：在终端窗口中不会发送 `^V` 控制字符，而是触发浏览器原生粘贴行为，将剪贴板内容直接注入到 Shell。
 
-- **Shell + 文件传输双栏工作区（第一版）**
-  - 位置：底部面板的 Shell 标签页内，左侧为 Shell 区，右侧为文件传输窗口。
+- **Shell + 文件管理双栏工作区（第一版）**
+  - 位置：底部面板的 Shell 标签页内，左侧为 Shell 区，右侧为文件管理窗口。
   - 默认：文件窗口 **收起** 为窄侧边栏（仅显示一个向左箭头），展开后 Shell 区自动变窄。
   - 支持：中间分隔条拖拽调整宽度（每个 Shell tab 独立记忆展开状态/宽度/当前路径）。
-  - 文件传输能力（基于容器 exec 执行命令实现）：
-    - 路径面包屑点击切换目录、手动输入路径并进入
+  - 文件管理能力（基于容器 exec 执行命令实现）：
+    - 路径面包屑点击切换目录（分隔符使用 `<`，目录名蓝色下划线提示可点击）
+    - 手动输入路径并进入；当路径不存在时显示红色提示语“路径不存在，请检查”
     - 上一级、刷新
     - 多选：下载（打包为 tar）、删除
     - 单选：重命名
     - 新建文件夹、上传文件到当前目录
+    - 未勾选时下载/删除/重命名按钮会置灰不可点击（重命名仅在单选时可用）
   - 后端接口（均需提供 cluster/namespace/pod/container，上下文与 Shell tab 绑定）：
     - 列目录：`GET /api/clusters/:id/pods/:namespace/:pod/files?container=xxx&path=/path`
     - 新建文件夹：`POST /api/clusters/:id/pods/:namespace/:pod/files/mkdir?container=xxx`（JSON: `{path}`）
@@ -90,7 +92,7 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
     - 删除：`POST /api/clusters/:id/pods/:namespace/:pod/files/delete?container=xxx`（JSON: `{paths:[]}`）
     - 下载：`GET /api/clusters/:id/pods/:namespace/:pod/files/download?container=xxx&path=/a&path=/b`（返回 `application/x-tar`）
     - 上传：`POST /api/clusters/:id/pods/:namespace/:pod/files/upload?container=xxx`（multipart: `path` + `file`）
-  - 注意：第一版依赖容器内 `/bin/sh`；下载依赖 `tar`，极简镜像缺失命令时会在界面显示错误提示。
+  - 注意：第一版依赖容器内 `/bin/sh`；下载依赖 `tar`，极简镜像缺失命令时会在界面显示错误提示。为提高跨镜像兼容性，凡需要 Go 解析的 shell 输出统一使用 `printf`（不依赖 `echo` 的转义行为）。
 
 - **可选 Basic 鉴权**
   - 环境变量 `WEBLENS_AUTH_USER` 与 `WEBLENS_AUTH_PASSWORD` 同时设置时，对所有请求（除 `/healthz`）启用 HTTP Basic 鉴权。
@@ -126,6 +128,15 @@ WebLens 是一个部署在 Linux 服务器上的 **Web 版 Kubernetes 控制台*
 ---
 
 ## 当前前端交互特性（2026-03）
+
+- **容器兼容性原则（很重要）**
+  - WebLens 的一部分能力（例如文件管理）底层依赖 `pod exec` 在容器内执行 `/bin/sh -c ...` 并将输出返回给 Go 再解析展示。
+  - **原则：所有需要被 Go 解析的 shell 输出，禁止依赖 `echo` 的转义行为**（不同镜像/不同 `/bin/sh` 实现对 `echo '\t'`、`echo '\n'` 的解释并不一致，可能导致“实际有内容但解析为空”的问题）。
+  - 统一约定：
+    - 使用 **`printf`** 输出（避免 `echo` 差异）
+    - 字段之间使用**明确分隔符**（当前约定为真实 TAB `\t`）
+    - 每条记录使用**明确换行**（`\n`）
+    - 失败时输出走 **stderr** + 返回**非 0**，Go 侧记录日志并将错误返回给前端（避免静默吞掉导致前端“空目录”）
 
 - **Pods 列表增强**
   - Name 列右侧提供「复制到剪贴板」按钮，方便在终端 / IM 中粘贴 Pod 名称。

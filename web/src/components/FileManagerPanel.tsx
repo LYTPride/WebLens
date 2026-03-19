@@ -60,6 +60,8 @@ export const FileManagerPanel: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // 仅用于区分：用户点击“进入”触发的目录跳转失败，需要显示更友好的固定提示语
+  const manualEnterPendingRef = useRef(false);
 
   useEffect(() => {
     const init = path ?? defaultPath;
@@ -80,8 +82,13 @@ export const FileManagerPanel: React.FC<Props> = ({
       setItems(res.items || []);
       setSelected({});
     } catch (e: any) {
-      setError(e?.response?.data?.error ?? e?.message ?? "加载目录失败");
+      if (manualEnterPendingRef.current) {
+        setError("路径不存在，请检查");
+      } else {
+        setError(e?.response?.data?.error ?? e?.message ?? "加载目录失败");
+      }
     } finally {
+      manualEnterPendingRef.current = false;
       setLoading(false);
     }
   }, [clusterId, namespace, pod, container, currentPath]);
@@ -200,26 +207,34 @@ export const FileManagerPanel: React.FC<Props> = ({
       >
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 8 }}>
           {breadcrumbs.map((b, idx) => (
-            <button
-              key={b.path}
-              type="button"
-              onClick={() => {
-                setCurrentPath(b.path);
-                setPathInput(b.path);
-              }}
-              style={{
-                border: "none",
-                background: "transparent",
-                color: idx === breadcrumbs.length - 1 ? "#e2e8f0" : "#94a3b8",
-                cursor: "pointer",
-                fontSize: 12,
-                padding: 0,
-              }}
-              title={b.path}
-            >
-              {b.name}
-              {idx < breadcrumbs.length - 1 ? " /" : ""}
-            </button>
+            <React.Fragment key={b.path}>
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPath(b.path);
+                  setPathInput(b.path);
+                }}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#38bdf8",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  padding: 0,
+                  textDecorationLine: "underline",
+                  textUnderlineOffset: 3,
+                  fontWeight: 600,
+                }}
+                title={b.path}
+              >
+                {b.name}
+              </button>
+              {idx < breadcrumbs.length - 1 && (
+                <span style={{ color: "#64748b", fontSize: 12, fontWeight: 700 }} aria-hidden>
+                  {"<"}
+                </span>
+              )}
+            </React.Fragment>
           ))}
         </div>
 
@@ -242,6 +257,7 @@ export const FileManagerPanel: React.FC<Props> = ({
             type="button"
             onClick={() => {
               const next = pathInput.trim() || "/";
+              manualEnterPendingRef.current = true;
               setCurrentPath(next);
             }}
             style={{
@@ -260,29 +276,47 @@ export const FileManagerPanel: React.FC<Props> = ({
       </div>
 
       <div style={{ padding: "8px 12px", display: "flex", flexWrap: "wrap", gap: 6, borderBottom: "1px solid #0b1220" }}>
-        <button type="button" onClick={() => { const up = parentPath(currentPath); setCurrentPath(up); setPathInput(up); }} style={toolBtn}>
+        <button
+          type="button"
+          onClick={() => {
+            const up = parentPath(currentPath);
+            setCurrentPath(up);
+            setPathInput(up);
+          }}
+          style={toolBtnStyle(false)}
+        >
           ↑ 上一级
         </button>
-        <button type="button" onClick={refresh} style={toolBtn}>
+        <button type="button" onClick={refresh} style={toolBtnStyle(false)}>
           刷新
         </button>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          style={toolBtn}
+          style={toolBtnStyle(false)}
         >
           上传
         </button>
-        <button type="button" onClick={doDownload} style={toolBtn} disabled={selectedPaths.length === 0}>
+        <button
+          type="button"
+          onClick={doDownload}
+          style={toolBtnStyle(selectedPaths.length === 0)}
+          disabled={selectedPaths.length === 0}
+        >
           下载
         </button>
-        <button type="button" onClick={doDelete} style={toolBtn} disabled={selectedPaths.length === 0}>
+        <button
+          type="button"
+          onClick={doDelete}
+          style={toolBtnStyle(selectedPaths.length === 0)}
+          disabled={selectedPaths.length === 0}
+        >
           删除
         </button>
-        <button type="button" onClick={doRename} style={toolBtn} disabled={!canRename}>
+        <button type="button" onClick={doRename} style={toolBtnStyle(!canRename)} disabled={!canRename}>
           重命名
         </button>
-        <button type="button" onClick={doMkdir} style={toolBtn}>
+        <button type="button" onClick={doMkdir} style={toolBtnStyle(false)}>
           新建文件夹
         </button>
         <input
@@ -373,6 +407,14 @@ const toolBtn: React.CSSProperties = {
   cursor: "pointer",
   fontSize: 12,
 };
+
+const toolBtnStyle = (disabled: boolean): React.CSSProperties => ({
+  ...toolBtn,
+  cursor: disabled ? "not-allowed" : "pointer",
+  opacity: disabled ? 0.45 : 1,
+  backgroundColor: disabled ? "#0b1220" : toolBtn.backgroundColor,
+  color: disabled ? "#64748b" : toolBtn.color,
+});
 
 const th: React.CSSProperties = {
   textAlign: "left",

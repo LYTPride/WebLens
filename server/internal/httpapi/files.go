@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"path"
 	"strings"
@@ -55,15 +56,15 @@ func registerFileRoutes(r *gin.Engine, reg *cluster.Registry) {
 		safePath := strings.ReplaceAll(p, `'`, `'\''`)
 		cmd := fmt.Sprintf(
 			`DIR='%s'; `+
-				`cd "$DIR" 2>/dev/null || { echo "__ERR__\tfile\t-1"; exit 2; }; `+
+				`cd "$DIR" 2>/dev/null || { printf '__ERR__\tfile\t-1\n'; exit 2; }; `+
 				`ls -1Ap 2>/dev/null | while IFS= read -r n; do `+
 				`[ -z "$n" ] && continue; `+
 				`case "$n" in "."|".." ) continue;; esac; `+
 				`if [ "${n#*\/}" != "$n" ]; then `+ // endswith /
-				`echo "${n%%/}\tdir\t-1"; `+
+				`printf '%%s\tdir\t-1\n' "${n%%/}"; `+
 				`else `+
 				`sz=$( (stat -c %%s "$n" 2>/dev/null) || (wc -c < "$n" 2>/dev/null) || echo -1 ); `+
-				`echo "$n\tfile\t$sz"; `+
+				`printf '%%s\tfile\t%%s\n' "$n" "$sz"; `+
 				`fi; `+
 				`done`,
 			safePath,
@@ -371,20 +372,50 @@ func parseFileEntries(out string) []fileEntry {
 		if line == "" {
 			continue
 		}
+
 		parts := strings.Split(line, "\t")
 		if len(parts) < 3 {
+			// 兼容性调试：如果 stdout 不包含真实 TAB，前端会表现为“空目录”。
+			trunc := line
+			if len(trunc) > 200 {
+				trunc = trunc[:200] + "..."
+			}
+			log.Printf("[files] parseFileEntries skip: invalid field count=%d line=%q", len(parts), trunc)
 			continue
 		}
+		if len(parts) != 3 {
+			trunc := line
+			if len(trunc) > 200 {
+				trunc = trunc[:200] + "..."
+			}
+			log.Printf("[files] parseFileEntries warn: field count=%d line=%q (only first3 will be used)", len(parts), trunc)
+		}
+
 		name := parts[0]
 		typ := parts[1]
 		sizeStr := parts[2]
+
+		if typ != "dir" && typ != "file" {
+			trunc := line
+			if len(trunc) > 200 {
+				trunc = trunc[:200] + "..."
+			}
+			log.Printf("[files] parseFileEntries skip: invalid type=%q line=%q", typ, trunc)
+			continue
+		}
+
 		var size int64 = -1
 		if v, err := parseInt64(sizeStr); err == nil {
 			size = v
+		} else {
+			// size 解析失败通常不影响列出能力，只是大小未知
+			trunc := line
+			if len(trunc) > 200 {
+				trunc = trunc[:200] + "..."
+			}
+			log.Printf("[files] parseFileEntries warn: parse size failed line=%q", trunc)
 		}
-		if typ != "dir" && typ != "file" {
-			continue
-		}
+
 		items = append(items, fileEntry{Name: name, Type: typ, Size: size})
 	}
 	return items
