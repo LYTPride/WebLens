@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -41,6 +42,20 @@ var (
 	listTTL     = time.Second
 )
 
+// PodHealth 描述单个 Pod 的健康评分及标签（仅返回给前端做展示与解释）
+type PodHealth struct {
+	HealthLabel   string   `json:"healthLabel"`
+	HealthReasons []string `json:"healthReasons,omitempty"`
+	HealthScore   int      `json:"healthScore"`
+}
+
+// PodWithHealth 在原生 corev1.Pod 基础上附加健康信息。
+// 通过匿名字段保证现有前端字段路径不变，同时新增 health* 字段。
+type PodWithHealth struct {
+	corev1.Pod `json:",inline"`
+	PodHealth  `json:",inline"`
+}
+
 // Pod Describe 缓存：极短 TTL，用于吸收用户连续刷新 Describe 的请求，保护 apiserver
 type podDescribeCacheEntry struct {
 	ts   time.Time
@@ -75,6 +90,200 @@ func setListCache(key string, data interface{}) {
 	listCacheMu.Lock()
 	listCache[key] = listCacheEntry{ts: time.Now(), data: data}
 	listCacheMu.Unlock()
+}
+
+// computePodHealth 根据 Pod 当前状态计算 0~100 的健康分并映射为四档标签。
+// 第一版仅依赖现有 Pod 字段，不引入额外存储或跨轮次状态。
+func computePodHealth(p *corev1.Pod, now time.Time) PodHealth {
+	score := 100
+	var reasons []string
+
+	// 1. STATUS 扣分
+	phase := ""
+	if p.Status.Phase != "" {
+		phase = string(p.Status.Phase)
+	}
+	overallReason := p.Status.Reason
+
+	// 容器/Init 容器的 waiting/terminated reason，尽量贴近 kubectl get pods 的展示
+	var waitingReason string
+	var allStatuses []corev1.ContainerStatus
+	allStatuses = append(allStatuses, p.Status.ContainerStatuses...)
+	allStatuses = append(allStatuses, p.Status.InitContainerStatuses...)
+	for i := range allStatuses {
+		st := allStatuses[i].State
+		if st.Waiting != nil && st.Waiting.Reason != "" {
+			waitingReason = st.Waiting.Reason
+			break
+		}
+		if st.Terminated != nil && st.Terminated.Reason != "" {
+			waitingReason = st.Terminated.Reason
+			break
+		}
+	}
+
+	statusText := phase
+	if waitingReason != "" {
+		statusText = waitingReason
+	} else if overallReason != "" {
+		statusText = overallReason
+	}
+	if statusText == "" {
+		statusText = "-"
+	}
+
+	statusKey := strings.ToLower(statusText)
+	forceSevere := false
+	switch {
+	case statusKey == "running":
+		// Running => 0
+	case statusKey == "completed" || statusKey == "succeeded":
+		// Completed/Succeeded => 0
+	case statusKey == "pending":
+		score -= 20
+		reasons = append(reasons, "STATUS=Pending")
+	case statusKey == "containercreating":
+		score -= 10
+		reasons = append(reasons, "STATUS=ContainerCreating")
+	case statusKey == "terminating":
+		score -= 10
+		reasons = append(reasons, "STATUS=Terminating")
+	case statusKey == "crashloopbackoff":
+		score -= 60
+		reasons = append(reasons, "STATUS=CrashLoopBackOff")
+		forceSevere = true
+	case statusKey == "errimagepull":
+		score -= 70
+		reasons = append(reasons, "STATUS=ErrImagePull")
+		forceSevere = true
+	case statusKey == "imagepullbackoff":
+		score -= 70
+		reasons = append(reasons, "STATUS=ImagePullBackOff")
+		forceSevere = true
+	case statusKey == "error":
+		score -= 60
+		reasons = append(reasons, "STATUS=Error")
+		forceSevere = true
+	case statusKey == "unknown":
+		score -= 80
+		reasons = append(reasons, "STATUS=Unknown")
+		forceSevere = true
+	case strings.HasPrefix(statusKey, "init:crashloopbackoff"):
+		score -= 60
+		reasons = append(reasons, "STATUS=Init:CrashLoopBackOff")
+		forceSevere = true
+	case strings.HasPrefix(statusKey, "init:error"):
+		score -= 50
+		reasons = append(reasons, "STATUS=Init:Error")
+	default:
+		// 其他未知状态 => 20
+		if statusKey != "-" {
+			score -= 20
+			reasons = append(reasons, "STATUS="+statusText)
+		}
+	}
+
+	// 2. READY 扣分（Completed/Succeeded 的 Job 型 Pod 不再因为 READY 额外扣分）
+	totalContainers := len(p.Status.ContainerStatuses)
+	readyContainers := 0
+	for i := range p.Status.ContainerStatuses {
+		if p.Status.ContainerStatuses[i].Ready {
+			readyContainers++
+		}
+	}
+
+	isCompletedPhase := p.Status.Phase == corev1.PodSucceeded
+	if totalContainers > 0 && !isCompletedPhase {
+		switch {
+		case readyContainers == totalContainers:
+			// 全部 ready => 0
+		case readyContainers > 0:
+			score -= 20
+			reasons = append(reasons, "READY 部分未就绪")
+		default:
+			score -= 40
+			reasons = append(reasons, "READY=0/全部未就绪")
+		}
+	}
+
+	// 3. RESTARTS 扣分（所有容器 restartCount 之和）
+	restarts := 0
+	for i := range p.Status.ContainerStatuses {
+		restarts += int(p.Status.ContainerStatuses[i].RestartCount)
+	}
+	switch {
+	case restarts == 0:
+		// 0 => 0
+	case restarts >= 1 && restarts <= 5:
+		score -= 5
+		reasons = append(reasons, "RESTARTS="+itoa(restarts))
+	case restarts >= 6 && restarts <= 20:
+		score -= 15
+		reasons = append(reasons, "RESTARTS="+itoa(restarts)+"，存在重启")
+	case restarts >= 21 && restarts <= 100:
+		score -= 30
+		reasons = append(reasons, "RESTARTS="+itoa(restarts)+"，存在频繁重启")
+	case restarts > 100:
+		score -= 45
+		reasons = append(reasons, "RESTARTS="+itoa(restarts)+"，历史重启次数过高")
+	}
+
+	// 4. 长时间卡住额外扣分（Pending / ContainerCreating / Terminating / Init:*）
+	if !p.CreationTimestamp.IsZero() {
+		age := now.Sub(p.CreationTimestamp.Time)
+		lower := statusKey
+		if lower == "" {
+			lower = strings.ToLower(overallReason)
+		}
+		isStuckStatus :=
+			lower == "pending" ||
+				lower == "containercreating" ||
+				lower == "terminating" ||
+				strings.HasPrefix(lower, "init:")
+		if isStuckStatus {
+			if age >= 2*time.Minute && age < 10*time.Minute {
+				score -= 15
+				reasons = append(reasons, "Pod 处于 "+statusText+" 超过 2 分钟")
+			} else if age >= 10*time.Minute {
+				score -= 30
+				reasons = append(reasons, "Pod 处于 "+statusText+" 超过 10 分钟")
+			}
+		}
+	}
+
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+
+	label := "健康"
+	switch {
+	case score >= 90:
+		label = "健康"
+	case score >= 70:
+		label = "关注"
+	case score >= 40:
+		label = "警告"
+	default:
+		label = "严重"
+	}
+	// 硬性覆盖：关键故障状态在第一版直接视为“严重”，满足运维直觉与验收场景
+	if forceSevere {
+		label = "严重"
+	}
+
+	return PodHealth{
+		HealthLabel:   label,
+		HealthReasons: reasons,
+		HealthScore:   score,
+	}
+}
+
+// itoa 使用 fmt.Sprint 避免在该文件额外引入 strconv，保持依赖简单。
+func itoa(v int) string {
+	return fmt.Sprint(v)
 }
 
 // PodDescribeResponse 封装 Pod 及其相关 Events，用于前端做「Describe Pod」视图
@@ -262,8 +471,21 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 				}
 			}
 		}
-		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+
+		// 为每个 Pod 计算健康信息并返回扩展后的结构
+		now := time.Now()
+		withHealth := make([]PodWithHealth, 0, len(list.Items))
+		for i := range list.Items {
+			p := list.Items[i]
+			h := computePodHealth(&p, now)
+			withHealth = append(withHealth, PodWithHealth{
+				Pod:       p,
+				PodHealth: h,
+			})
+		}
+
+		setListCache(cacheKey, withHealth)
+		c.JSON(http.StatusOK, gin.H{"items": withHealth})
 	})
 
 	// Pods Watch：基于 Kubernetes Watch API 的实时变更流（用于前端 Resource Watch）

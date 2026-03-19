@@ -32,17 +32,38 @@ import copyIcon from "../assets/icon-copy.png";
 
 const ALL_NAMESPACES = "";
 
-const POD_COLUMN_KEYS = ["name", "namespace", "node", "age", "status", "restarts", "containers", "actions"] as const;
+const POD_COLUMN_KEYS = [
+  "name",
+  "namespace",
+  "node",
+  "age",
+  "health",
+  "status",
+  "restarts",
+  "containers",
+  "actions",
+] as const;
 const POD_COLUMN_DEFAULTS: Record<(typeof POD_COLUMN_KEYS)[number], number> = {
   name: 180,
   namespace: 120,
   node: 140,
   age: 90,
+  health: 100,
   status: 80,
   restarts: 70,
   containers: 70,
   actions: 80,
 };
+
+/** 计算 Pod 存活时间（秒），用于“长时间 Pending/ContainerCreating”等判定 */
+function getPodAgeSeconds(creationTimestamp?: string): number | null {
+  if (!creationTimestamp) return null;
+  const start = new Date(creationTimestamp).getTime();
+  const now = Date.now();
+  const sec = Math.floor((now - start) / 1000);
+  if (Number.isNaN(sec) || sec < 0) return null;
+  return sec;
+}
 
 /** 根据 creationTimestamp 计算并格式化为存活时间
  *  < 1 分钟：按秒显示（Xs）
@@ -798,6 +819,53 @@ export const App: React.FC = () => {
       }),
     [pods, nameFilter],
   );
+
+  // Pods 全局提示：只要存在任意非“健康”标签就提示
+  const hasNonHealthyPods = useMemo(
+    () =>
+      pods.some((p) => {
+        const label = p.healthLabel || "健康";
+        return label !== "健康";
+      }),
+    [pods],
+  );
+
+  /** 计算单个 Pod 的状态文案及重启次数（不再做行级异常标红） */
+  const getPodStatusInfo = (pod: Pod): { text: string; restarts: number } => {
+    const phase = pod.status?.phase || "-";
+    const overallReason = pod.status?.reason || "";
+    const containerStatuses = pod.status?.containerStatuses || [];
+    const initStatuses = (pod.status as any)?.initContainerStatuses || [];
+    const allStatuses: Array<any> = [...containerStatuses, ...initStatuses];
+
+    let waitingReason = "";
+    for (let i = 0; i < allStatuses.length; i += 1) {
+      const st = allStatuses[i]?.state;
+      const r = st?.waiting?.reason || st?.terminated?.reason;
+      if (r) {
+        waitingReason = r;
+        break;
+      }
+    }
+
+    let display = phase;
+    if (waitingReason) {
+      // 当容器等待/退出理由与 kubectl get pods 中类似（如 CrashLoopBackOff）时，优先显示该 reason
+      display = waitingReason;
+    } else if (overallReason) {
+      display = overallReason;
+    }
+    if (!display) display = "-";
+
+    const restarts =
+      containerStatuses.reduce((s, cs) => s + (typeof cs.restartCount === "number" ? cs.restartCount : 0), 0) || 0;
+
+    const ageSec = getPodAgeSeconds(pod.metadata.creationTimestamp) ?? 0;
+    const phaseLower = (phase || "").toLowerCase();
+    const reasonLower = (waitingReason || overallReason || "").toLowerCase();
+
+    return { text: display, restarts };
+  };
 
   const filteredResourceItems = useMemo(
     () =>
@@ -1725,6 +1793,25 @@ export const App: React.FC = () => {
                         正在根据新的集群与命名空间加载资源…
                       </span>
                     )}
+                    {!applyingSelection && currentView === "pods" && hasNonHealthyPods && (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          color: "#f87171",
+                          marginLeft: 12,
+                          fontWeight: 700,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
+                        }}
+                      >
+                        <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
+                          ⚠
+                        </span>
+                        当前范围内存在非“健康”状态的 Pod，请及时关注。
+                      </span>
+                    )}
                   </div>
                   <input
                     type="text"
@@ -1773,8 +1860,9 @@ export const App: React.FC = () => {
                     </colgroup>
                     <thead>
                       <tr>
-                        {(["Name", "Namespace", "Node", "存活时间", "Status", "Restarts", "容器数", "操作"] as const).map(
-                          (label, i) => {
+                        {(
+                          ["Name", "Namespace", "Node", "存活时间", "状态标签", "Status", "Restarts", "容器数", "操作"] as const
+                        ).map((label, i) => {
                             const key = POD_COLUMN_KEYS[i];
                             const w = podColumnWidths[key] ?? POD_COLUMN_DEFAULTS[key];
                             return (
@@ -1823,18 +1911,43 @@ export const App: React.FC = () => {
                     </thead>
                     <tbody>
                       {filteredPods.map((p) => {
-                        const status = p.status?.phase ?? "-";
+                        const { text: statusText, restarts } = getPodStatusInfo(p);
                         const node = p.spec?.nodeName ?? "-";
                         const age = formatPodAge(p.metadata.creationTimestamp);
-                        const restarts = p.status?.containerStatuses?.reduce((s, cs) => s + cs.restartCount, 0) ?? 0;
                         const containerCount = getPodContainerNames(p).length;
                         const menuKey = `${p.metadata.namespace}/${p.metadata.name}`;
                         const containers = getPodContainerNames(p);
                         const isMenuOpen = podMenuOpenKey === menuKey;
-                        const cellStyle: React.CSSProperties = { ...tdStyle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 0 };
+                        const baseCellStyle: React.CSSProperties = {
+                          ...tdStyle,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          maxWidth: 0,
+                        };
+                        const baseCellNoWrap: React.CSSProperties = baseCellStyle;
+
+                        const healthLabel = p.healthLabel || "健康";
+                        const reasonsText = (p.healthReasons || []).join("；");
+                        let healthBg = "rgba(22,163,74,0.15)";
+                        let healthBorder = "rgba(22,163,74,0.6)";
+                        let healthColor = "#bbf7d0";
+                        if (healthLabel === "关注") {
+                          healthBg = "rgba(202,138,4,0.18)";
+                          healthBorder = "rgba(234,179,8,0.7)";
+                          healthColor = "#facc15";
+                        } else if (healthLabel === "警告") {
+                          healthBg = "rgba(249,115,22,0.2)";
+                          healthBorder = "rgba(249,115,22,0.75)";
+                          healthColor = "#fed7aa";
+                        } else if (healthLabel === "严重") {
+                          healthBg = "rgba(185,28,28,0.25)";
+                          healthBorder = "rgba(248,113,113,0.85)";
+                          healthColor = "#fecaca";
+                        }
                           return (
                           <tr key={p.metadata.uid}>
-                            <td style={cellStyle} title={p.metadata.name}>
+                            <td style={baseCellNoWrap} title={p.metadata.name}>
                               <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
                                 <button
                                   type="button"
@@ -1867,12 +1980,32 @@ export const App: React.FC = () => {
                                 </button>
                               </span>
                             </td>
-                            <td style={cellStyle} title={p.metadata.namespace}>{p.metadata.namespace}</td>
-                            <td style={cellStyle} title={node}>{node}</td>
-                            <td style={cellStyle} title={age}>{age}</td>
-                            <td style={cellStyle} title={status}>{status}</td>
-                            <td style={cellStyle}>{restarts}</td>
-                            <td style={cellStyle}>{containerCount}</td>
+                            <td style={baseCellNoWrap} title={p.metadata.namespace}>{p.metadata.namespace}</td>
+                            <td style={baseCellNoWrap} title={node}>{node}</td>
+                            <td style={baseCellNoWrap} title={age}>{age}</td>
+                            <td style={baseCellNoWrap}>
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  padding: "2px 8px",
+                                  borderRadius: 999,
+                                  backgroundColor: healthBg,
+                                  border: `1px solid ${healthBorder}`,
+                                  color: healthColor,
+                                  fontSize: 11,
+                                  maxWidth: "100%",
+                                  boxSizing: "border-box",
+                                  cursor: reasonsText ? "default" : "inherit",
+                                }}
+                                title={reasonsText || undefined}
+                              >
+                                {healthLabel}
+                              </span>
+                            </td>
+                            <td style={baseCellNoWrap} title={statusText}>{statusText}</td>
+                            <td style={baseCellNoWrap}>{restarts}</td>
+                            <td style={baseCellNoWrap}>{containerCount}</td>
                             <td style={{ ...tdStyle, overflow: "visible" }}>
                               <div style={{ position: "relative" }}>
                                 <button

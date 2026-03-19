@@ -1,0 +1,433 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  deleteInContainer,
+  downloadContainerFilesUrl,
+  listContainerFiles,
+  mkdirInContainer,
+  renameInContainer,
+  uploadContainerFile,
+  type ContainerFileEntry,
+} from "../api";
+
+type Props = {
+  clusterId: string;
+  namespace: string;
+  pod: string;
+  container: string;
+  /** 初始路径；若提供 path/onPathChange，则作为受控组件由外部管理 */
+  defaultPath?: string;
+  path?: string;
+  onPathChange?: (p: string) => void;
+  onToast?: (msg: string) => void;
+};
+
+function joinPath(dir: string, name: string): string {
+  if (!dir) return name;
+  if (dir === "/") return `/${name}`;
+  return `${dir.replace(/\/+$/, "")}/${name}`;
+}
+
+function parentPath(p: string): string {
+  const clean = (p || "/").replace(/\/+$/, "") || "/";
+  if (clean === "/") return "/";
+  const idx = clean.lastIndexOf("/");
+  if (idx <= 0) return "/";
+  return clean.slice(0, idx) || "/";
+}
+
+export const FileManagerPanel: React.FC<Props> = ({
+  clusterId,
+  namespace,
+  pod,
+  container,
+  defaultPath = "/",
+  path,
+  onPathChange,
+  onToast,
+}) => {
+  const [innerPath, setInnerPath] = useState(defaultPath);
+  const currentPath = path ?? innerPath;
+  const setCurrentPath = useCallback(
+    (p: string) => {
+      if (onPathChange) onPathChange(p);
+      else setInnerPath(p);
+    },
+    [onPathChange],
+  );
+  const [pathInput, setPathInput] = useState(currentPath);
+  const [items, setItems] = useState<ContainerFileEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // 仅用于区分：用户点击“进入”触发的目录跳转失败，需要显示更友好的固定提示语
+  const manualEnterPendingRef = useRef(false);
+
+  useEffect(() => {
+    const init = path ?? defaultPath;
+    setInnerPath(init);
+    setPathInput(init);
+    setSelected({});
+  }, [clusterId, namespace, pod, container, defaultPath, path]);
+
+  useEffect(() => {
+    setPathInput(currentPath);
+  }, [currentPath]);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listContainerFiles(clusterId, namespace, pod, container, currentPath);
+      setItems(res.items || []);
+      setSelected({});
+    } catch (e: any) {
+      if (manualEnterPendingRef.current) {
+        setError("路径不存在，请检查");
+      } else {
+        setError(e?.response?.data?.error ?? e?.message ?? "加载目录失败");
+      }
+    } finally {
+      manualEnterPendingRef.current = false;
+      setLoading(false);
+    }
+  }, [clusterId, namespace, pod, container, currentPath]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const selectedPaths = useMemo(() => {
+    const names = Object.keys(selected).filter((k) => selected[k]);
+    return names.map((name) => joinPath(currentPath, name));
+  }, [selected, currentPath]);
+
+  const canRename = useMemo(() => Object.keys(selected).filter((k) => selected[k]).length === 1, [selected]);
+
+  const breadcrumbs = useMemo(() => {
+    const clean = (currentPath || "/").replace(/\/+$/, "") || "/";
+    if (clean === "/") return [{ name: "/", path: "/" }];
+    const parts = clean.split("/").filter(Boolean);
+    const crumbs: Array<{ name: string; path: string }> = [{ name: "/", path: "/" }];
+    let acc = "";
+    parts.forEach((p) => {
+      acc += `/${p}`;
+      crumbs.push({ name: p, path: acc });
+    });
+    return crumbs;
+  }, [currentPath]);
+
+  const toggleAll = (checked: boolean) => {
+    const next: Record<string, boolean> = {};
+    items.forEach((it) => {
+      next[it.name] = checked;
+    });
+    setSelected(next);
+  };
+
+  const sizeText = (n: number) => {
+    if (n == null || n < 0) return "-";
+    if (n < 1024) return `${n}B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+    return `${(n / (1024 * 1024 * 1024)).toFixed(1)}GB`;
+  };
+
+  const doDownload = () => {
+    if (selectedPaths.length === 0) return;
+    const url = downloadContainerFilesUrl(clusterId, namespace, pod, container, selectedPaths);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `weblens-files-${pod}.tar`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const doDelete = async () => {
+    if (selectedPaths.length === 0) return;
+    if (!window.confirm(`确定删除已勾选的 ${selectedPaths.length} 项吗？`)) return;
+    try {
+      await deleteInContainer(clusterId, namespace, pod, container, selectedPaths);
+      onToast?.("删除成功");
+      refresh();
+    } catch (e: any) {
+      setError(e?.response?.data?.error ?? e?.message ?? "删除失败");
+    }
+  };
+
+  const doRename = async () => {
+    const one = Object.keys(selected).find((k) => selected[k]);
+    if (!one) return;
+    const nextName = window.prompt("重命名为：", one);
+    if (!nextName || !nextName.trim() || nextName.trim() === one) return;
+    try {
+      await renameInContainer(
+        clusterId,
+        namespace,
+        pod,
+        container,
+        joinPath(currentPath, one),
+        joinPath(currentPath, nextName.trim()),
+      );
+      onToast?.("重命名成功");
+      refresh();
+    } catch (e: any) {
+      setError(e?.response?.data?.error ?? e?.message ?? "重命名失败");
+    }
+  };
+
+  const doMkdir = async () => {
+    const name = window.prompt("新建文件夹名称：", "new-folder");
+    if (!name || !name.trim()) return;
+    try {
+      await mkdirInContainer(clusterId, namespace, pod, container, joinPath(currentPath, name.trim()));
+      onToast?.("文件夹已创建");
+      refresh();
+    } catch (e: any) {
+      setError(e?.response?.data?.error ?? e?.message ?? "创建失败");
+    }
+  };
+
+  const doUpload = async (file: File) => {
+    try {
+      const dst = joinPath(currentPath, file.name);
+      await uploadContainerFile(clusterId, namespace, pod, container, dst, file);
+      onToast?.("上传成功");
+      refresh();
+    } catch (e: any) {
+      setError(e?.response?.data?.error ?? e?.message ?? "上传失败");
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <div
+        style={{ padding: "10px 12px", borderBottom: "1px solid #0b1220" }}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 8 }}>
+          {breadcrumbs.map((b, idx) => (
+            <React.Fragment key={b.path}>
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPath(b.path);
+                  setPathInput(b.path);
+                }}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#38bdf8",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  padding: 0,
+                  textDecorationLine: "underline",
+                  textUnderlineOffset: 3,
+                  fontWeight: 600,
+                }}
+                title={b.path}
+              >
+                {b.name}
+              </button>
+              {idx < breadcrumbs.length - 1 && (
+                <span style={{ color: "#64748b", fontSize: 12, fontWeight: 700 }} aria-hidden>
+                  {"<"}
+                </span>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            value={pathInput}
+            onChange={(e) => setPathInput(e.target.value)}
+            placeholder="/app/logs"
+            style={{
+              flex: 1,
+              padding: "6px 10px",
+              borderRadius: 6,
+              border: "1px solid #1f2937",
+              backgroundColor: "#0f172a",
+              color: "#e5e7eb",
+              fontSize: 12,
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              const next = pathInput.trim() || "/";
+              manualEnterPendingRef.current = true;
+              setCurrentPath(next);
+            }}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#1e293b",
+              color: "#e5e7eb",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            进入
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: "8px 12px", display: "flex", flexWrap: "wrap", gap: 6, borderBottom: "1px solid #0b1220" }}>
+        <button
+          type="button"
+          onClick={() => {
+            const up = parentPath(currentPath);
+            setCurrentPath(up);
+            setPathInput(up);
+          }}
+          style={toolBtnStyle(false)}
+        >
+          ↑ 上一级
+        </button>
+        <button type="button" onClick={refresh} style={toolBtnStyle(false)}>
+          刷新
+        </button>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          style={toolBtnStyle(false)}
+        >
+          上传
+        </button>
+        <button
+          type="button"
+          onClick={doDownload}
+          style={toolBtnStyle(selectedPaths.length === 0)}
+          disabled={selectedPaths.length === 0}
+        >
+          下载
+        </button>
+        <button
+          type="button"
+          onClick={doDelete}
+          style={toolBtnStyle(selectedPaths.length === 0)}
+          disabled={selectedPaths.length === 0}
+        >
+          删除
+        </button>
+        <button type="button" onClick={doRename} style={toolBtnStyle(!canRename)} disabled={!canRename}>
+          重命名
+        </button>
+        <button type="button" onClick={doMkdir} style={toolBtnStyle(false)}>
+          新建文件夹
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) doUpload(f);
+            e.currentTarget.value = "";
+          }}
+        />
+      </div>
+
+      {error && (
+        <div style={{ padding: "8px 12px", color: "#f87171", fontSize: 12, borderBottom: "1px solid #0b1220" }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={th}><input type="checkbox" onChange={(e) => toggleAll(e.target.checked)} checked={items.length > 0 && items.every((it) => selected[it.name])} /></th>
+              <th style={th}>名称</th>
+              <th style={th}>类型</th>
+              <th style={th}>大小</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr>
+                <td colSpan={4} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>
+                  加载中…
+                </td>
+              </tr>
+            )}
+            {!loading && items.length === 0 && (
+              <tr>
+                <td colSpan={4} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>
+                  空目录
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              items.map((it) => (
+                <tr key={it.name} style={{ borderBottom: "1px solid #0b1220" }}>
+                  <td style={td}>
+                    <input
+                      type="checkbox"
+                      checked={!!selected[it.name]}
+                      onChange={(e) => setSelected((prev) => ({ ...prev, [it.name]: e.target.checked }))}
+                    />
+                  </td>
+                  <td
+                    style={{ ...td, cursor: it.type === "dir" ? "pointer" : "default", color: "#e2e8f0" }}
+                    onClick={() => {
+                      if (it.type !== "dir") return;
+                      const next = joinPath(currentPath, it.name);
+                      setCurrentPath(next);
+                      setPathInput(next);
+                    }}
+                    title={it.type === "dir" ? "点击进入目录" : it.name}
+                  >
+                    <span style={{ marginRight: 6, color: it.type === "dir" ? "#38bdf8" : "#94a3b8" }}>
+                      {it.type === "dir" ? "📁" : "📄"}
+                    </span>
+                    {it.name}
+                  </td>
+                  <td style={{ ...td, color: "#94a3b8" }}>{it.type === "dir" ? "dir" : "file"}</td>
+                  <td style={{ ...td, color: "#94a3b8" }}>{it.type === "dir" ? "-" : sizeText(it.size)}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const toolBtn: React.CSSProperties = {
+  padding: "4px 8px",
+  borderRadius: 6,
+  border: "1px solid #334155",
+  backgroundColor: "#1e293b",
+  color: "#e5e7eb",
+  cursor: "pointer",
+  fontSize: 12,
+};
+
+const toolBtnStyle = (disabled: boolean): React.CSSProperties => ({
+  ...toolBtn,
+  cursor: disabled ? "not-allowed" : "pointer",
+  opacity: disabled ? 0.45 : 1,
+  backgroundColor: disabled ? "#0b1220" : toolBtn.backgroundColor,
+  color: disabled ? "#64748b" : toolBtn.color,
+});
+
+const th: React.CSSProperties = {
+  textAlign: "left",
+  padding: "8px 10px",
+  borderBottom: "1px solid #1e293b",
+  color: "#94a3b8",
+  position: "sticky",
+  top: 0,
+  backgroundColor: "#020617",
+  zIndex: 1,
+};
+
+const td: React.CSSProperties = {
+  padding: "8px 10px",
+};
+
