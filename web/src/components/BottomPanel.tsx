@@ -296,7 +296,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                             flexShrink: 0,
                           }}
                         >
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>文件传输</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>文件管理</div>
                           <button
                             type="button"
                             onClick={() => setFileOpenByTab((prev) => ({ ...prev, [tab.id]: false }))}
