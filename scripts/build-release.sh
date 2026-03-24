@@ -19,7 +19,23 @@ TARBALL="${OUT_DIR}/${RELEASE_NAME}-${VERSION}.tar.gz"
 
 echo "=== WebLens 部署包构建 ==="
 
+# 0. 前置检查
+if ! command -v go &>/dev/null; then
+  echo "Error: go not found. Please install Go (>=1.22)." >&2
+  exit 1
+fi
+if ! command -v npm &>/dev/null; then
+  echo "Error: npm not found. Please install Node.js + npm." >&2
+  exit 1
+fi
+
 # 1. 构建后端（Linux amd64 静态二进制）
+echo ">> 下载后端依赖（go mod download）..."
+(
+  cd server
+  go mod download
+)
+
 echo ">> 构建 server/bin/weblens-server ..."
 mkdir -p server/bin
 (
@@ -27,14 +43,10 @@ mkdir -p server/bin
   export CGO_ENABLED=0
   export GOOS=linux
   export GOARCH=amd64
-  if command -v go &>/dev/null; then
-    go build -trimpath -o bin/weblens-server ./cmd/weblens
-  else
-    echo "go not found, using existing binary if present" >&2
-  fi
+  go build -trimpath -o bin/weblens-server ./cmd/weblens
 )
 if [[ ! -f server/bin/weblens-server ]]; then
-  echo "Error: server/bin/weblens-server not found. Install Go and run build, or copy binary." >&2
+  echo "Error: server/bin/weblens-server not found after build." >&2
   exit 1
 fi
 chmod +x server/bin/weblens-server
@@ -42,7 +54,18 @@ chmod +x server/bin/weblens-server
 # 2. 构建前端（先清空旧的 web/dist，避免历史遗留文件混入）
 echo ">> 清空 web/dist 并重新构建前端 ..."
 rm -rf web/dist
-(cd web && npm run build)
+(
+  cd web
+  # 确保单次执行可自动安装前端依赖
+  if [[ -f package-lock.json ]]; then
+    echo ">> 安装前端依赖（npm ci）..."
+    npm ci
+  else
+    echo ">> 安装前端依赖（npm install）..."
+    npm install
+  fi
+  npm run build
+)
 if [[ ! -f web/dist/index.html ]]; then
   echo "Error: web/dist/index.html not found. Run: cd web && npm run build" >&2
   exit 1

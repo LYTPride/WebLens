@@ -55,12 +55,15 @@ export const FileManagerPanel: React.FC<Props> = ({
     [onPathChange],
   );
   const [pathInput, setPathInput] = useState(currentPath);
+  const [addressBarMode, setAddressBarMode] = useState<"breadcrumb" | "edit">("breadcrumb");
   const [items, setItems] = useState<ContainerFileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  // 仅用于区分：用户点击“进入”触发的目录跳转失败，需要显示更友好的固定提示语
+  const addressInputRef = useRef<HTMLInputElement | null>(null);
+  const skipAddressBlurRef = useRef(false);
+  // 仅用于区分：地址栏手动确认路径后的跳转失败，需要显示更友好的固定提示语
   const manualEnterPendingRef = useRef(false);
 
   useEffect(() => {
@@ -68,11 +71,49 @@ export const FileManagerPanel: React.FC<Props> = ({
     setInnerPath(init);
     setPathInput(init);
     setSelected({});
+    setAddressBarMode("breadcrumb");
   }, [clusterId, namespace, pod, container, defaultPath, path]);
 
   useEffect(() => {
     setPathInput(currentPath);
   }, [currentPath]);
+
+  const enterAddressEditMode = useCallback(() => {
+    setPathInput(currentPath);
+    setAddressBarMode("edit");
+  }, [currentPath]);
+
+  useEffect(() => {
+    if (addressBarMode !== "edit") return;
+    const id = requestAnimationFrame(() => {
+      const el = addressInputRef.current;
+      if (!el) return;
+      el.focus();
+      el.select();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [addressBarMode]);
+
+  const commitPathFromAddressInput = useCallback(() => {
+    skipAddressBlurRef.current = true;
+    const next = pathInput.trim() || "/";
+    manualEnterPendingRef.current = true;
+    setCurrentPath(next);
+    setAddressBarMode("breadcrumb");
+    queueMicrotask(() => {
+      skipAddressBlurRef.current = false;
+    });
+  }, [pathInput, setCurrentPath]);
+
+  const cancelAddressEdit = useCallback(() => {
+    setPathInput(currentPath);
+    setAddressBarMode("breadcrumb");
+  }, [currentPath]);
+
+  const onAddressBarBlur = useCallback(() => {
+    if (skipAddressBlurRef.current) return;
+    cancelAddressEdit();
+  }, [cancelAddressEdit]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -202,86 +243,108 @@ export const FileManagerPanel: React.FC<Props> = ({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div
-        style={{ padding: "10px 12px", borderBottom: "1px solid #0b1220" }}
-      >
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 8 }}>
-          {breadcrumbs.map((b, idx) => (
-            <React.Fragment key={b.path}>
-              <button
-                type="button"
-                onClick={() => {
-                  setCurrentPath(b.path);
-                  setPathInput(b.path);
-                }}
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid #0b1220" }}>
+        <div
+          role="group"
+          aria-label="路径地址栏"
+          onDoubleClick={(e) => {
+            if ((e.target as HTMLElement).closest("button[data-crumb]")) return;
+            enterAddressEditMode();
+          }}
+          style={{
+            ...addressBarShellStyle,
+            cursor: addressBarMode === "breadcrumb" ? "default" : "text",
+          }}
+        >
+          <span style={addressBarIconStyle} aria-hidden>
+            📁
+          </span>
+          {addressBarMode === "breadcrumb" ? (
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                alignItems: "center",
+                overflowX: "auto",
+                padding: "4px 8px 4px 0",
+                gap: 2,
+              }}
+            >
+              {breadcrumbs.map((b, idx) => (
+                <React.Fragment key={b.path}>
+                  <button
+                    type="button"
+                    data-crumb
+                    onClick={() => setCurrentPath(b.path)}
+                    style={crumbBtnStyle}
+                    title={b.path}
+                  >
+                    {b.name}
+                  </button>
+                  {idx < breadcrumbs.length - 1 && (
+                    <span style={crumbSepStyle} aria-hidden>
+                      ›
+                    </span>
+                  )}
+                </React.Fragment>
+              ))}
+              <div
+                role="presentation"
+                tabIndex={-1}
+                onClick={enterAddressEditMode}
                 style={{
-                  border: "none",
-                  background: "transparent",
-                  color: "#38bdf8",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  padding: 0,
-                  textDecorationLine: "underline",
-                  textUnderlineOffset: 3,
-                  fontWeight: 600,
+                  flex: 1,
+                  minWidth: 12,
+                  alignSelf: "stretch",
+                  cursor: "text",
                 }}
-                title={b.path}
-              >
-                {b.name}
-              </button>
-              {idx < breadcrumbs.length - 1 && (
-                <span style={{ color: "#64748b", fontSize: 12, fontWeight: 700 }} aria-hidden>
-                  {"<"}
-                </span>
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-
-        <div style={{ display: "flex", gap: 6 }}>
-          <input
-            value={pathInput}
-            onChange={(e) => setPathInput(e.target.value)}
-            placeholder="/app/logs"
-            style={{
-              flex: 1,
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid #1f2937",
-              backgroundColor: "#0f172a",
-              color: "#e5e7eb",
-              fontSize: 12,
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              const next = pathInput.trim() || "/";
-              manualEnterPendingRef.current = true;
-              setCurrentPath(next);
-            }}
-            style={{
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#1e293b",
-              color: "#e5e7eb",
-              cursor: "pointer",
-              fontSize: 12,
-            }}
-          >
-            进入
-          </button>
+                title="点击输入完整路径"
+              />
+            </div>
+          ) : (
+            <input
+              ref={addressInputRef}
+              value={pathInput}
+              onChange={(e) => setPathInput(e.target.value)}
+              onBlur={onAddressBarBlur}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitPathFromAddressInput();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  skipAddressBlurRef.current = true;
+                  cancelAddressEdit();
+                  queueMicrotask(() => {
+                    skipAddressBlurRef.current = false;
+                  });
+                }
+              }}
+              placeholder="/app/logs"
+              spellCheck={false}
+              autoComplete="off"
+              style={addressInputStyle}
+            />
+          )}
         </div>
       </div>
 
-      <div style={{ padding: "8px 12px", display: "flex", flexWrap: "wrap", gap: 6, borderBottom: "1px solid #0b1220" }}>
+      <div
+        style={{
+          padding: "6px 8px",
+          display: "flex",
+          flexWrap: "nowrap",
+          gap: 4,
+          overflowX: "auto",
+          borderBottom: "1px solid #0b1220",
+        }}
+      >
         <button
           type="button"
           onClick={() => {
             const up = parentPath(currentPath);
             setCurrentPath(up);
-            setPathInput(up);
           }}
           style={toolBtnStyle(false)}
         >
@@ -376,9 +439,7 @@ export const FileManagerPanel: React.FC<Props> = ({
                     style={{ ...td, cursor: it.type === "dir" ? "pointer" : "default", color: "#e2e8f0" }}
                     onClick={() => {
                       if (it.type !== "dir") return;
-                      const next = joinPath(currentPath, it.name);
-                      setCurrentPath(next);
-                      setPathInput(next);
+                      setCurrentPath(joinPath(currentPath, it.name));
                     }}
                     title={it.type === "dir" ? "点击进入目录" : it.name}
                   >
@@ -398,14 +459,71 @@ export const FileManagerPanel: React.FC<Props> = ({
   );
 };
 
+const addressBarShellStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "stretch",
+  minHeight: 34,
+  borderRadius: 6,
+  border: "1px solid #334155",
+  backgroundColor: "#0f172a",
+  overflow: "hidden",
+};
+
+const addressBarIconStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  paddingLeft: 10,
+  paddingRight: 2,
+  color: "#64748b",
+  fontSize: 14,
+  flexShrink: 0,
+  userSelect: "none",
+};
+
+const crumbBtnStyle: React.CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "#38bdf8",
+  cursor: "pointer",
+  fontSize: 12,
+  padding: "4px 6px",
+  borderRadius: 4,
+  fontWeight: 500,
+  whiteSpace: "nowrap",
+  flexShrink: 0,
+};
+
+const crumbSepStyle: React.CSSProperties = {
+  color: "#475569",
+  fontSize: 13,
+  fontWeight: 600,
+  userSelect: "none",
+  flexShrink: 0,
+  padding: "0 1px",
+};
+
+const addressInputStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  border: "none",
+  outline: "none",
+  backgroundColor: "#020617",
+  color: "#e5e7eb",
+  fontSize: 12,
+  padding: "6px 10px",
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+};
+
 const toolBtn: React.CSSProperties = {
-  padding: "4px 8px",
+  padding: "3px 7px",
   borderRadius: 6,
   border: "1px solid #334155",
   backgroundColor: "#1e293b",
   color: "#e5e7eb",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: 11,
+  whiteSpace: "nowrap",
+  flexShrink: 0,
 };
 
 const toolBtnStyle = (disabled: boolean): React.CSSProperties => ({
