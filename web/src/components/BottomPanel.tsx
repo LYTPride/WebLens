@@ -64,7 +64,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
       if (!id) return;
       const delta = fileDragStartX.current - e.clientX; // 向左拖 => 面板更宽
       let next = fileDragStartW.current + delta;
-      next = Math.max(280, Math.min(720, next));
+      next = Math.max(300, Math.min(780, next));
       setFileWidthByTab((prev) => ({ ...prev, [id]: next }));
     };
     const onUp = () => setFileDragging(false);
@@ -262,7 +262,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                           e.preventDefault();
                           fileDragTabId.current = tab.id;
                           fileDragStartX.current = e.clientX;
-                          fileDragStartW.current = fileWidthByTab[tab.id] ?? 400;
+                          fileDragStartW.current = fileWidthByTab[tab.id] ?? 520;
                           setFileDragging(true);
                         }}
                         title="拖拽调整 Shell / 文件窗口宽度"
@@ -276,9 +276,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                       />
                       <div
                         style={{
-                          width: fileWidthByTab[tab.id] ?? 400,
-                          minWidth: 280,
-                          maxWidth: 720,
+                          width: fileWidthByTab[tab.id] ?? 520,
+                          minWidth: 300,
+                          maxWidth: 780,
                           display: "flex",
                           flexDirection: "column",
                           backgroundColor: "#020617",
