@@ -23,3 +23,11 @@
 - 路径区合并为单条地址栏：默认面包屑（`›` 分隔、可横向滚动），空白区点击或双击进入输入模式；Enter 跳转，Esc/失焦恢复面包屑；保留手动路径不存在时的固定提示
 - 默认展开宽度调至 520px，拖拽范围约 300–780px；工具栏优先单行展示（极窄时可横向滚动）
 
+### Deployments 页面与运维 API
+
+- 列表列：Name、Namespace、Pods、Replicas、Age、Conditions、操作；表头拖拽调宽（与 Pods 共用 `useColumnResize` + `ResizableTh`）
+- 列表行 hover、三点按钮与下拉菜单样式与 Pods 统一（`global.css` + `wl-table-menu-trigger` / `wl-table-dropdown-menu`）
+- 同一已应用 cluster + namespace 下，Pods ⇄ Deployments 切换复用内存列表；「刷新列表」仅刷新当前资源类型
+- 后端：`GET/PUT .../deployments/:ns/:name/yaml`、`PATCH .../scale`、`POST .../restart`、`DELETE .../name`；变更后失效 deployments 列表短缓存
+- Edit：复用 `PodYamlEditTab`（`yamlKind: deployment`），保存后 `onEditSaved` 合并列表项
+

@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { applyPodYaml, fetchPodYaml } from "../api";
+import {
+  applyDeploymentYaml,
+  applyPodYaml,
+  fetchDeploymentYaml,
+  fetchPodYaml,
+} from "../api";
 
 const MINIMAP_WIDTH = 56;
 const LINE_HEIGHT = 18;
@@ -8,8 +13,11 @@ interface PodYamlEditTabProps {
   clusterId: string;
   namespace: string;
   podName: string;
+  /** 默认 Pod；Deployment 时与 podName 传部署名称 */
+  yamlKind?: "pod" | "deployment";
   onClose: () => void;
-  onSaved?: () => void;
+  /** Deployment 保存时传入 API 返回的 JSON 对象，便于列表局部更新 */
+  onSaved?: (result?: unknown) => void;
   /** 仅当标签激活时才请求 YAML，避免与 Watch 等长连接争抢导致长时间等待 */
   isActive?: boolean;
 }
@@ -18,6 +26,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   clusterId,
   namespace,
   podName,
+  yamlKind = "pod",
   onClose,
   onSaved,
   isActive = true,
@@ -39,15 +48,19 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const text = await fetchPodYaml(clusterId, namespace, podName);
+      const text =
+        yamlKind === "deployment"
+          ? await fetchDeploymentYaml(clusterId, namespace, podName)
+          : await fetchPodYaml(clusterId, namespace, podName);
       setYaml(text);
       setInitialYaml(text);
     } catch (e: unknown) {
-      setError((e as Error)?.message ?? "加载 YAML 失败");
+      const err = e as { message?: string; response?: { data?: { error?: string } } };
+      setError(err?.response?.data?.error ?? err?.message ?? "加载 YAML 失败");
     } finally {
       setLoading(false);
     }
-  }, [clusterId, namespace, podName]);
+  }, [clusterId, namespace, podName, yamlKind]);
 
   useEffect(() => {
     if (isActive) loadYaml();
@@ -165,12 +178,19 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
     setSaving(true);
     setError(null);
     try {
-      await applyPodYaml(clusterId, namespace, podName, yaml);
-      setInitialYaml(yaml);
-      onSaved?.();
+      if (yamlKind === "deployment") {
+        const data = await applyDeploymentYaml(clusterId, namespace, podName, yaml);
+        setInitialYaml(yaml);
+        onSaved?.(data);
+      } else {
+        await applyPodYaml(clusterId, namespace, podName, yaml);
+        setInitialYaml(yaml);
+        onSaved?.();
+      }
       if (andClose) onClose();
     } catch (e: unknown) {
-      setError((e as Error)?.message ?? "保存失败");
+      const err = e as { message?: string; response?: { data?: { error?: string } } };
+      setError(err?.response?.data?.error ?? err?.message ?? "保存失败");
     } finally {
       setSaving(false);
     }
@@ -218,7 +238,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#94a3b8", fontSize: 12 }}>
-          <span>Kind: Pod</span>
+          <span>Kind: {yamlKind === "deployment" ? "Deployment" : "Pod"}</span>
           <span>Name: {podName}</span>
           <span>Namespace: {namespace}</span>
         </div>

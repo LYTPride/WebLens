@@ -24,7 +24,9 @@ WebLens 采用前后端分离 + 同源部署模式：
 ## 主要模块
 
 - `server/internal/cluster`：kubeconfig 扫描与多集群注册
-- `server/internal/httpapi`：API 路由与资源操作
-- `web/src/pages/App.tsx`：主页面状态编排
-- `web/src/components/*`：底部工作区、表格、日志、Shell 等组件
+- `server/internal/httpapi`：API 路由与资源操作（含 Deployment 的 List/Watch/YAML 更新、Scale、Restart、Delete 等）
+- `web/src/pages/App.tsx`：主页面状态编排（Pods / Deployments 列表、列宽、菜单、作用域内列表缓存）
+- `web/src/components/*`：底部工作区、YAML 编辑、可拖拽表头 `ResizableTh`、日志、Shell 等
+- `web/src/hooks/useColumnResize.ts`：表格列宽拖拽逻辑（Pods / Deployments 复用）
+
 
