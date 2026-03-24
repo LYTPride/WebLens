@@ -15,6 +15,8 @@ export interface PanelTab {
   title: string;
   /** 该 Pod 的容器列表（用于 Logs 容器下拉） */
   containers: string[];
+  /** edit 标签：YAML 资源类型，默认 pod */
+  yamlKind?: "pod" | "deployment";
 }
 
 interface BottomPanelProps {
@@ -27,6 +29,8 @@ interface BottomPanelProps {
   onHeightRatioChange: (r: number) => void;
   minimized: boolean;
   onMinimizedChange: (v: boolean) => void;
+  /** YAML 保存成功（Deployment 时带 API 返回体） */
+  onEditSaved?: (tab: PanelTab, result?: unknown) => void;
 }
 
 const MIN_HEIGHT = 0.15;
@@ -43,6 +47,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
   onHeightRatioChange,
   minimized,
   onMinimizedChange,
+  onEditSaved,
 }) => {
   const [dragging, setDragging] = useState(false);
   const dragStartY = useRef(0);
@@ -373,7 +378,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   clusterId={tab.clusterId}
                   namespace={tab.namespace}
                   podName={tab.pod}
+                  yamlKind={tab.yamlKind ?? "pod"}
                   onClose={() => onCloseTab(tab.id)}
+                  onSaved={(result) => onEditSaved?.(tab, result)}
                   isActive={activeTabId === tab.id}
                 />
               )}

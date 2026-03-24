@@ -553,6 +553,68 @@ export async function deletePod(clusterId: string, namespace: string, pod: strin
   );
 }
 
+/** Deployment YAML（编辑） */
+export async function fetchDeploymentYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+/** 应用 Deployment YAML，返回更新后的对象（JSON） */
+export async function applyDeploymentYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  yamlBody: string,
+): Promise<unknown> {
+  const res = await api.put(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
+  return res.data;
+}
+
+export async function scaleDeployment(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  replicas: number,
+): Promise<unknown> {
+  const res = await api.patch(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
+    { replicas },
+  );
+  return res.data;
+}
+
+export async function restartDeployment(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<unknown> {
+  const res = await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+  );
+  return res.data;
+}
+
+export async function deleteDeployment(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  await api.delete(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+  );
+}
+
 /** 通用：按资源路径拉取 items（用于 Deployments / StatefulSets / ...） */
 export async function fetchResourceList<T = unknown>(
   clusterId: string,
