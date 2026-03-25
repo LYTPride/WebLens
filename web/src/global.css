@@ -129,3 +129,33 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
+/* ClearableSearchInput 清空按钮 */
+.wl-clearable-search-clear {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.wl-clearable-search-clear:hover {
+  color: #e2e8f0;
+  background-color: rgba(148, 163, 184, 0.12);
+}
+.wl-clearable-search-clear:active {
+  background-color: rgba(148, 163, 184, 0.2);
+}
+

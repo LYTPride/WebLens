@@ -751,6 +751,8 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		c.Data(http.StatusOK, "text/yaml; charset=utf-8", raw)
 	})
 
+	registerDeploymentDescribeRoute(r, reg)
+
 	// Apply Deployment（YAML 更新）
 	r.PUT("/api/clusters/:id/deployments/:namespace/:name", func(c *gin.Context) {
 		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("name")
