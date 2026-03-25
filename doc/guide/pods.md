@@ -37,11 +37,11 @@ Pods 列表新增“状态标签”列，标签值为：
 
 ## YAML 编辑
 
-底部面板中打开 **Edit** 时，YAML 编辑区与 Deployment 编辑共用同一套增强能力：
+底部面板中打开 **Edit** 时，与 Deployment 共用 **Monaco Editor**：
 
-- **缩进层级参考线**（Canvas 叠加，随内容滚动）
-- 滚动时编辑区上方的 **当前 key 路径面包屑**（便于定位深层嵌套）
-- 仍支持行号、右侧 minimap、关键字搜索、Cancel / Save / Save & Close
+- **Sticky Scroll**（Monaco 内置，缩进模型）：冻结区为 **真实 YAML 源码行**，含 **行号** 与 **语法着色**，视觉与正文一体；点击冻结行可跳转到该行（折叠区域由编辑器尽量展开可见）
+- 内置 **缩进参考线**、**右侧 minimap**、**折叠**
+- 仍支持关键字搜索、Cancel / Save / Save & Close
 
 ## 常用操作
 

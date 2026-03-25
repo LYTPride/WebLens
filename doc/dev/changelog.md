@@ -35,8 +35,9 @@
 
 ### YAML 编辑器增强（Pod / Deployment 共用）
 
-- 新增 `YamlEditorWithGuides`（textarea + Canvas 缩进参考线）、`YamlScrollContextBar`、`web/src/utils/yamlStructure.ts`
+- YAML 编辑改为 **Monaco Editor**（`YamlMonacoEditor` + `monaco/yamlMonacoEnv` Worker）：内置 **stickyScroll**（`indentationModel`）、行号、minimap、折叠；移除自研 textarea 叠层与顶部路径条
 - `PodYamlEditTab` 接入上述能力；后续其他 YAML 编辑可复用同一组件
+- **启动与离线**：入口 `web/src/main.tsx` 加载 `monaco/monacoInit.ts`，在 Worker 注册后执行 `loader.config({ monaco })`，强制使用 **npm 包内 Monaco**，避免 `@monaco-editor/react` 默认走 CDN 导致编辑页长期停在 **Loading...**（内网/防火墙环境常见）
 
 ### 搜索/过滤输入
 
