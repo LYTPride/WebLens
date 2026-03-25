@@ -5,6 +5,10 @@ import {
   fetchDeploymentYaml,
   fetchPodYaml,
 } from "../api";
+import { ClearableSearchInput } from "./ClearableSearchInput";
+import { YamlEditorWithGuides } from "./YamlEditorWithGuides";
+import { YamlScrollContextBar } from "./YamlScrollContextBar";
+import { buildYamlKeyPathPerLine, detectYamlIndentUnit } from "../utils/yamlStructure";
 
 const MINIMAP_WIDTH = 56;
 const LINE_HEIGHT = 18;
@@ -43,6 +47,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   const minimapWrapRef = useRef<HTMLDivElement>(null);
   const [viewportStyle, setViewportStyle] = useState<{ top: number; height: number }>({ top: 0, height: 0 });
   const [minimapHeight, setMinimapHeight] = useState(0);
+  const [scrollPathLine, setScrollPathLine] = useState(0);
 
   const loadYaml = useCallback(async () => {
     setLoading(true);
@@ -86,14 +91,34 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
     });
   }, []);
 
+  const yamlLines = useMemo(() => yaml.split("\n"), [yaml]);
+  const yamlIndentUnit = useMemo(() => detectYamlIndentUnit(yamlLines), [yamlLines]);
+  const keyPaths = useMemo(
+    () => buildYamlKeyPathPerLine(yaml, yamlIndentUnit),
+    [yaml, yamlIndentUnit],
+  );
+
+  const syncScrollPathFromEditor = useCallback(() => {
+    const el = editorRef.current;
+    if (!el || keyPaths.length === 0) {
+      setScrollPathLine(0);
+      return;
+    }
+    const line = Math.floor((el.scrollTop + LINE_HEIGHT / 2) / LINE_HEIGHT);
+    setScrollPathLine(Math.max(0, Math.min(keyPaths.length - 1, line)));
+  }, [keyPaths.length]);
+
+  const handleEditorScroll = useCallback(() => {
+    updateViewportFromEditor();
+    syncScrollPathFromEditor();
+  }, [updateViewportFromEditor, syncScrollPathFromEditor]);
+
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
     updateViewportFromEditor();
-    const onScroll = () => updateViewportFromEditor();
-    el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [yaml, updateViewportFromEditor]);
+    syncScrollPathFromEditor();
+  }, [yaml, updateViewportFromEditor, syncScrollPathFromEditor]);
 
   useEffect(() => {
     const wrap = minimapWrapRef.current;
@@ -147,10 +172,13 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
       const targetTop = lineIndex * LINE_HEIGHT;
       const viewTop = targetTop - el.clientHeight / 2;
       el.scrollTop = Math.max(0, viewTop);
-      // 额外触发一次 viewport 更新和 minimap 同步
-      setTimeout(() => updateViewportFromEditor(), 0);
+      // 额外触发一次 viewport、面包屑与 minimap 同步
+      setTimeout(() => {
+        updateViewportFromEditor();
+        syncScrollPathFromEditor();
+      }, 0);
     },
-    [matches, total, yaml, updateViewportFromEditor],
+    [matches, total, yaml, updateViewportFromEditor, syncScrollPathFromEditor],
   );
 
   const goPrev = () => {
@@ -202,8 +230,8 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
     onClose();
   };
 
-  const lines = yaml.split("\n");
-  const lineCount = lines.length;
+  const safePathLine =
+    keyPaths.length === 0 ? 0 : Math.min(scrollPathLine, keyPaths.length - 1);
 
   if (loading) {
     return (
@@ -243,16 +271,15 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
           <span>Namespace: {namespace}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="text"
+          <ClearableSearchInput
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
+            onChange={(v) => {
+              setSearch(v);
               setCurrentMatchIndex(0);
             }}
             placeholder="搜索关键字"
-            style={{
-              width: 160,
+            style={{ width: 160 }}
+            inputStyle={{
               padding: "4px 8px",
               borderRadius: 4,
               border: "1px solid #334155",
@@ -355,6 +382,8 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         </div>
       </div>
 
+      <YamlScrollContextBar segments={keyPaths[safePathLine] ?? []} />
+
       {/* 编辑器 + 缩略图 */}
       <div
         style={{
@@ -393,29 +422,17 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
                 '"JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
             }}
           >
-            {lines.map((_, i) => (
+            {yamlLines.map((_, i) => (
               <div key={i}>{i + 1}</div>
             ))}
           </div>
-          <textarea
+          <YamlEditorWithGuides
             ref={editorRef}
             value={yaml}
-            onChange={(e) => setYaml(e.target.value)}
-            spellCheck={false}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              padding: "10px 12px",
-              border: "none",
-              outline: "none",
-              backgroundColor: "#020617",
-              color: "#e2e8f0",
-              fontSize: 12,
-              lineHeight: 1.5,
-              fontFamily:
-                '"JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-              resize: "none",
-            }}
+            onChange={setYaml}
+            lineHeight={LINE_HEIGHT}
+            fontSize={12}
+            onScroll={handleEditorScroll}
           />
         </div>
 

@@ -30,11 +30,24 @@ Pods 列表新增“状态标签”列，标签值为：
 - 提示语不受 Name 搜索过滤影响
 - 只有当前范围内全部健康时提示语才消失
 
+## Describe
+
+- **点击表格中的 Pod Name**（名称以可点击按钮呈现）可从 **右侧** 打开 Describe 面板：遮罩、可拖拽宽度、刷新与关闭与 Deployments Describe 一致。
+- 展示 Pod 基本信息、Labels/Annotations、容器摘要，以及 **Events**（Warning/失败类事件为红底高亮；无事件时显示「暂无 Events」）。
+
+## YAML 编辑
+
+底部面板中打开 **Edit** 时，YAML 编辑区与 Deployment 编辑共用同一套增强能力：
+
+- **缩进层级参考线**（Canvas 叠加，随内容滚动）
+- 滚动时编辑区上方的 **当前 key 路径面包屑**（便于定位深层嵌套）
+- 仍支持行号、右侧 minimap、关键字搜索、Cancel / Save / Save & Close
+
 ## 常用操作
 
 每个 Pod 行支持以下操作：
 
-- 复制 Pod 名称
+- 复制 Pod 名称（与点击 Name 打开 Describe 互不冲突）
 - 打开 Logs
 - 打开 Shell
 - 打开 YAML 编辑

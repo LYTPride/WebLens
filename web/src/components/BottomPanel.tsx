@@ -184,7 +184,13 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
               }}
             >
               <span>
-                {t.type === "shell" ? "Shell" : t.type === "logs" ? "Logs" : "Pod"}: {t.type === "edit" ? t.pod : t.title}
+                {t.type === "shell"
+                  ? `Shell: ${t.title}`
+                  : t.type === "logs"
+                    ? `Logs: ${t.title}`
+                    : t.type === "edit"
+                      ? `${t.yamlKind === "deployment" ? "Deployment" : "Pod"}: ${t.pod}`
+                      : t.title}
               </span>
               <button
                 type="button"

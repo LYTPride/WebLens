@@ -86,6 +86,87 @@ export interface PodDescribe {
   events: K8sEvent[];
 }
 
+/** Deployment Describe 视图块（与后端 DeploymentDescribeView 对齐） */
+export interface EnvDescribeView {
+  name: string;
+  value?: string;
+  from?: string;
+}
+
+export interface ContainerDescribeView {
+  name: string;
+  image: string;
+  ports?: string[];
+  requests?: Record<string, string>;
+  limits?: Record<string, string>;
+  env?: EnvDescribeView[];
+  volumeMounts?: string[];
+}
+
+export interface VolumeDescribeView {
+  name: string;
+  kind: string;
+}
+
+export interface K8sTolerationLoose {
+  key?: string;
+  operator?: string;
+  value?: string;
+  effect?: string;
+  tolerationSeconds?: number;
+}
+
+export interface DeploymentReplicaStatusView {
+  desired: number;
+  updated: number;
+  ready: number;
+  available: number;
+  unavailable: number;
+}
+
+export interface RollingUpdateDescribeView {
+  maxUnavailable?: string;
+  maxSurge?: string;
+}
+
+export interface DeploymentConditionView {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+  lastTransitionTime?: string;
+  lastUpdateTime?: string;
+}
+
+export interface DeploymentPodTemplateView {
+  containers: ContainerDescribeView[];
+  initContainers?: ContainerDescribeView[];
+  volumes?: VolumeDescribeView[];
+  serviceAccount?: string;
+  nodeSelector?: Record<string, string>;
+  tolerations?: K8sTolerationLoose[];
+}
+
+export interface DeploymentDescribeView {
+  name: string;
+  namespace: string;
+  creationTimestamp?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  selector?: string;
+  replicas: DeploymentReplicaStatusView;
+  conditions?: DeploymentConditionView[];
+  podTemplate: DeploymentPodTemplateView;
+  strategyType: string;
+  rollingUpdate?: RollingUpdateDescribeView;
+  progressDeadlineSeconds?: number | null;
+}
+
+export interface DeploymentDescribe {
+  view: DeploymentDescribeView;
+  events: K8sEvent[];
+}
+
 export interface ClusterCombo {
   id: string;
   clusterId: string;
@@ -437,6 +518,17 @@ export async function fetchPodDescribe(
 ): Promise<PodDescribe> {
   const res = await api.get<PodDescribe>(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/describe`,
+  );
+  return res.data;
+}
+
+export async function fetchDeploymentDescribe(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<DeploymentDescribe> {
+  const res = await api.get<DeploymentDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/describe`,
   );
   return res.data;
 }

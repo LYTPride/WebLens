@@ -23,7 +23,9 @@ import {
   watchResourceList,
   type ResourceWatchEvent,
   fetchPodDescribe,
+  fetchDeploymentDescribe,
   type PodDescribe,
+  type DeploymentDescribe,
   scaleDeployment,
   restartDeployment,
   deleteDeployment,
@@ -32,6 +34,9 @@ import { Sidebar } from "../components/Sidebar";
 import { ResourceTable, type Column } from "../components/ResourceTable";
 import { BottomPanel, type PanelTab } from "../components/BottomPanel";
 import { ResizableTh } from "../components/ResizableTh";
+import { ClearableSearchInput } from "../components/ClearableSearchInput";
+import { DescribeEventsSection } from "../components/describe/DescribeEventsSection";
+import { DeploymentDescribeContent } from "../components/describe/DeploymentDescribeContent";
 import { useColumnResize } from "../hooks/useColumnResize";
 import copyIcon from "../assets/icon-copy.png";
 
@@ -378,11 +383,15 @@ export const App: React.FC = () => {
   const currentViewRef = useRef<ResourceKind>("pods");
   /** 左侧边栏是否收起 */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  /** Pod Describe 右侧弹层：当前选中的 Pod key 及数据 */
-  const [describeTarget, setDescribeTarget] = useState<{ clusterId: string; namespace: string; name: string } | null>(
-    null,
-  );
-  const [describeData, setDescribeData] = useState<PodDescribe | null>(null);
+  /** Describe 右侧弹层：Pod 或 Deployment */
+  const [describeTarget, setDescribeTarget] = useState<{
+    kind: "pod" | "deployment";
+    clusterId: string;
+    namespace: string;
+    name: string;
+  } | null>(null);
+  const [describePodData, setDescribePodData] = useState<PodDescribe | null>(null);
+  const [describeDeploymentData, setDescribeDeploymentData] = useState<DeploymentDescribe | null>(null);
   const [describeLoading, setDescribeLoading] = useState(false);
   const [describeError, setDescribeError] = useState<string | null>(null);
   const [describeWidthRatio, setDescribeWidthRatio] = useState(0.5);
@@ -465,28 +474,50 @@ export const App: React.FC = () => {
     if (!describeTarget) return;
     setDescribeLoading(true);
     setDescribeError(null);
-    fetchPodDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
-      .then((data) => {
-        setDescribeData(data);
-        setDescribeError(null);
-      })
-      .catch((e: any) => {
-        const status = e?.response?.status;
-        const backendMsg = e?.response?.data?.error;
-        if (status === 404) {
-          setDescribeData(null);
-          setDescribeError("Pod 已不存在或已被删除");
-        } else {
-          setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
-        }
-      })
-      .finally(() => setDescribeLoading(false));
+    if (describeTarget.kind === "pod") {
+      setDescribePodData(null);
+      fetchPodDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
+        .then((data) => {
+          setDescribePodData(data);
+          setDescribeError(null);
+        })
+        .catch((e: any) => {
+          const status = e?.response?.status;
+          const backendMsg = e?.response?.data?.error;
+          if (status === 404) {
+            setDescribePodData(null);
+            setDescribeError("Pod 已不存在或已被删除");
+          } else {
+            setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
+          }
+        })
+        .finally(() => setDescribeLoading(false));
+    } else {
+      setDescribeDeploymentData(null);
+      fetchDeploymentDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
+        .then((data) => {
+          setDescribeDeploymentData(data);
+          setDescribeError(null);
+        })
+        .catch((e: any) => {
+          const status = e?.response?.status;
+          const backendMsg = e?.response?.data?.error;
+          if (status === 404) {
+            setDescribeDeploymentData(null);
+            setDescribeError("Deployment 已不存在或已被删除");
+          } else {
+            setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
+          }
+        })
+        .finally(() => setDescribeLoading(false));
+    }
   }, [describeTarget]);
 
-  // Pod Describe：加载选中 Pod 的详细信息（Pod + Events），不跟随 Watch 变化，只在打开/刷新时请求一次
+  // Describe：打开或切换目标时拉取；不跟随 Watch，仅打开/刷新时请求
   useEffect(() => {
     if (!describeTarget) {
-      setDescribeData(null);
+      setDescribePodData(null);
+      setDescribeDeploymentData(null);
       setDescribeError(null);
       setDescribeLoading(false);
       return;
@@ -600,9 +631,20 @@ export const App: React.FC = () => {
   const openDescribeForPod = (pod: Pod) => {
     if (!effectiveClusterId) return;
     setDescribeTarget({
+      kind: "pod",
       clusterId: effectiveClusterId,
       namespace: pod.metadata.namespace,
       name: pod.metadata.name,
+    });
+  };
+
+  const openDescribeForDeployment = (d: DeploymentRow) => {
+    if (!effectiveClusterId) return;
+    setDescribeTarget({
+      kind: "deployment",
+      clusterId: effectiveClusterId,
+      namespace: d.metadata.namespace ?? "",
+      name: d.metadata.name,
     });
   };
 
@@ -1225,8 +1267,6 @@ export const App: React.FC = () => {
     [deployColumnWidths],
   );
 
-  const describeEvents = describeData?.events ?? [];
-
   const genericColumns: Column<K8sItem>[] = [
     {
       key: "name",
@@ -1751,21 +1791,20 @@ export const App: React.FC = () => {
                   </div>
                 </div>
 
-                <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
                   <span style={{ fontSize: 13, color: "#9ca3af" }}>已添加组合</span>
-                  <input
-                    type="text"
+                  <ClearableSearchInput
                     value={comboSearchKeyword}
-                    onChange={(e) => setComboSearchKeyword(e.target.value)}
+                    onChange={setComboSearchKeyword}
                     placeholder="搜索 kubeconfig 文件名 / 命名空间 / 别名 关键字"
-                    style={{
+                    style={{ minWidth: 220, flex: 1, maxWidth: 420 }}
+                    inputStyle={{
                       padding: "4px 8px",
                       borderRadius: 6,
                       border: "1px solid #1f2937",
                       backgroundColor: "#020617",
                       color: "#e5e7eb",
                       fontSize: 12,
-                      minWidth: 220,
                     }}
                   />
                 </div>
@@ -2099,21 +2138,22 @@ export const App: React.FC = () => {
                           }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <input
-                            type="text"
-                            value={clusterSearchKeyword}
-                            onChange={(e) => setClusterSearchKeyword(e.target.value)}
-                            placeholder="搜索 kubeconfig 文件名 / 命名空间 / 组合别名关键字"
-                            style={{
-                              margin: 8,
-                              padding: "6px 10px",
-                              borderRadius: 6,
-                              border: "1px solid #1f2937",
-                              backgroundColor: "#020617",
-                              color: "#e5e7eb",
-                              fontSize: 13,
-                            }}
-                          />
+                          <div style={{ margin: 8, minWidth: 0 }}>
+                            <ClearableSearchInput
+                              value={clusterSearchKeyword}
+                              onChange={setClusterSearchKeyword}
+                              placeholder="搜索 kubeconfig 文件名 / 命名空间 / 组合别名关键字"
+                              style={{ width: "100%", boxSizing: "border-box" }}
+                              inputStyle={{
+                                padding: "6px 10px",
+                                borderRadius: 6,
+                                border: "1px solid #1f2937",
+                                backgroundColor: "#020617",
+                                color: "#e5e7eb",
+                                fontSize: 13,
+                              }}
+                            />
+                          </div>
                           <div style={{ overflowY: "auto", flex: 1, maxHeight: 260 }}>
                             {clusterCombos
                               .filter((combo) => {
@@ -2299,19 +2339,18 @@ export const App: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <input
-                    type="text"
+                  <ClearableSearchInput
                     value={nameFilter}
-                    onChange={(e) => setNameFilter(e.target.value)}
+                    onChange={setNameFilter}
                     placeholder="按 Name 关键字过滤"
-                    style={{
+                    style={{ minWidth: 160 }}
+                    inputStyle={{
                       padding: "4px 8px",
                       borderRadius: 6,
                       border: "1px solid #1f2937",
                       backgroundColor: "#020617",
                       color: "#e5e7eb",
                       fontSize: 12,
-                      minWidth: 160,
                     }}
                   />
                 </div>
@@ -2667,15 +2706,23 @@ export const App: React.FC = () => {
                           <tr key={(d.metadata.uid as string) || menuKey} className="wl-table-row">
                             <td style={baseCell} title={d.metadata.name}>
                               <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
-                                <span
+                                <button
+                                  type="button"
+                                  onClick={() => openDescribeForDeployment(d)}
                                   style={{
+                                    padding: 0,
+                                    margin: 0,
+                                    border: "none",
+                                    background: "none",
+                                    color: "inherit",
+                                    cursor: "pointer",
                                     overflow: "hidden",
                                     textOverflow: "ellipsis",
                                     whiteSpace: "nowrap",
                                   }}
                                 >
                                   {d.metadata.name}
-                                </span>
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => copyName(d.metadata.name)}
@@ -2884,7 +2931,7 @@ export const App: React.FC = () => {
         }}
       />
 
-      {/* Pod Describe 右侧弹层 */}
+      {/* Describe 右侧弹层（Pod / Deployment 共用容器） */}
       {describeTarget && (
         <div
           style={{
@@ -2940,7 +2987,7 @@ export const App: React.FC = () => {
               title="拖拽调整宽度"
             />
 
-            {/* 标题栏：Pod 名称 + 关闭按钮 */}
+            {/* 标题栏 */}
             <div
               style={{
                 position: "sticky",
@@ -2956,7 +3003,8 @@ export const App: React.FC = () => {
             >
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <span style={{ fontSize: 14, fontWeight: 600 }}>
-                  Pod: {describeTarget.namespace}/{describeTarget.name}
+                  {describeTarget.kind === "deployment" ? "Deployment" : "Pod"}: {describeTarget.namespace}/
+                  {describeTarget.name}
                 </span>
                 {describeError && (
                   <span style={{ fontSize: 12, color: "#f97373", marginTop: 2 }}>错误：{describeError}</span>
@@ -2975,7 +3023,7 @@ export const App: React.FC = () => {
                     cursor: "pointer",
                     fontSize: 12,
                   }}
-                  title="复制 Namespace/Pod 名称"
+                  title="复制 Namespace/资源名称"
                 >
                   复制
                 </button>
@@ -3024,42 +3072,40 @@ export const App: React.FC = () => {
               }}
             >
               {describeLoading && <div style={{ color: "#9ca3af" }}>加载 Describe 中…</div>}
-              {!describeLoading && describeData && (
+              {!describeLoading && describeTarget.kind === "pod" && describePodData && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  {/* 基本信息 */}
                   <section>
                     <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>基本信息</h4>
                     <div style={{ fontSize: 12, color: "#cbd5f5", lineHeight: 1.6 }}>
-                      <div>Namespace：{describeData.pod.metadata.namespace}</div>
-                      <div>Name：{describeData.pod.metadata.name}</div>
+                      <div>Namespace：{describePodData.pod.metadata.namespace}</div>
+                      <div>Name：{describePodData.pod.metadata.name}</div>
                       <div>
-                        Node：{describeData.pod.spec?.nodeName ?? "-"}
-                        {describeData.pod.status?.hostIP ? ` (${describeData.pod.status.hostIP})` : ""}
+                        Node：{describePodData.pod.spec?.nodeName ?? "-"}
+                        {describePodData.pod.status?.hostIP ? ` (${describePodData.pod.status.hostIP})` : ""}
                       </div>
-                      <div>Pod IP：{describeData.pod.status?.podIP ?? "-"}</div>
-                      <div>Phase：{describeData.pod.status?.phase ?? "-"}</div>
+                      <div>Pod IP：{describePodData.pod.status?.podIP ?? "-"}</div>
+                      <div>Phase：{describePodData.pod.status?.phase ?? "-"}</div>
                     </div>
                   </section>
 
-                  {/* 标签 / 注解 */}
-                  {(describeData.pod.metadata.labels || describeData.pod.metadata.annotations) && (
+                  {(describePodData.pod.metadata.labels || describePodData.pod.metadata.annotations) && (
                     <section>
                       <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Labels & Annotations</h4>
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 12, lineHeight: 1.6 }}>
-                        {describeData.pod.metadata.labels && (
+                        {describePodData.pod.metadata.labels && (
                           <div>
                             <div style={{ marginBottom: 4, color: "#9ca3af" }}>Labels</div>
-                            {Object.entries(describeData.pod.metadata.labels).map(([k, v]) => (
+                            {Object.entries(describePodData.pod.metadata.labels).map(([k, v]) => (
                               <div key={k}>
                                 <span style={{ color: "#9ca3af" }}>{k}</span>: {v}
                               </div>
                             ))}
                           </div>
                         )}
-                        {describeData.pod.metadata.annotations && (
+                        {describePodData.pod.metadata.annotations && (
                           <div>
                             <div style={{ marginBottom: 4, color: "#9ca3af" }}>Annotations</div>
-                            {Object.entries(describeData.pod.metadata.annotations).map(([k, v]) => (
+                            {Object.entries(describePodData.pod.metadata.annotations).map(([k, v]) => (
                               <div key={k}>
                                 <span style={{ color: "#9ca3af" }}>{k}</span>: {v}
                               </div>
@@ -3070,12 +3116,11 @@ export const App: React.FC = () => {
                     </section>
                   )}
 
-                  {/* 容器 */}
-                  {describeData.pod.spec?.containers && describeData.pod.spec.containers.length > 0 && (
+                  {describePodData.pod.spec?.containers && describePodData.pod.spec.containers.length > 0 && (
                     <section>
                       <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Containers</h4>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
-                        {describeData.pod.spec.containers.map((c) => (
+                        {describePodData.pod.spec.containers.map((c) => (
                           <div
                             key={c.name}
                             style={{
@@ -3103,51 +3148,15 @@ export const App: React.FC = () => {
                     </section>
                   )}
 
-                  {/* Events */}
-                  <section>
-                    <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Events</h4>
-                    {describeEvents.length === 0 && (
-                      <div style={{ fontSize: 12, color: "#64748b" }}>暂无 Events</div>
-                    )}
-                    {describeEvents.length > 0 && (
-                      <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-                        {describeEvents.map((ev) => {
-                          const isWarning =
-                            (ev.type && ev.type.toLowerCase() === "warning") ||
-                            (ev.reason && ev.reason.toLowerCase().includes("fail"));
-                          return (
-                            <div
-                              key={ev.metadata.uid || `${ev.lastTimestamp}-${ev.reason}-${ev.message}`}
-                              style={{
-                                padding: "4px 6px",
-                                borderRadius: 4,
-                                marginBottom: 4,
-                                backgroundColor: isWarning ? "rgba(127,29,29,0.2)" : "transparent",
-                              }}
-                            >
-                              <div>
-                                <span
-                                  style={{
-                                    fontWeight: isWarning ? 700 : 500,
-                                    color: isWarning ? "#f97373" : "#e5e7eb",
-                                  }}
-                                >
-                                  {ev.type ?? "-"} {ev.reason ?? ""}
-                                </span>{" "}
-                                <span style={{ color: "#9ca3af" }}>
-                                  {ev.lastTimestamp ?? ev.firstTimestamp ?? ""}
-                                </span>
-                              </div>
-                              <div style={{ whiteSpace: "pre-wrap", color: isWarning ? "#fecaca" : "#cbd5f5" }}>
-                                {ev.message}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </section>
+                  <DescribeEventsSection events={describePodData.events ?? []} />
                 </div>
+              )}
+              {!describeLoading && describeTarget.kind === "deployment" && describeDeploymentData && (
+                <DeploymentDescribeContent
+                  view={describeDeploymentData.view}
+                  events={describeDeploymentData.events ?? []}
+                  ageLabel={formatPodAge(describeDeploymentData.view.creationTimestamp)}
+                />
               )}
             </div>
           </div>
