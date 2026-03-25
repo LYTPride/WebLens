@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchPodLogs, streamPodLogs } from "../api";
+import { ClearableSearchInput } from "./ClearableSearchInput";
 
 interface LogsTabProps {
   clusterId: string;
@@ -285,16 +286,15 @@ export const LogsTab: React.FC<LogsTabProps> = ({
         >
           {autoScroll ? "暂停滚动" : "自动滚动"}
         </button>
-        <input
-          type="text"
+        <ClearableSearchInput
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
+          onChange={(v) => {
+            setSearch(v);
             setCurrentMatchIndex(0);
           }}
           placeholder="搜索关键字"
-          style={{
-            width: 140,
+          style={{ width: 140 }}
+          inputStyle={{
             padding: "4px 8px",
             borderRadius: 4,
             border: "1px solid #334155",

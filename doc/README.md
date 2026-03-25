@@ -11,6 +11,7 @@
 ## 用户手册（guide）
 
 - [Pods 使用手册](./guide/pods.md)
+- [Deployments 使用手册](./guide/deployments.md)
 - [Shell 使用手册](./guide/shell.md)
 - [文件管理面板使用手册](./guide/file-manager.md)
 

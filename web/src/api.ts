@@ -86,6 +86,87 @@ export interface PodDescribe {
   events: K8sEvent[];
 }
 
+/** Deployment Describe 视图块（与后端 DeploymentDescribeView 对齐） */
+export interface EnvDescribeView {
+  name: string;
+  value?: string;
+  from?: string;
+}
+
+export interface ContainerDescribeView {
+  name: string;
+  image: string;
+  ports?: string[];
+  requests?: Record<string, string>;
+  limits?: Record<string, string>;
+  env?: EnvDescribeView[];
+  volumeMounts?: string[];
+}
+
+export interface VolumeDescribeView {
+  name: string;
+  kind: string;
+}
+
+export interface K8sTolerationLoose {
+  key?: string;
+  operator?: string;
+  value?: string;
+  effect?: string;
+  tolerationSeconds?: number;
+}
+
+export interface DeploymentReplicaStatusView {
+  desired: number;
+  updated: number;
+  ready: number;
+  available: number;
+  unavailable: number;
+}
+
+export interface RollingUpdateDescribeView {
+  maxUnavailable?: string;
+  maxSurge?: string;
+}
+
+export interface DeploymentConditionView {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+  lastTransitionTime?: string;
+  lastUpdateTime?: string;
+}
+
+export interface DeploymentPodTemplateView {
+  containers: ContainerDescribeView[];
+  initContainers?: ContainerDescribeView[];
+  volumes?: VolumeDescribeView[];
+  serviceAccount?: string;
+  nodeSelector?: Record<string, string>;
+  tolerations?: K8sTolerationLoose[];
+}
+
+export interface DeploymentDescribeView {
+  name: string;
+  namespace: string;
+  creationTimestamp?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  selector?: string;
+  replicas: DeploymentReplicaStatusView;
+  conditions?: DeploymentConditionView[];
+  podTemplate: DeploymentPodTemplateView;
+  strategyType: string;
+  rollingUpdate?: RollingUpdateDescribeView;
+  progressDeadlineSeconds?: number | null;
+}
+
+export interface DeploymentDescribe {
+  view: DeploymentDescribeView;
+  events: K8sEvent[];
+}
+
 export interface ClusterCombo {
   id: string;
   clusterId: string;
@@ -441,6 +522,17 @@ export async function fetchPodDescribe(
   return res.data;
 }
 
+export async function fetchDeploymentDescribe(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<DeploymentDescribe> {
+  const res = await api.get<DeploymentDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/describe`,
+  );
+  return res.data;
+}
+
 export async function fetchPodLogs(
   clusterId: string,
   namespace: string,
@@ -550,6 +642,68 @@ export async function applyPodYaml(
 export async function deletePod(clusterId: string, namespace: string, pod: string): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}`,
+  );
+}
+
+/** Deployment YAML（编辑） */
+export async function fetchDeploymentYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+/** 应用 Deployment YAML，返回更新后的对象（JSON） */
+export async function applyDeploymentYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  yamlBody: string,
+): Promise<unknown> {
+  const res = await api.put(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
+  return res.data;
+}
+
+export async function scaleDeployment(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  replicas: number,
+): Promise<unknown> {
+  const res = await api.patch(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
+    { replicas },
+  );
+  return res.data;
+}
+
+export async function restartDeployment(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<unknown> {
+  const res = await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+  );
+  return res.data;
+}
+
+export async function deleteDeployment(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  await api.delete(
+    `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
   );
 }
 
