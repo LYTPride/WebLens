@@ -29,4 +29,10 @@ WebLens 采用前后端分离 + 同源部署模式：
 - `web/src/components/*`：底部工作区、YAML 编辑、可拖拽表头 `ResizableTh`、日志、Shell 等
 - `web/src/hooks/useColumnResize.ts`：表格列宽拖拽逻辑（Pods / Deployments 复用）
 
+## 前端 YAML 编辑（Monaco）
+
+- 组件：`web/src/components/YamlMonacoEditor.tsx`，由 `PodYamlEditTab`（Pod / Deployment Edit）复用。
+- 初始化顺序：`main.tsx` → `monaco/monacoInit.ts` → 先 `yamlMonacoEnv.ts`（Vite `?worker` 注册 `MonacoEnvironment`）→ 再 `import * as monaco from "monaco-editor"` 与 `@monaco-editor/react` 的 **`loader.config({ monaco })`**，使运行时不再依赖外网 CDN 拉取 Monaco。
+- 依赖：`monaco-editor`、`@monaco-editor/react`（见 `web/package.json`）；生产构建会将编辑器打入静态资源，首屏 JS 体积会增大，属预期。
+
 
