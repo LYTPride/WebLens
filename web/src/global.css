@@ -83,14 +83,79 @@ body {
   color: #e2e8f0;
 }
 
-/* 三点按钮：背景与文字色仅由 class 控制，悬停高亮才能生效 */
-.wl-pod-menu-trigger {
+/* 列表行悬停（Pods / Deployments 共用） */
+.wl-table-body tr.wl-table-row {
+  transition: background-color 0.12s ease;
+}
+.wl-table-body tr.wl-table-row:hover {
+  background-color: #0f172a;
+}
+
+/* 三点按钮：Pods / Deployments 统一（保留旧 class 别名） */
+.wl-pod-menu-trigger,
+.wl-table-menu-trigger {
   background-color: #1e293b;
   color: #9ca3af;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  border: 1px solid #1f2937;
 }
-.wl-pod-menu-trigger:hover {
+.wl-pod-menu-trigger:hover,
+.wl-table-menu-trigger:hover {
   background-color: #334155;
   color: #e2e8f0;
+  border-color: #475569;
+}
+.wl-pod-menu-trigger:active,
+.wl-table-menu-trigger:active {
+  background-color: #1e293b;
+}
+.wl-table-menu-trigger:focus-visible,
+.wl-pod-menu-trigger:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+.wl-table-menu-trigger:disabled,
+.wl-pod-menu-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 表格行内下拉菜单容器（与现有内联阴影一致，便于后续统一改主题） */
+.wl-table-dropdown-menu {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* ClearableSearchInput 清空按钮 */
+.wl-clearable-search-clear {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.wl-clearable-search-clear:hover {
+  color: #e2e8f0;
+  background-color: rgba(148, 163, 184, 0.12);
+}
+.wl-clearable-search-clear:active {
+  background-color: rgba(148, 163, 184, 0.2);
 }
 

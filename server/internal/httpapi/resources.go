@@ -13,6 +13,7 @@ import (
 
 	"weblens/server/internal/cluster"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -90,6 +91,14 @@ func setListCache(key string, data interface{}) {
 	listCacheMu.Lock()
 	listCache[key] = listCacheEntry{ts: time.Now(), data: data}
 	listCacheMu.Unlock()
+}
+
+// invalidateDeploymentListCache 在 Deployment 变更后丢弃 list 短缓存，避免列表长时间陈旧
+func invalidateDeploymentListCache(clusterID, deploymentNS string) {
+	listCacheMu.Lock()
+	defer listCacheMu.Unlock()
+	delete(listCache, listCacheKey("deployments", clusterID, deploymentNS))
+	delete(listCache, listCacheKey("deployments", clusterID, corev1.NamespaceAll))
 }
 
 // computePodHealth 根据 Pod 当前状态计算 0~100 的健康分并映射为四档标签。
@@ -718,6 +727,151 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 		watchAndStream(c, id, ns, w)
+	})
+
+	// Get Deployment YAML
+	r.GET("/api/clusters/:id/deployments/:namespace/:name/yaml", func(c *gin.Context) {
+		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("name")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		dep, err := client.AppsV1().Deployments(ns).Get(c.Request.Context(), name, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		dep.ManagedFields = nil
+		raw, err := yaml.Marshal(dep)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Data(http.StatusOK, "text/yaml; charset=utf-8", raw)
+	})
+
+	registerDeploymentDescribeRoute(r, reg)
+
+	// Apply Deployment（YAML 更新）
+	r.PUT("/api/clusters/:id/deployments/:namespace/:name", func(c *gin.Context) {
+		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("name")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		body, err := c.GetRawData()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var dep appsv1.Deployment
+		if err := yaml.Unmarshal(body, &dep); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid YAML: " + err.Error()})
+			return
+		}
+		existing, err := client.AppsV1().Deployments(ns).Get(c.Request.Context(), name, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		dep.Namespace = ns
+		dep.Name = name
+		dep.ResourceVersion = existing.ResourceVersion
+		updated, err := client.AppsV1().Deployments(ns).Update(c.Request.Context(), &dep, metav1.UpdateOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		invalidateDeploymentListCache(id, ns)
+		c.JSON(http.StatusOK, updated)
+	})
+
+	type deploymentScaleRequest struct {
+		Replicas int32 `json:"replicas"`
+	}
+
+	// Scale Deployment（副本数）
+	r.PATCH("/api/clusters/:id/deployments/:namespace/:name/scale", func(c *gin.Context) {
+		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("name")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		var req deploymentScaleRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if req.Replicas < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "replicas must be >= 0"})
+			return
+		}
+		ctx := c.Request.Context()
+		scale, err := client.AppsV1().Deployments(ns).GetScale(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		scale.Spec.Replicas = req.Replicas
+		_, err = client.AppsV1().Deployments(ns).UpdateScale(ctx, name, scale, metav1.UpdateOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		dep, err := client.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		invalidateDeploymentListCache(id, ns)
+		c.JSON(http.StatusOK, dep)
+	})
+
+	// Restart Deployment（rollout：更新 PodTemplate annotation）
+	r.POST("/api/clusters/:id/deployments/:namespace/:name/restart", func(c *gin.Context) {
+		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("name")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		ctx := c.Request.Context()
+		dep, err := client.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if dep.Spec.Template.Annotations == nil {
+			dep.Spec.Template.Annotations = make(map[string]string)
+		}
+		dep.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+		updated, err := client.AppsV1().Deployments(ns).Update(ctx, dep, metav1.UpdateOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		invalidateDeploymentListCache(id, ns)
+		c.JSON(http.StatusOK, updated)
+	})
+
+	// Delete Deployment
+	r.DELETE("/api/clusters/:id/deployments/:namespace/:name", func(c *gin.Context) {
+		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("name")
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		err := client.AppsV1().Deployments(ns).Delete(c.Request.Context(), name, metav1.DeleteOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		invalidateDeploymentListCache(id, ns)
+		c.Status(http.StatusNoContent)
 	})
 
 	// StatefulSets
