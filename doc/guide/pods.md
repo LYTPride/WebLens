@@ -7,7 +7,7 @@
 Pods 页面由三部分组成：
 
 - 顶部：集群组合选择（cluster + namespace）与应用按钮
-- 中部：Pods 表格（支持按 Name 过滤）
+- 中部：Pods 表格（支持按 Name 过滤、列排序与 Watch 实时重排；详见 [资源列表说明](./resource-lists.md)）
 - 底部：工作区（Logs / Shell / 编辑等标签）
 
 ## 状态标签
