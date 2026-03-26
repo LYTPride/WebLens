@@ -2,6 +2,8 @@
 
 欢迎使用 WebLens 文档中心。本文档用于快速定位用户手册、开发文档与规划信息。
 
+根目录 `README.md` 与本页 **只概括重大核心能力**；具体交互与变更默认落在 `guide/`、`dev/` 与 `changelog.md`。
+
 ## 如何阅读
 
 - 如果你是使用者（运维/测试）：先看 `guide/`
@@ -12,6 +14,7 @@
 
 - [Pods 使用手册](./guide/pods.md)
 - [Deployments 使用手册](./guide/deployments.md)
+- [资源列表：筛选、排序与实时更新](./guide/resource-lists.md)
 - [Shell 使用手册](./guide/shell.md)
 - [文件管理面板使用手册](./guide/file-manager.md)
 

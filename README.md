@@ -2,17 +2,19 @@
 
 WebLens 是一个面向 Kubernetes 运维场景的 Web 控制台。它通过浏览器提供多集群资源查看、Pod 排障与基础运维能力，后端作为 Kubernetes API Proxy 统一处理请求。
 
+> 说明：本 README **只概括重大核心特色**；字段级交互、样式与迭代细节默认写在 `doc/`，不在此逐条展开。
+
 ## 核心功能
 
-- 多集群接入与组合切换（cluster + namespace preset）
-- **Pods** 列表（状态标签、列宽拖拽；**点击 Name** 打开右侧 Describe；Shell/Logs/编辑等）
-- **Deployments** 列表（可调列宽、Conditions；**点击 Name** 打开结构化 Describe 侧栏；Scale / Restart / Edit YAML / Delete；与 Pods 作用域缓存一致）
-- **YAML 编辑**（Pod / Deployment 共用）：Monaco Editor（语法高亮、minimap、折叠、sticky 上下文、搜索与保存）
-- 其他 Workloads / Config / Network / Cluster 资源浏览
-- Pod 状态标签（健康/关注/警告/严重）与全局风险提示
-- Pod Logs（流式跟随、历史上翻、下载）
-- Pod Shell（WebSocket exec，支持重连）
-- Shell 右侧文件管理（单条地址栏、目录浏览、上传/下载/删除/重命名/新建目录；**传输任务**区展示上传与下载状态及进度，多任务可折叠滚动；默认可调宽度）
+- **多集群**：组合选择（cluster + namespace preset）、应用与刷新
+- **Pods / Deployments**：列表与 Watch 实时同步；Describe 侧栏；Deployments 支持扩缩容、重启、YAML、删除
+- **列表能力**（Pods、Deployments 等）：Name 筛选、表头拖拽调宽、**按列排序**（Watch 更新后仍按当前排序重排；开启排序时若某行排序位置因数据变化而改变，可有轻量行内提示）
+- **YAML 编辑**（Pod / Deployment）：Monaco（高亮、minimap、折叠、sticky 上下文、搜索与保存）
+- **其他资源**：Workloads / Config / Network / Cluster 等浏览
+- **Pod 健康标签**（健康 / 关注 / 警告 / 严重）与范围级风险提示
+- **Pod Logs**：流式、历史上翻、下载
+- **Pod Shell**：WebSocket exec，支持重连
+- **Shell 旁文件管理**：目录浏览与上传/下载/删除等；传输任务汇总
 
 ## 快速开始
 
@@ -41,23 +43,12 @@ npm run dev
 
 ## 文档导航
 
-详细文档已拆分到 `doc/` 目录：
+详细文档在 `doc/`：
 
 - 文档二级首页：`doc/README.md`
-- 用户手册：`doc/guide/`
-  - `doc/guide/pods.md`
-  - `doc/guide/deployments.md`
-  - `doc/guide/shell.md`
-  - `doc/guide/file-manager.md`
+- 用户手册：`doc/guide/`（含 Pods、Deployments、Shell、文件管理、**资源列表排序与实时更新**）
 - 开发文档：`doc/dev/`
-  - `doc/dev/architecture.md`
-  - `doc/dev/health-label-model.md`
-  - `doc/dev/shell-implementation.md`
-  - `doc/dev/file-manager-design.md`
-  - `doc/dev/changelog.md`
-- 规划路线：`doc/roadmap.md`
-
-后续新增功能建议按同样结构补充：用户视角写入 `doc/guide/`，实现原理写入 `doc/dev/`。
+- 规划：`doc/roadmap.md`
 
 ## 技术栈
 
@@ -68,4 +59,3 @@ npm run dev
 ## License
 
 暂未指定（建议补充 `LICENSE` 文件后在此处更新）。
-
