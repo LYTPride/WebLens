@@ -159,3 +159,16 @@ body {
   background-color: rgba(148, 163, 184, 0.2);
 }
 
+/*
+ * Monaco：sticky scroll 与 wordWrap 并存时，仅加固冻结行内容区（不影响正文 .view-lines）。
+ * 与 monaco 自带 stickyScroll.css 的 nowrap 叠加，避免异常子节点撑开可视高度。
+ */
+.monaco-editor .sticky-widget .sticky-line-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.monaco-editor .sticky-widget .sticky-line-number {
+  overflow: hidden;
+}
+

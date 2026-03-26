@@ -22,6 +22,7 @@
 - 优化 UI：路径不存在提示、工具栏按钮置灰
 - 路径区合并为单条地址栏：默认面包屑（`›` 分隔、可横向滚动），空白区点击或双击进入输入模式；Enter 跳转，Esc/失焦恢复面包屑；保留手动路径不存在时的固定提示
 - 默认展开宽度调至 520px，拖拽范围约 300–780px；工具栏优先单行展示（极窄时可横向滚动）
+- **传输任务**：`FileTransferTasksPanel` + 工具栏下方面板；上传走 `onUploadProgress`；下载 `fetch` 流式读 body，区分 Content-Length **真实**进度、列表原始大小 **估算**进度与无法估算三种展示（见 `doc/guide/file-manager.md`）
 
 ### Deployments 页面与运维 API
 
@@ -38,6 +39,7 @@
 - YAML 编辑改为 **Monaco Editor**（`YamlMonacoEditor` + `monaco/yamlMonacoEnv` Worker）：内置 **stickyScroll**（`indentationModel`）、行号、minimap、折叠；移除自研 textarea 叠层与顶部路径条
 - `PodYamlEditTab` 接入上述能力；后续其他 YAML 编辑可复用同一组件
 - **启动与离线**：入口 `web/src/main.tsx` 加载 `monaco/monacoInit.ts`，在 Worker 注册后执行 `loader.config({ monaco })`，强制使用 **npm 包内 Monaco**，避免 `@monaco-editor/react` 默认走 CDN 导致编辑页长期停在 **Loading...**（内网/防火墙环境常见）
+- **Sticky Scroll 与换行**：`npm install` 后 `postinstall` 运行 `web/scripts/apply-monaco-sticky-patch.cjs`，修正原生 sticky 在 `wordWrap` 下的占位问题（无需额外 npm 依赖）
 
 ### 搜索/过滤输入
 

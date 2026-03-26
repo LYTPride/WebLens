@@ -360,6 +360,9 @@ export async function uploadContainerFile(
   container: string,
   dstPath: string,
   file: File,
+  opts?: {
+    onUploadProgress?: (ev: { loaded: number; total: number | null }) => void;
+  },
 ): Promise<void> {
   const form = new FormData();
   form.set("path", dstPath);
@@ -370,8 +373,67 @@ export async function uploadContainerFile(
     {
       params: { container },
       headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (e) => {
+        const loaded = e.loaded;
+        const total =
+          typeof e.total === "number" && e.total > 0 ? e.total : file.size > 0 ? file.size : null;
+        opts?.onUploadProgress?.({ loaded, total });
+      },
     },
   );
+}
+
+/**
+ * 通过 fetch 拉取容器文件打包（tar），便于统计已接收字节。
+ * 后端为流式响应时通常无 Content-Length，此时 total 为 null，仅 loaded 递增，不做假百分比。
+ */
+export async function downloadContainerArchiveBlob(
+  url: string,
+  opts?: {
+    signal?: AbortSignal;
+    onProgress?: (ev: { loaded: number; total: number | null }) => void;
+  },
+): Promise<Blob> {
+  const res = await fetch(url, { credentials: "same-origin", signal: opts?.signal });
+  const cl = res.headers.get("content-length");
+  const parsed = cl ? parseInt(cl, 10) : NaN;
+  const total = !Number.isNaN(parsed) && parsed > 0 ? parsed : null;
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const text = await res.text();
+      try {
+        const j = JSON.parse(text) as { error?: string };
+        if (j?.error) msg = j.error;
+      } catch {
+        if (text) msg = text.slice(0, 200);
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+
+  if (!res.body) {
+    const blob = await res.blob();
+    opts?.onProgress?.({ loaded: blob.size, total: total ?? (blob.size > 0 ? blob.size : null) });
+    return blob;
+  }
+
+  const reader = res.body.getReader();
+  let loaded = 0;
+  const chunks: BlobPart[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value?.byteLength) {
+      loaded += value.byteLength;
+      chunks.push(value);
+      opts?.onProgress?.({ loaded, total });
+    }
+  }
+  return new Blob(chunks);
 }
 
 export type PodWatchEventType = "ADDED" | "MODIFIED" | "DELETED" | "ERROR";
