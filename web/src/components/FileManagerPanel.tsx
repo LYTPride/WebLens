@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteInContainer,
+  downloadContainerArchiveBlob,
   downloadContainerFilesUrl,
   listContainerFiles,
   mkdirInContainer,
@@ -8,6 +9,11 @@ import {
   uploadContainerFile,
   type ContainerFileEntry,
 } from "../api";
+import {
+  FileTransferTasksPanel,
+  formatTransferBytes,
+  type TransferTask,
+} from "./FileTransferTasksPanel";
 
 type Props = {
   clusterId: string;
@@ -62,6 +68,7 @@ export const FileManagerPanel: React.FC<Props> = ({
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
+  const [transferTasks, setTransferTasks] = useState<TransferTask[]>([]);
   const skipAddressBlurRef = useRef(false);
   // 仅用于区分：地址栏手动确认路径后的跳转失败，需要显示更友好的固定提示语
   const manualEnterPendingRef = useRef(false);
@@ -143,6 +150,20 @@ export const FileManagerPanel: React.FC<Props> = ({
     return names.map((name) => joinPath(currentPath, name));
   }, [selected, currentPath]);
 
+  /** 勾选项在当前列表中的 size 之和；任一项缺失或 size&lt;0 则不做 tar 进度估算 */
+  const selectedListBytesForTarEstimate = useMemo(() => {
+    const names = new Set(Object.keys(selected).filter((k) => selected[k]));
+    if (names.size === 0) return { ok: false as const, bytes: 0 };
+    let sum = 0;
+    for (const n of names) {
+      const it = items.find((i) => i.name === n);
+      if (!it || it.size < 0) return { ok: false as const, bytes: 0 };
+      sum += it.size;
+    }
+    if (sum <= 0) return { ok: false as const, bytes: 0 };
+    return { ok: true as const, bytes: sum };
+  }, [items, selected]);
+
   const canRename = useMemo(() => Object.keys(selected).filter((k) => selected[k]).length === 1, [selected]);
 
   const breadcrumbs = useMemo(() => {
@@ -174,15 +195,160 @@ export const FileManagerPanel: React.FC<Props> = ({
     return `${(n / (1024 * 1024 * 1024)).toFixed(1)}GB`;
   };
 
-  const doDownload = () => {
+  const removeTransferTask = useCallback((id: string) => {
+    setTransferTasks((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const scheduleRemoveTransferTask = useCallback(
+    (id: string) => {
+      window.setTimeout(() => removeTransferTask(id), 12000);
+    },
+    [removeTransferTask],
+  );
+
+  const newTaskId = () =>
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  const doDownload = async () => {
     if (selectedPaths.length === 0) return;
+    const estimateBytes = selectedListBytesForTarEstimate.ok
+      ? selectedListBytesForTarEstimate.bytes
+      : 0;
+    const label =
+      selectedPaths.length === 1
+        ? selectedPaths[0].replace(/^.*\//, "") || "download.tar"
+        : `打包 ${selectedPaths.length} 项 → weblens-files-${pod}.tar`;
+    const id = newTaskId();
+    const initialBasis = estimateBytes > 0 ? "estimated" : "unknown";
+    setTransferTasks((prev) => [
+      ...prev,
+      {
+        id,
+        kind: "download",
+        label,
+        status: "running",
+        percent: estimateBytes > 0 ? 0 : null,
+        loaded: 0,
+        total: null,
+        downloadBasis: initialBasis,
+        estimateTotalBytes: estimateBytes > 0 ? estimateBytes : undefined,
+        detail:
+          estimateBytes > 0
+            ? `列表原始总大小 ${formatTransferBytes(estimateBytes)}，将用于估算进度\ntar 流式响应通常无 Content-Length`
+            : "正在连接…\n流式打包，无总大小可用于估算（勾选项含未知大小或总大小为 0）",
+      },
+    ]);
     const url = downloadContainerFilesUrl(clusterId, namespace, pod, container, selectedPaths);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `weblens-files-${pod}.tar`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    try {
+      const blob = await downloadContainerArchiveBlob(url, {
+        onProgress: ({ loaded, total: clTotal }) => {
+          if (clTotal != null && clTotal > 0) {
+            const pct = Math.min(99, Math.round((loaded / clTotal) * 100));
+            setTransferTasks((prev) =>
+              prev.map((t) =>
+                t.id === id
+                  ? {
+                      ...t,
+                      downloadBasis: "exact",
+                      total: clTotal,
+                      loaded,
+                      percent: pct,
+                      estimateTotalBytes: undefined,
+                      detail: `真实进度（HTTP Content-Length：${formatTransferBytes(clTotal)}）`,
+                    }
+                  : t,
+              ),
+            );
+            return;
+          }
+          if (estimateBytes > 0) {
+            const raw = loaded / estimateBytes;
+            const barPct = raw >= 1 ? 97 : Math.min(97, Math.round(raw * 100));
+            setTransferTasks((prev) =>
+              prev.map((t) =>
+                t.id === id
+                  ? {
+                      ...t,
+                      downloadBasis: "estimated",
+                      estimateTotalBytes: estimateBytes,
+                      loaded,
+                      total: null,
+                      percent: barPct,
+                      detail: `已接收 ${formatTransferBytes(loaded)} / ${formatTransferBytes(estimateBytes)}（估算）\n流式打包中，按原始文件大小估算`,
+                    }
+                  : t,
+              ),
+            );
+            return;
+          }
+          setTransferTasks((prev) =>
+            prev.map((t) =>
+              t.id === id
+                ? {
+                    ...t,
+                    downloadBasis: "unknown",
+                    loaded,
+                    total: null,
+                    percent: null,
+                    estimateTotalBytes: undefined,
+                    detail: `已接收 ${loaded.toLocaleString()} 字节\n流式打包，无总大小`,
+                  }
+                : t,
+            ),
+          );
+        },
+      });
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = `weblens-files-${pod}.tar`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(href);
+      setTransferTasks((prev) =>
+        prev.map((t) => {
+          if (t.id !== id) return t;
+          const basis = t.downloadBasis;
+          let detail: string;
+          if (basis === "exact") {
+            detail = "已触发浏览器保存（真实进度 · Content-Length）";
+          } else if (basis === "estimated") {
+            detail =
+              "已触发浏览器保存。tar 实际体积可能大于或小于列表估算（压缩、头信息、目录条目等）";
+          } else {
+            detail = "已触发浏览器保存（流式打包，无总大小）";
+          }
+          return {
+            ...t,
+            status: "success",
+            loaded: blob.size,
+            total: blob.size,
+            percent: basis === "unknown" ? null : 100,
+            detail,
+          };
+        }),
+      );
+      onToast?.("下载完成");
+      scheduleRemoveTransferTask(id);
+    } catch (e: any) {
+      const msg = e?.message ?? "下载失败";
+      setTransferTasks((prev) =>
+        prev.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                status: "error",
+                percent: null,
+                detail: msg,
+              }
+            : t,
+        ),
+      );
+      scheduleRemoveTransferTask(id);
+    }
   };
 
   const doDelete = async () => {
@@ -231,13 +397,58 @@ export const FileManagerPanel: React.FC<Props> = ({
   };
 
   const doUpload = async (file: File) => {
+    const id = newTaskId();
+    const knownTotal = file.size > 0 ? file.size : null;
+    setTransferTasks((prev) => [
+      ...prev,
+      {
+        id,
+        kind: "upload",
+        label: file.name,
+        status: "running",
+        percent: knownTotal ? 0 : null,
+        loaded: 0,
+        total: knownTotal,
+      },
+    ]);
     try {
       const dst = joinPath(currentPath, file.name);
-      await uploadContainerFile(clusterId, namespace, pod, container, dst, file);
+      await uploadContainerFile(clusterId, namespace, pod, container, dst, file, {
+        onUploadProgress: ({ loaded, total }) => {
+          const effTotal = total != null && total > 0 ? total : knownTotal;
+          const pct =
+            effTotal != null && effTotal > 0
+              ? Math.min(100, Math.round((loaded / effTotal) * 100))
+              : null;
+          setTransferTasks((prev) =>
+            prev.map((x) =>
+              x.id === id ? { ...x, loaded, total: effTotal, percent: pct } : x,
+            ),
+          );
+        },
+      });
+      setTransferTasks((prev) =>
+        prev.map((x) =>
+          x.id === id
+            ? {
+                ...x,
+                status: "success",
+                percent: x.percent != null ? 100 : null,
+                loaded: file.size,
+                total: file.size > 0 ? file.size : x.loaded,
+              }
+            : x,
+        ),
+      );
       onToast?.("上传成功");
       refresh();
+      scheduleRemoveTransferTask(id);
     } catch (e: any) {
-      setError(e?.response?.data?.error ?? e?.message ?? "上传失败");
+      const msg = e?.response?.data?.error ?? e?.message ?? "上传失败";
+      setTransferTasks((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, status: "error", percent: null, detail: msg } : x)),
+      );
+      scheduleRemoveTransferTask(id);
     }
   };
 
@@ -385,14 +596,17 @@ export const FileManagerPanel: React.FC<Props> = ({
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           style={{ display: "none" }}
           onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) doUpload(f);
+            const list = e.target.files;
+            if (list?.length) Array.from(list).forEach((f) => void doUpload(f));
             e.currentTarget.value = "";
           }}
         />
       </div>
+
+      <FileTransferTasksPanel tasks={transferTasks} onDismissTask={removeTransferTask} />
 
       {error && (
         <div style={{ padding: "8px 12px", color: "#f87171", fontSize: 12, borderBottom: "1px solid #0b1220" }}>
