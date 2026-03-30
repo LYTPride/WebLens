@@ -30,8 +30,9 @@ func isForbiddenClusterScope(err error) bool {
 	return strings.Contains(s, "forbidden") && strings.Contains(s, "cluster scope")
 }
 
-// listCacheEntry / listCache：针对各类 List 结果做一个极短 TTL（1 秒）的软缓存，
-// 用于吸收多个前端在同一时间段对同一资源的并发轮询请求，降低对 kube-apiserver 的压力。
+// listCacheEntry / listCache：针对各类 **HTTP List** 结果做一个极短 TTL（1 秒）的软缓存，
+// 用于吸收多个前端在同一时间段对同一资源的并发 list 请求，降低对 kube-apiserver 的压力。
+// Watch 流不走此缓存；实时增量仅依赖 watch + 前端 raw state reducer。
 type listCacheEntry struct {
 	ts   time.Time
 	data interface{}
@@ -331,6 +332,8 @@ func watchAndStream(c *gin.Context, id, ns string, w watch.Interface) {
 
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
+	// 关闭常见反向代理对响应体的缓冲，避免 watch 事件被攒批延迟（运维体感「一分钟才更新」）
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.WriteHeader(http.StatusOK)
 
 	flusher, ok := c.Writer.(http.Flusher)
@@ -358,6 +361,54 @@ func watchAndStream(c *gin.Context, id, ns string, w watch.Interface) {
 			}
 			if err := enc.Encode(&out); err != nil {
 				log.Printf("watch encode error cluster=%s namespace=%s: %v", id, ns, err)
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// watchPodsStream 与 watchAndStream 相同协议，但对每个事件中的 Pod 调用 computePodHealth，
+// 输出结构与 GET /pods 列表一致（PodWithHealth），避免前端用 watch 增量覆盖后丢失 healthLabel 而回退为「健康」。
+func watchPodsStream(c *gin.Context, id, ns string, w watch.Interface) {
+	defer w.Stop()
+
+	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.WriteHeader(http.StatusOK)
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		log.Printf("watch pods cluster=%s namespace=%s: response writer does not support flush", id, ns)
+		return
+	}
+
+	enc := json.NewEncoder(c.Writer)
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case ev, ok := <-w.ResultChan():
+			if !ok {
+				return
+			}
+			var outObj interface{} = ev.Object
+			if pod, ok := ev.Object.(*corev1.Pod); ok {
+				p := *pod
+				h := computePodHealth(pod, time.Now())
+				outObj = PodWithHealth{Pod: p, PodHealth: h}
+			}
+			out := struct {
+				Type   watch.EventType `json:"type"`
+				Object interface{}     `json:"object"`
+			}{
+				Type:   ev.Type,
+				Object: outObj,
+			}
+			if err := enc.Encode(&out); err != nil {
+				log.Printf("watch pods encode error cluster=%s namespace=%s: %v", id, ns, err)
 				return
 			}
 			flusher.Flush()
@@ -510,10 +561,10 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 
-		// 使用 resourceVersion=0：从当前状态开始发送 ADDED 事件，然后持续推送变更
+		// 不固定 ResourceVersion=0：与 apiserver「当前版本」对齐持续增量；AllowWatchBookmarks 利于长连接书签
 		w, err := client.CoreV1().Pods(ns).Watch(c.Request.Context(), metav1.ListOptions{
-			Watch:           true,
-			ResourceVersion: "0",
+			Watch:               true,
+			AllowWatchBookmarks: true,
 		})
 		if err != nil {
 			// 没有 watch 权限时返回 403，由前端决定是否回退到轮询
@@ -524,7 +575,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		watchAndStream(c, id, ns, w)
+		watchPodsStream(c, id, ns, w)
 	})
 
 	// Get Pod YAML（用于编辑）
@@ -715,8 +766,8 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 		w, err := client.AppsV1().Deployments(ns).Watch(c.Request.Context(), metav1.ListOptions{
-			Watch:           true,
-			ResourceVersion: "0",
+			Watch:               true,
+			AllowWatchBookmarks: true,
 		})
 		if err != nil {
 			if isForbiddenClusterScope(err) {
@@ -922,8 +973,8 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 		w, err := client.AppsV1().StatefulSets(ns).Watch(c.Request.Context(), metav1.ListOptions{
-			Watch:           true,
-			ResourceVersion: "0",
+			Watch:               true,
+			AllowWatchBookmarks: true,
 		})
 		if err != nil {
 			if isForbiddenClusterScope(err) {
@@ -1479,5 +1530,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		watchAndStream(c, id, ns, w)
 	})
+
+	RegisterStatefulSetRoutes(r, reg)
 }
 

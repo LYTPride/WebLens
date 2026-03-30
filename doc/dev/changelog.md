@@ -4,6 +4,14 @@
 
 ## 2026-03（近期）
 
+### 资源列表架构与 Watch
+
+- 统一 **list（快照）+ watch（增量）+ 作用域内跳过重复 list**：共享 `web/src/resourceList/watchEventReducer.ts`（Pods 按 `uid`，Deployments / StatefulSets / 其他 namespaced 资源按 `namespace/name`）
+- 开发约定与后续资源接入清单：`web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md`；文档索引：`doc/dev/resource-list-dataflow.md`
+- 修复在 **Deployments** 等视图下后台 `loadPods` 成功后未更新 `lastPodsListFetchRef`，导致切回 Pods 误触发重复全量 list、体感滞后的问题
+- Watch 客户端：流结束后自动重连；服务端 Watch 响应头 `X-Accel-Buffering: no`、Pods watch 输出 `PodWithHealth` 与列表一致，避免健康标签被裸 Pod 覆盖漂移
+- 表头 sticky 与 hover 高亮：`th.wl-table-sticky-head`（`ResizableTh` 与全选列等统一 class）
+
 ### Pod 状态标签
 
 - 新增 `healthLabel` / `healthReasons` / `healthScore`

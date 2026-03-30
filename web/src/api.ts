@@ -15,6 +15,9 @@ export interface Pod {
     namespace: string;
     uid: string;
     creationTimestamp?: string;
+    /** 存在时表示 Pod 正在删除，Status 列应展示 Terminating */
+    deletionTimestamp?: string;
+    ownerReferences?: Array<{ kind: string; name: string; uid?: string; controller?: boolean }>;
   };
   status?: {
     phase?: string;
@@ -43,6 +46,8 @@ export interface Pod {
   spec?: {
     nodeName?: string;
     containers?: Array<{ name: string }>;
+    /** 列表接口若带 volumes，可用于展示 Pod 挂载的 PVC 名称 */
+    volumes?: Array<{ name?: string; persistentVolumeClaim?: { claimName?: string } }>;
   };
   // 后端计算得到的健康信息，仅用于前端标签展示与解释
   healthLabel?: "健康" | "关注" | "警告" | "严重";
@@ -164,6 +169,29 @@ export interface DeploymentDescribeView {
 
 export interface DeploymentDescribe {
   view: DeploymentDescribeView;
+  events: K8sEvent[];
+}
+
+/** StatefulSet 结构化 Describe（与后端 StatefulSetDescribeView 对齐） */
+export interface StatefulSetDescribeView {
+  name: string;
+  namespace: string;
+  serviceName?: string;
+  creationTimestamp?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  replicas: number;
+  readyReplicas: number;
+  currentReplicas: number;
+  updatedReplicas: number;
+  volumeClaimTemplateNames?: string[];
+  strategyType: string;
+  rollingPartition?: number | null;
+  podManagementPolicy?: string;
+}
+
+export interface StatefulSetDescribe {
+  view: StatefulSetDescribeView;
   events: K8sEvent[];
 }
 
@@ -452,6 +480,26 @@ export interface ResourceWatchEvent<T = any> {
  * 使用后端封装的 Kubernetes Watch API 做 Pod 实时变更监听。
  * 基于 fetch + ReadableStream 逐行读取 JSON 事件。
  */
+/** 消费 watch 行流；流正常结束或断开后由外层负责重连 */
+async function readWatchLineStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onLine: (line: string) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (line) onLine(line);
+    }
+  }
+}
+
 export function watchPods(
   clusterId: string,
   namespace: string | undefined,
@@ -460,7 +508,6 @@ export function watchPods(
     onError?: (err: Error) => void;
   },
 ): () => void {
-  const ac = new AbortController();
   const base = typeof window !== "undefined" ? window.location.origin : "";
   const url = new URL(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods/watch`,
@@ -470,44 +517,58 @@ export function watchPods(
     url.searchParams.set("namespace", namespace);
   }
 
-  fetch(url.toString(), { signal: ac.signal })
-    .then(async (res) => {
-      if (!res.ok) {
-        throw new Error(res.statusText || `HTTP ${res.status}`);
-      }
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let idx: number;
-        // 按行分割，每行一个 JSON 事件
-        while ((idx = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, idx).trim();
-          buffer = buffer.slice(idx + 1);
-          if (!line) continue;
+  let cancelled = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let fetchAbort: AbortController | null = null;
+  const clearReconnect = () => {
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
+  const connect = () => {
+    if (cancelled) return;
+    fetchAbort = new AbortController();
+    const sig = fetchAbort.signal;
+    fetch(url.toString(), { signal: sig })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(res.statusText || `HTTP ${res.status}`);
+        }
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response body");
+        await readWatchLineStream(reader, (line) => {
           try {
             const ev = JSON.parse(line) as PodWatchEvent;
             if (ev && ev.object && ev.object.metadata) {
               opts.onEvent(ev);
             }
           } catch (e) {
-            // 单条事件解析失败不影响后续
             // eslint-disable-next-line no-console
             console.warn("Failed to parse pods watch event:", e);
           }
-        }
-      }
-    })
-    .catch((err) => {
-      if (err?.name === "AbortError") return;
-      opts.onError?.(err);
-    });
+        });
+      })
+      .catch((err: Error) => {
+        if (err?.name === "AbortError" || cancelled) return;
+        opts.onError?.(err);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        clearReconnect();
+        reconnectTimer = setTimeout(connect, 600);
+      });
+  };
 
-  return () => ac.abort();
+  connect();
+
+  return () => {
+    cancelled = true;
+    clearReconnect();
+    fetchAbort?.abort();
+    fetchAbort = null;
+  };
 }
 
 /**
@@ -523,7 +584,6 @@ export function watchResourceList<T = any>(
     onError?: (err: Error) => void;
   },
 ): () => void {
-  const ac = new AbortController();
   const base = typeof window !== "undefined" ? window.location.origin : "";
   const path = resourcePath(kind);
   const url = new URL(
@@ -534,24 +594,27 @@ export function watchResourceList<T = any>(
     url.searchParams.set("namespace", namespace);
   }
 
-  fetch(url.toString(), { signal: ac.signal })
-    .then(async (res) => {
-      if (!res.ok) {
-        throw new Error(res.statusText || `HTTP ${res.status}`);
-      }
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let idx: number;
-        while ((idx = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, idx).trim();
-          buffer = buffer.slice(idx + 1);
-          if (!line) continue;
+  let cancelled = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let fetchAbort: AbortController | null = null;
+  const clearReconnect = () => {
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
+  const connect = () => {
+    if (cancelled) return;
+    fetchAbort = new AbortController();
+    fetch(url.toString(), { signal: fetchAbort.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(res.statusText || `HTTP ${res.status}`);
+        }
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response body");
+        await readWatchLineStream(reader, (line) => {
           try {
             const ev = JSON.parse(line) as ResourceWatchEvent<T>;
             if (ev && ev.object) {
@@ -561,15 +624,27 @@ export function watchResourceList<T = any>(
             // eslint-disable-next-line no-console
             console.warn("Failed to parse resource watch event:", e);
           }
-        }
-      }
-    })
-    .catch((err) => {
-      if (err?.name === "AbortError") return;
-      opts.onError?.(err);
-    });
+        });
+      })
+      .catch((err: Error) => {
+        if (err?.name === "AbortError" || cancelled) return;
+        opts.onError?.(err);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        clearReconnect();
+        reconnectTimer = setTimeout(connect, 600);
+      });
+  };
 
-  return () => ac.abort();
+  connect();
+
+  return () => {
+    cancelled = true;
+    clearReconnect();
+    fetchAbort?.abort();
+    fetchAbort = null;
+  };
 }
 
 /** 获取 Pod Describe 数据（Pod + Events） */
@@ -766,6 +841,77 @@ export async function deleteDeployment(
 ): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+  );
+}
+
+export async function fetchStatefulSetDescribe(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<StatefulSetDescribe> {
+  const res = await api.get<StatefulSetDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/describe`,
+  );
+  return res.data;
+}
+
+export async function fetchStatefulSetYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+export async function applyStatefulSetYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  yamlBody: string,
+): Promise<unknown> {
+  const res = await api.put(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
+  return res.data;
+}
+
+export async function scaleStatefulSet(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  replicas: number,
+): Promise<unknown> {
+  const res = await api.patch(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
+    { replicas },
+  );
+  return res.data;
+}
+
+export async function restartStatefulSet(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<unknown> {
+  const res = await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+  );
+  return res.data;
+}
+
+export async function deleteStatefulSet(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  await api.delete(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
   );
 }
 
