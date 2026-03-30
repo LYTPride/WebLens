@@ -21,6 +21,7 @@
 ## 开发文档（dev）
 
 - [架构设计](./dev/architecture.md)
+- [资源列表数据流（list / watch / 缓存）](./dev/resource-list-dataflow.md)
 - [Pod 状态标签模型](./dev/health-label-model.md)
 - [Shell 实现说明](./dev/shell-implementation.md)
 - [文件管理面板设计说明](./dev/file-manager-design.md)
