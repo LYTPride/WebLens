@@ -24,7 +24,7 @@
 - [资源列表数据流（list / watch / 缓存）](./dev/resource-list-dataflow.md)（规范正文见仓库 [`web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md`](../web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md)，含 **serverTimeMs**、Age、Watch 缺口 list 合并）
 - [Pod 状态标签模型](./dev/health-label-model.md)
 - [Shell 实现说明](./dev/shell-implementation.md)
-- [文件管理面板设计说明](./dev/file-manager-design.md)
+- [文件管理面板设计说明](./dev/file-manager-design.md)（含与列表共用的 **`ConfirmDialog` / `InputDialog`** 说明）
 - [开发变更记录](./dev/changelog.md)
 
 ## 路线规划

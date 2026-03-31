@@ -4,6 +4,14 @@
 
 ## 2026-03（近期）
 
+### 统一确认 / 输入弹窗（替代浏览器原生 dialog）
+
+- 新增 **`web/src/components/ConfirmDialog.tsx`**：深色主题、标题/说明/可滚动资源列表、取消与确定；支持 `danger` / `primary`、外部 `busy`、**Esc** 与遮罩关闭（忙碌时禁用）；确定在 `onConfirm` **成功返回后**再关闭，失败抛错则保留弹窗。
+- 新增 **`web/src/components/InputDialog.tsx`**：替代 `window.prompt`，用于单行输入（如重命名、新建文件夹）；**Esc** / **Enter** 提交。
+- **`App.tsx`**：批量 Pod/Deployment 操作确认改为 `ConfirmDialog`；单行删除 Pod、Deployment/StatefulSet 删除与重启等不再使用 `window.confirm`，统一为 `actionConfirm` + `ConfirmDialog`；批量操作失败时在 `confirmBatchAction` 中 **rethrow**，以便保持弹窗。
+- **`FileManagerPanel.tsx`**：删除确认、重命名与新建文件夹改为上述组件（`zIndex` 略高于底部面板）。
+- 后续新增需用户确认的危险操作，应优先 **`import { ConfirmDialog }`** 或沿用 App 内 `setActionConfirm` 模式，避免 `window.confirm` / `alert` / `prompt`。
+
 ### 资源列表标题简化
 
 - 列表主标题统一为 **`资源类型 · namespace / 条数`**，去掉标题中的 **集群 ID / 组合括号**（与上方「集群与命名空间 · 当前：…」去重），减轻长集群名下顶部栏横向挤压；实现：`web/src/pages/App.tsx`。
