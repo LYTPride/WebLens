@@ -1,4 +1,24 @@
 import type { Pod, PodWatchEvent, ResourceWatchEvent } from "../api";
+import { readCreationTimestampFromMetadata } from "../utils/k8sCreationTimestamp";
+
+/**
+ * apiserver 的 watch JSON 里 metadata.creationTimestamp 常带 omitempty；
+ * MODIFIED 若未带该字段，整对象替换会「洗掉」创建时间，Age 会错用后续来源或显示异常。
+ * 同一 uid 下若新对象缺少 creationTimestamp，则保留列表中已有的值。
+ */
+function withPreservedCreationTimestamp(prev: Pod[], incoming: Pod, uid: string): Pod {
+  const incTs = readCreationTimestampFromMetadata(incoming.metadata);
+  if (incTs) return incoming;
+  const prevPod = prev.find((p) => p.metadata.uid === uid);
+  const oldTs = prevPod ? readCreationTimestampFromMetadata(prevPod.metadata) : undefined;
+  if (oldTs) {
+    return {
+      ...incoming,
+      metadata: { ...incoming.metadata, creationTimestamp: oldTs },
+    };
+  }
+  return incoming;
+}
 
 /**
  * Watch 事件归约：把 ADDED/MODIFIED/DELETED 合并进当前作用域内的「原始列表」。
@@ -9,7 +29,11 @@ import type { Pod, PodWatchEvent, ResourceWatchEvent } from "../api";
  */
 
 export function applyPodWatchEvent(prev: Pod[], ev: PodWatchEvent, effectiveNamespace: string): Pod[] {
-  const obj = ev.object;
+  // apiserver 在 AllowWatchBookmarks 时会下发 BOOKMARK；ERROR 等也不应写入列表
+  if (ev.type !== "ADDED" && ev.type !== "MODIFIED" && ev.type !== "DELETED") {
+    return prev;
+  }
+  let obj = ev.object;
   if (!obj?.metadata?.uid) return prev;
   const uid = obj.metadata.uid;
   const ns = obj.metadata.namespace;
@@ -18,6 +42,19 @@ export function applyPodWatchEvent(prev: Pod[], ev: PodWatchEvent, effectiveName
   }
   if (ev.type === "DELETED") {
     return prev.filter((p) => p.metadata.uid !== uid);
+  }
+  obj = withPreservedCreationTimestamp(prev, obj, uid);
+  if (
+    typeof localStorage !== "undefined" &&
+    localStorage.getItem("weblens_debug_pod_age") === "1" &&
+    (ev.type === "ADDED" || ev.type === "MODIFIED")
+  ) {
+    // eslint-disable-next-line no-console
+    console.debug("[weblens reducer pod merge]", ev.type, {
+      uid,
+      name: obj.metadata?.name,
+      creationTimestampAfterPreserve: readCreationTimestampFromMetadata(obj.metadata),
+    });
   }
   let replaced = false;
   const next = prev.map((p) => {
@@ -42,6 +79,9 @@ export function applyK8sNamespacedWatchEvent<T>(
   ev: ResourceWatchEvent<T>,
   effectiveNamespace: string,
 ): T[] {
+  if (ev.type !== "ADDED" && ev.type !== "MODIFIED" && ev.type !== "DELETED") {
+    return prev;
+  }
   const obj = ev.object as T;
   const meta = (obj as { metadata?: { name?: string; namespace?: string } }).metadata || {};
   const name = meta.name;

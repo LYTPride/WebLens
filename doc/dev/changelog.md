@@ -4,6 +4,13 @@
 
 ## 2026-03（近期）
 
+### 资源列表：服务端时间（serverTimeMs）与 Age
+
+- **后端**：各类资源 **HTTP list** 响应在 `items` 外统一附带 **`serverTimeMs`**；**watch** 每行事件 JSON 附带 **`serverTimeMs`**（`watchAndStream` / `watchPodsStream`）。
+- **前端**：`fetchPods` / `fetchResourceList` 返回 `ListWithServerTime`；`App.tsx` 中 `syncServerClock` 在 list、watch、`mergeListSnapshot` 缺口补齐等路径校准；**逻辑 server now** 用 `performance.now()` 在锚点间单调推进（`web/src/utils/serverClock.ts`）。
+- **Age**：`formatAgeFromMetadata` / `creationTimestampToAgeSeconds` 使用上述逻辑 now；负时长钳为 **0**，避免误导性 `"-"`；本机与集群时间差超阈值时列表区轻量提示。
+- **架构说明**：已写入 `web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md`（服务端时间基准、Watch 缺口 list 合并、`useNowTick` 与按 Age 排序的依赖约定）。
+
 ### 资源列表架构与 Watch
 
 - 统一 **list（快照）+ watch（增量）+ 作用域内跳过重复 list**：共享 `web/src/resourceList/watchEventReducer.ts`（Pods 按 `uid`，Deployments / StatefulSets / 其他 namespaced 资源按 `namespace/name`）
