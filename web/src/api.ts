@@ -294,12 +294,15 @@ export async function fetchNamespaces(clusterId: string): Promise<string[]> {
   return (res.data.items || []).map((n) => n.metadata.name).sort();
 }
 
-export async function fetchPods(clusterId: string, namespace?: string) {
-  const res = await api.get<{ items: Pod[] }>(
+export async function fetchPods(clusterId: string, namespace?: string): Promise<ListWithServerTime<Pod>> {
+  const res = await api.get<ListWithServerTime<Pod>>(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods`,
-    { params: namespace ? { namespace } : {} },
+    {
+      params: namespace ? { namespace } : {},
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    },
   );
-  return res.data.items;
+  return { items: res.data.items || [], serverTimeMs: res.data.serverTimeMs };
 }
 
 export async function listContainerFiles(
@@ -464,16 +467,23 @@ export async function downloadContainerArchiveBlob(
   return new Blob(chunks);
 }
 
-export type PodWatchEventType = "ADDED" | "MODIFIED" | "DELETED" | "ERROR";
+export type PodWatchEventType = "ADDED" | "MODIFIED" | "DELETED" | "ERROR" | "BOOKMARK";
 
 export interface PodWatchEvent {
   type: PodWatchEventType;
   object: Pod;
+  serverTimeMs?: number;
 }
 
 export interface ResourceWatchEvent<T = any> {
   type: PodWatchEventType;
   object: T;
+  serverTimeMs?: number;
+}
+
+export interface ListWithServerTime<T> {
+  items: T[];
+  serverTimeMs?: number;
 }
 
 /**
@@ -506,6 +516,8 @@ export function watchPods(
   opts: {
     onEvent: (ev: PodWatchEvent) => void;
     onError?: (err: Error) => void;
+    /** 每次建立新 HTTP 连接并开始读流时调用（含首次与断线重连），用于 list 合并补齐 watch 缺口 */
+    onConnectionEstablished?: () => void;
   },
 ): () => void {
   const base = typeof window !== "undefined" ? window.location.origin : "";
@@ -538,10 +550,23 @@ export function watchPods(
         }
         const reader = res.body?.getReader();
         if (!reader) throw new Error("No response body");
+        opts.onConnectionEstablished?.();
         await readWatchLineStream(reader, (line) => {
           try {
             const ev = JSON.parse(line) as PodWatchEvent;
             if (ev && ev.object && ev.object.metadata) {
+              if (
+                typeof localStorage !== "undefined" &&
+                localStorage.getItem("weblens_debug_pod_age") === "1"
+              ) {
+                const o = ev.object;
+                // eslint-disable-next-line no-console
+                console.debug("[weblens watchPods]", ev.type, {
+                  name: o.metadata?.name,
+                  uid: o.metadata?.uid,
+                  creationTimestamp: o.metadata?.creationTimestamp,
+                });
+              }
               opts.onEvent(ev);
             }
           } catch (e) {
@@ -582,6 +607,7 @@ export function watchResourceList<T = any>(
   opts: {
     onEvent: (ev: ResourceWatchEvent<T>) => void;
     onError?: (err: Error) => void;
+    onConnectionEstablished?: () => void;
   },
 ): () => void {
   const base = typeof window !== "undefined" ? window.location.origin : "";
@@ -614,6 +640,7 @@ export function watchResourceList<T = any>(
         }
         const reader = res.body?.getReader();
         if (!reader) throw new Error("No response body");
+        opts.onConnectionEstablished?.();
         await readWatchLineStream(reader, (line) => {
           try {
             const ev = JSON.parse(line) as ResourceWatchEvent<T>;
@@ -920,12 +947,12 @@ export async function fetchResourceList<T = unknown>(
   clusterId: string,
   resourcePath: string,
   namespace?: string,
-): Promise<T[]> {
-  const res = await api.get<{ items: T[] }>(
+): Promise<ListWithServerTime<T>> {
+  const res = await api.get<ListWithServerTime<T>>(
     `/api/clusters/${encodeURIComponent(clusterId)}/${resourcePath}`,
     { params: namespace ? { namespace } : {} },
   );
-  return res.data.items || [];
+  return { items: res.data.items || [], serverTimeMs: res.data.serverTimeMs };
 }
 
 export type ResourceKind =

@@ -51,6 +51,7 @@ import {
   type PodSortKey,
   type DeploymentSortKey,
   type StatefulSetSortKey,
+  type StatefulSetSortRow,
 } from "../utils/resourceListSort";
 import {
   podsOwnedByStatefulSet,
@@ -82,10 +83,23 @@ import { DeploymentDescribeContent } from "../components/describe/DeploymentDesc
 import { StatefulSetDescribeContent } from "../components/describe/StatefulSetDescribeContent";
 import { useColumnResize } from "../hooks/useColumnResize";
 import { useSortedRowPositionChangeHighlight } from "../hooks/useSortedRowPositionChangeHighlight";
+import { useNowTick } from "../hooks/useNowTick";
 import { applyK8sNamespacedWatchEvent, applyPodWatchEvent } from "../resourceList/watchEventReducer";
+import { mergeNamespacedItemsWithListSnapshot, mergePodsWithListSnapshot } from "../resourceList/mergeListSnapshot";
+import { formatAgeFromMetadata, readCreationTimestampFromMetadata } from "../utils/k8sCreationTimestamp";
+import {
+  CLOCK_SKEW_WARN_THRESHOLD_MS,
+  getClockSkewMs,
+  getCurrentServerNow,
+  newServerClockSnapshot,
+  type ServerClockSnapshot,
+} from "../utils/serverClock";
 import copyIcon from "../assets/icon-copy.png";
 
 const ALL_NAMESPACES = "";
+
+/** 调试：localStorage `weblens_debug_pod_age=1` 时，每个 uid 在 Pods 表首次渲染打一次 */
+const loggedPodAgeRowByUid = new Set<string>();
 
 const POD_COLUMN_KEYS = [
   "name",
@@ -109,53 +123,6 @@ const POD_COLUMN_DEFAULTS: Record<(typeof POD_COLUMN_KEYS)[number], number> = {
   containers: 70,
   actions: 80,
 };
-
-/** 计算 Pod 存活时间（秒），用于“长时间 Pending/ContainerCreating”等判定 */
-function getPodAgeSeconds(creationTimestamp?: string): number | null {
-  if (!creationTimestamp) return null;
-  const start = new Date(creationTimestamp).getTime();
-  const now = Date.now();
-  const sec = Math.floor((now - start) / 1000);
-  if (Number.isNaN(sec) || sec < 0) return null;
-  return sec;
-}
-
-/** 根据 creationTimestamp 计算并格式化为存活时间
- *  < 1 分钟：按秒显示（Xs）
- *  < 1 小时：按整分和秒显示（XmYs）
- *  < 1 天：按整小时和分显示（XhYm）
- *  >= 1 天：按整天和小时显示（XdYh）
- */
-function formatPodAge(creationTimestamp?: string): string {
-  if (!creationTimestamp) return "-";
-  const start = new Date(creationTimestamp).getTime();
-  const now = Date.now();
-  const sec = Math.floor((now - start) / 1000);
-  if (sec < 0) return "-";
-  if (sec < 60) {
-    // 小于 1 分钟，按秒
-    return `${sec}s`;
-  }
-
-  const min = Math.floor(sec / 60);
-  const remainSec = sec % 60;
-  if (sec < 3600) {
-    // 小于 1 小时，按“整分钟+秒”
-    return `${min}m${remainSec ? `${remainSec}s` : ""}`;
-  }
-
-  const h = Math.floor(sec / 3600);
-  const remainMin = Math.floor((sec % 3600) / 60);
-  if (sec < 24 * 3600) {
-    // 小于 1 天，按“整小时+分钟”
-    return `${h}h${remainMin ? `${remainMin}m` : ""}`;
-  }
-
-  const d = Math.floor(sec / (24 * 3600));
-  const remainHour = Math.floor((sec % (24 * 3600)) / 3600);
-  // 大于等于 1 天，按“整天 + 小时”（上限）
-  return `${d}d${remainHour ? `${remainHour}h` : ""}`;
-}
 
 const MIN_COL_WIDTH = 40;
 
@@ -416,6 +383,7 @@ export const App: React.FC = () => {
   const [resourceLoading, setResourceLoading] = useState(false);
   const [deploymentLoading, setDeploymentLoading] = useState(false);
   const [statefulsetLoading, setStatefulsetLoading] = useState(false);
+  const [serverClockSnapshot, setServerClockSnapshot] = useState<ServerClockSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   /** 正在应用新的集群/命名空间选择，用于全局 loading 提示 */
   const [applyingSelection, setApplyingSelection] = useState(false);
@@ -544,6 +512,13 @@ export const App: React.FC = () => {
   const podsManualRefreshToastRef = useRef(false);
   const deploymentsManualRefreshToastRef = useRef(false);
   const statefulsetsManualRefreshToastRef = useRef(false);
+  /** watch 断线重连 / 可见性恢复时 list 合并补齐的节流（毫秒时间戳） */
+  const lastPodsWatchGapFillAtRef = useRef(0);
+  const lastDeploymentsWatchGapFillAtRef = useRef(0);
+  const lastStsWatchGapFillAtRef = useRef(0);
+  const prevPageVisibleForGapFillRef = useRef(
+    typeof document === "undefined" ? true : document.visibilityState === "visible",
+  );
   const currentViewRef = useRef<ResourceKind>("pods");
   /** 左侧边栏是否收起 */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -572,7 +547,23 @@ export const App: React.FC = () => {
     [effectiveClusterId, effectiveNamespace, applyRevision],
   );
 
+  const listAgeTickActive =
+    !!effectiveClusterId &&
+    (currentView === "pods" ||
+      currentView === "deployments" ||
+      currentView === "statefulsets" ||
+      describeTarget !== null);
+
+  const clientNowTick = useNowTick(1000, listAgeTickActive);
+  const listAgeNow = useMemo(
+    () => getCurrentServerNow(serverClockSnapshot, clientNowTick),
+    [serverClockSnapshot, clientNowTick],
+  );
+  const serverClockSkewMs = useMemo(() => Math.round(getClockSkewMs(listAgeNow)), [listAgeNow]);
+  const showServerClockSkewHint = Math.abs(serverClockSkewMs) > CLOCK_SKEW_WARN_THRESHOLD_MS;
+
   useEffect(() => {
+    loggedPodAgeRowByUid.clear();
     setSelectedPodKeys(new Set());
     setSelectedDeploymentKeys(new Set());
   }, [listScopeKey]);
@@ -1012,9 +1003,17 @@ export const App: React.FC = () => {
     setApplyRevision((v) => v + 1);
   };
 
-  const loadPods = async (clusterId: string, namespace: string) => {
+  // 必须稳定引用：否则 Pods 的 useEffect 在每次任意 state 重渲染时都会 cleanup+重连 watch，
+  // 造成 ADDED/MODIFIED 丢失，新 Pod 只能等下一次 HTTP list 才出现且 Age 已偏大。
+  const syncServerClock = useCallback((serverTimeMs?: number) => {
+    if (typeof serverTimeMs !== "number" || !Number.isFinite(serverTimeMs) || serverTimeMs <= 0) return;
+    setServerClockSnapshot(newServerClockSnapshot(serverTimeMs));
+  }, []);
+
+  const loadPods = useCallback(async (clusterId: string, namespace: string) => {
     const requestedNs = namespace || undefined;
-    const items = await fetchPods(clusterId, requestedNs);
+    const { items, serverTimeMs } = await fetchPods(clusterId, requestedNs);
+    syncServerClock(serverTimeMs);
     const cur = activeClusterNsRef.current;
     if (cur.clusterId !== clusterId || (cur.namespace || "") !== (requestedNs ?? "")) {
       return;
@@ -1022,7 +1021,7 @@ export const App: React.FC = () => {
     setPods(items);
     setApplyingSelection(false);
     setError(null);
-  };
+  }, [syncServerClock]);
 
   const confirmBatchAction = useCallback(async () => {
     if (!batchConfirm || !effectiveClusterId) return;
@@ -1040,7 +1039,7 @@ export const App: React.FC = () => {
         setSelectedPodKeys(new Set());
         setBatchConfirm(null);
         setToastMessage(`已删除 ${keys.length} 个 Pod`);
-        await loadPods(effectiveClusterId, effectiveNamespace);
+        // 不调用 loadPods：全表覆盖会与 watch 竞态并抹掉刚 ADDED 的新 Pod；删除增量交给 watch。
       } else if (kind === "deployments-delete") {
         for (const key of keys) {
           const { namespace, name } = parseNsNameRowKey(key);
@@ -1062,7 +1061,12 @@ export const App: React.FC = () => {
         }
         setBatchConfirm(null);
         setToastMessage(`已触发 ${keys.length} 个 Deployment 重启`);
-        const refreshed = await fetchResourceList<K8sItem>(effectiveClusterId, "deployments", nsApi);
+        const { items: refreshed, serverTimeMs } = await fetchResourceList<K8sItem>(
+          effectiveClusterId,
+          "deployments",
+          nsApi,
+        );
+        syncServerClock(serverTimeMs);
         setDeploymentItems(refreshed as K8sItem[]);
       }
     } catch (e: any) {
@@ -1070,7 +1074,7 @@ export const App: React.FC = () => {
     } finally {
       setBatchBusy(false);
     }
-  }, [batchConfirm, effectiveClusterId, effectiveNamespace]);
+  }, [batchConfirm, effectiveClusterId, effectiveNamespace, syncServerClock]);
 
   const loadResourceList = useCallback(async () => {
     if (!effectiveClusterId) return;
@@ -1078,7 +1082,8 @@ export const App: React.FC = () => {
     const ns =
       currentView === "nodes" || currentView === "namespaces" ? undefined : (effectiveNamespace || undefined);
     fetchResourceList(effectiveClusterId, currentView, ns)
-      .then((items) => {
+      .then(({ items, serverTimeMs }) => {
+        syncServerClock(serverTimeMs);
         setResourceItems(items as K8sItem[]);
         setError(null);
       })
@@ -1094,7 +1099,88 @@ export const App: React.FC = () => {
         setResourceLoading(false);
         setApplyingSelection(false);
       });
-  }, [effectiveClusterId, currentView, effectiveNamespace]);
+  }, [effectiveClusterId, currentView, effectiveNamespace, syncServerClock]);
+
+  const WATCH_GAP_FILL_MIN_MS = 2500;
+
+  const runPodsWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible) return;
+    const viewOk =
+      currentViewRef.current === "pods" ||
+      currentViewRef.current === "statefulsets" ||
+      currentViewRef.current === "deployments";
+    if (!viewOk) return;
+    const t = Date.now();
+    if (t - lastPodsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastPodsWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchPods(cid, ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      setPods((prev) => mergePodsWithListSnapshot(prev, items, ns));
+    } catch {
+      /* 静默补齐，避免打断 watch 主链路 */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
+  const runDeploymentsWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible || currentViewRef.current !== "deployments") return;
+    const t = Date.now();
+    if (t - lastDeploymentsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastDeploymentsWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchResourceList<K8sItem>(cid, "deployments", ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      if (currentViewRef.current !== "deployments") return;
+      setDeploymentItems((prev) => mergeNamespacedItemsWithListSnapshot(prev, items as K8sItem[], ns));
+    } catch {
+      /* silent */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
+  const runStatefulsetsWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible || currentViewRef.current !== "statefulsets") return;
+    const t = Date.now();
+    if (t - lastStsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastStsWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchResourceList<K8sItem>(cid, "statefulsets", ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      if (currentViewRef.current !== "statefulsets") return;
+      setStatefulsetItems((prev) => mergeNamespacedItemsWithListSnapshot(prev, items as K8sItem[], ns));
+    } catch {
+      /* silent */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
+  useEffect(() => {
+    const wasVisible = prevPageVisibleForGapFillRef.current;
+    prevPageVisibleForGapFillRef.current = pageVisible;
+    if (!effectiveClusterId || !pageVisible || wasVisible) return;
+    const needsPodsData =
+      currentView === "pods" || currentView === "statefulsets" || currentView === "deployments";
+    if (needsPodsData) void runPodsWatchGapFill();
+    if (currentView === "deployments") void runDeploymentsWatchGapFill();
+    if (currentView === "statefulsets") void runStatefulsetsWatchGapFill();
+  }, [
+    pageVisible,
+    effectiveClusterId,
+    currentView,
+    runPodsWatchGapFill,
+    runDeploymentsWatchGapFill,
+    runStatefulsetsWatchGapFill,
+  ]);
 
   useEffect(() => {
     loadClusters().catch((e: any) => setError(e?.message || "Failed to load clusters")).finally(() => setLoading(false));
@@ -1283,12 +1369,16 @@ export const App: React.FC = () => {
 
     const cancel = watchPods(effectiveClusterId, effectiveNamespace || undefined, {
       onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
         setPods((prev) => applyPodWatchEvent(prev, ev, effectiveNamespace));
       },
       onError: (err) => {
         // eslint-disable-next-line no-console
         console.error("pods watch error:", err);
         setError(err?.message || "Pods Watch 失败，请检查集群权限或稍后重试");
+      },
+      onConnectionEstablished: () => {
+        void runPodsWatchGapFill();
       },
     });
     podsWatchCancelRef.current = cancel;
@@ -1304,9 +1394,11 @@ export const App: React.FC = () => {
     effectiveNamespace,
     currentView,
     pageVisible,
-    loadPods,
     listScopeKey,
     podsListNonce,
+    loadPods,
+    runPodsWatchGapFill,
+    syncServerClock,
   ]);
 
   // Deployments：独立列表状态 + 与 Pods 相同的「作用域内跳过重复 HTTP」策略
@@ -1334,7 +1426,8 @@ export const App: React.FC = () => {
       setDeploymentLoading(true);
       setError(null);
       fetchResourceList<K8sItem>(effectiveClusterId, "deployments", ns)
-        .then((items) => {
+        .then(({ items, serverTimeMs }) => {
+          syncServerClock(serverTimeMs);
           const cur = activeClusterNsRef.current;
           if (currentViewRef.current !== "deployments") {
             if (deploymentsManualRefreshToastRef.current) deploymentsManualRefreshToastRef.current = false;
@@ -1372,17 +1465,22 @@ export const App: React.FC = () => {
 
     const cancel = watchResourceList<K8sItem>(effectiveClusterId, "deployments", ns, {
       onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
         setDeploymentItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
       },
       onError: (err) => {
         // eslint-disable-next-line no-console
         console.error("deployments watch error:", err);
         fetchResourceList<K8sItem>(effectiveClusterId, "deployments", ns)
-          .then((items) => {
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
             if (currentViewRef.current !== "deployments") return;
             setDeploymentItems(items as K8sItem[]);
           })
           .catch(() => {});
+      },
+      onConnectionEstablished: () => {
+        void runDeploymentsWatchGapFill();
       },
     });
     resourceWatchCancelRef.current = cancel;
@@ -1400,6 +1498,8 @@ export const App: React.FC = () => {
     pageVisible,
     listScopeKey,
     deploymentsListNonce,
+    runDeploymentsWatchGapFill,
+    syncServerClock,
   ]);
 
   // StatefulSets：独立列表 + Watch；不关闭 Pods Watch（实例数据复用 Pods 缓存）
@@ -1426,7 +1526,8 @@ export const App: React.FC = () => {
       setStatefulsetLoading(true);
       setError(null);
       fetchResourceList<K8sItem>(effectiveClusterId, "statefulsets", ns)
-        .then((items) => {
+        .then(({ items, serverTimeMs }) => {
+          syncServerClock(serverTimeMs);
           const cur = activeClusterNsRef.current;
           if (currentViewRef.current !== "statefulsets") {
             if (statefulsetsManualRefreshToastRef.current) statefulsetsManualRefreshToastRef.current = false;
@@ -1464,17 +1565,22 @@ export const App: React.FC = () => {
 
     const cancel = watchResourceList<K8sItem>(effectiveClusterId, "statefulsets", ns, {
       onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
         setStatefulsetItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
       },
       onError: (err) => {
         // eslint-disable-next-line no-console
         console.error("statefulsets watch error:", err);
         fetchResourceList<K8sItem>(effectiveClusterId, "statefulsets", ns)
-          .then((items) => {
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
             if (currentViewRef.current !== "statefulsets") return;
             setStatefulsetItems(items as K8sItem[]);
           })
           .catch(() => {});
+      },
+      onConnectionEstablished: () => {
+        void runStatefulsetsWatchGapFill();
       },
     });
     resourceWatchCancelRef.current = cancel;
@@ -1492,6 +1598,8 @@ export const App: React.FC = () => {
     pageVisible,
     listScopeKey,
     statefulsetsListNonce,
+    runStatefulsetsWatchGapFill,
+    syncServerClock,
   ]);
 
   // 其它非 Pods、非 Deployments 资源：沿用原 Watch + HTTP 列表逻辑（每次进入视图仍拉取，保持改动最小）
@@ -1513,6 +1621,7 @@ export const App: React.FC = () => {
       currentView === "nodes" || currentView === "namespaces" ? undefined : effectiveNamespace || undefined,
       {
         onEvent: (ev) => {
+          syncServerClock(ev.serverTimeMs);
           setResourceItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
         },
         onError: (err) => {
@@ -1530,7 +1639,7 @@ export const App: React.FC = () => {
         resourceWatchCancelRef.current = null;
       }
     };
-  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible, loadResourceList, applyRevision]);
+  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible, loadResourceList, applyRevision, syncServerClock]);
 
   const viewTitle: Record<ResourceKind, string> = {
     pods: "Pods",
@@ -1608,10 +1717,20 @@ export const App: React.FC = () => {
       const k = `${row.metadata.namespace ?? ""}/${row.metadata.name}`;
       return statefulsetStsStatsByKey.get(k)?.stats ?? buildStatefulSetSortStats(row, []);
     };
-    return sortByState(filteredStatefulSets as StatefulSetRow[], statefulsetsListSort, (a, b, key) =>
-      compareStatefulSetsForSort(a, b, key, getStats),
+    const byAge = statefulsetsListSort?.key === "age";
+    return sortByState(
+      filteredStatefulSets as StatefulSetSortRow[],
+      statefulsetsListSort,
+      byAge
+        ? (a, b, key) => compareStatefulSetsForSort(a, b, key, getStats, listAgeNow)
+        : (a, b, key) => compareStatefulSetsForSort(a, b, key, getStats),
     );
-  }, [filteredStatefulSets, statefulsetsListSort, statefulsetStsStatsByKey]);
+  }, [
+    filteredStatefulSets,
+    statefulsetsListSort,
+    statefulsetStsStatsByKey,
+    statefulsetsListSort?.key === "age" ? listAgeNow : 0,
+  ]);
 
   const hasNonHealthyStatefulSets = useMemo(() => {
     for (const raw of statefulsetItems) {
@@ -1629,15 +1748,23 @@ export const App: React.FC = () => {
     return podsOwnedByStatefulSet(pods, describeTarget.name, describeTarget.namespace);
   }, [describeTarget, pods]);
 
-  const sortedPods = useMemo(
-    () => sortByState(filteredPods, podsListSort, comparePodsForSort),
-    [filteredPods, podsListSort],
-  );
+  const sortedPods = useMemo(() => {
+    const byAge = podsListSort?.key === "age";
+    return sortByState(
+      filteredPods,
+      podsListSort,
+      byAge ? (a, b, k) => comparePodsForSort(a, b, k, listAgeNow) : comparePodsForSort,
+    );
+  }, [filteredPods, podsListSort, podsListSort?.key === "age" ? listAgeNow : 0]);
 
-  const sortedDeployments = useMemo(
-    () => sortByState(filteredDeployments, deploymentsListSort, compareDeploymentsForSort),
-    [filteredDeployments, deploymentsListSort],
-  );
+  const sortedDeployments = useMemo(() => {
+    const byAge = deploymentsListSort?.key === "age";
+    return sortByState(
+      filteredDeployments,
+      deploymentsListSort,
+      byAge ? (a, b, k) => compareDeploymentsForSort(a, b, k, listAgeNow) : compareDeploymentsForSort,
+    );
+  }, [filteredDeployments, deploymentsListSort, deploymentsListSort?.key === "age" ? listAgeNow : 0]);
 
   const visiblePodKeysSet = useMemo(
     () => new Set(sortedPods.map((p) => nsNameRowKey(p.metadata.namespace, p.metadata.name))),
@@ -3112,6 +3239,26 @@ export const App: React.FC = () => {
                         正在根据新的集群与命名空间加载资源…
                       </span>
                     )}
+                    {!applyingSelection &&
+                      (currentView === "pods" || currentView === "deployments" || currentView === "statefulsets") &&
+                      showServerClockSkewHint && (
+                        <span
+                          title={`本地与服务端时间偏差约 ${Math.abs(serverClockSkewMs)}ms`}
+                          style={{
+                            fontSize: 12,
+                            color: "#fbbf24",
+                            marginLeft: 12,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>
+                            ⏱
+                          </span>
+                          本地时间与集群时间存在偏差，Age 已按服务端时间校准
+                        </span>
+                      )}
                     {!applyingSelection && currentView === "pods" && hasNonHealthyPods && (
                       <span
                         style={{
@@ -3258,7 +3405,24 @@ export const App: React.FC = () => {
                       {sortedPods.map((p) => {
                         const { text: statusText, restarts } = getPodStatusInfo(p);
                         const node = p.spec?.nodeName ?? "-";
-                        const age = formatPodAge(p.metadata.creationTimestamp);
+                        const age = formatAgeFromMetadata(p.metadata, listAgeNow);
+                        if (
+                          typeof localStorage !== "undefined" &&
+                          localStorage.getItem("weblens_debug_pod_age") === "1"
+                        ) {
+                          const u = p.metadata.uid;
+                          if (u && !loggedPodAgeRowByUid.has(u)) {
+                            loggedPodAgeRowByUid.add(u);
+                            // eslint-disable-next-line no-console
+                            console.debug("[weblens pod row first render]", {
+                              name: p.metadata.name,
+                              uid: u,
+                              eventHint: "pods-table",
+                              creationTimestamp: readCreationTimestampFromMetadata(p.metadata),
+                              ageLabel: age,
+                            });
+                          }
+                        }
                         const containerCount = getPodContainerNames(p).length;
                         const menuKey = `${p.metadata.namespace}/${p.metadata.name}`;
                         const containers = getPodContainerNames(p);
@@ -3475,7 +3639,7 @@ export const App: React.FC = () => {
                                               .then(() => {
                                                 setPodMenuOpenKey(null); setPodMenuSubmenu(null);
                                                 setError(null);
-                                                loadPods(effectiveClusterId!, effectiveNamespace);
+                                                // 依赖 watch 推送 DELETED/ADDED；delete 后再 loadPods 会整表覆盖，易丢失事件链与错误 Age。
                                               })
                                               .catch((err: any) => setError(err?.response?.data?.error ?? err?.message ?? "删除失败"));
                                           }}
@@ -3621,7 +3785,7 @@ export const App: React.FC = () => {
                           whiteSpace: "nowrap",
                           maxWidth: 0,
                         };
-                        const age = formatPodAge(d.metadata.creationTimestamp);
+                        const age = formatAgeFromMetadata(d.metadata, listAgeNow);
                         const ns = d.metadata.namespace ?? "";
                         const dname = d.metadata.name;
                         const deployRowSelectKey = nsNameRowKey(ns, dname);
@@ -3932,7 +4096,7 @@ export const App: React.FC = () => {
                           whiteSpace: "nowrap",
                           maxWidth: 0,
                         };
-                        const age = formatPodAge(s.metadata.creationTimestamp);
+                        const age = formatAgeFromMetadata(s.metadata, listAgeNow);
                         const ns = s.metadata.namespace ?? "";
                         const sname = s.metadata.name;
                         const expanded = expandedStatefulSetKeys.has(menuKey);
@@ -4583,7 +4747,6 @@ export const App: React.FC = () => {
                                                                   setPodMenuOpenKey(null);
                                                                   setPodMenuSubmenu(null);
                                                                   setError(null);
-                                                                  loadPods(effectiveClusterId!, effectiveNamespace);
                                                                 })
                                                                 .catch((err: any) =>
                                                                   setError(
@@ -4898,14 +5061,20 @@ export const App: React.FC = () => {
                 <DeploymentDescribeContent
                   view={describeDeploymentData.view}
                   events={describeDeploymentData.events ?? []}
-                  ageLabel={formatPodAge(describeDeploymentData.view.creationTimestamp)}
+                  ageLabel={formatAgeFromMetadata(
+                    { creationTimestamp: describeDeploymentData.view.creationTimestamp },
+                    listAgeNow,
+                  )}
                 />
               )}
               {!describeLoading && describeTarget.kind === "statefulset" && describeStatefulSetData && (
                 <StatefulSetDescribeContent
                   view={describeStatefulSetData.view}
                   events={describeStatefulSetData.events ?? []}
-                  ageLabel={formatPodAge(describeStatefulSetData.view.creationTimestamp)}
+                  ageLabel={formatAgeFromMetadata(
+                    { creationTimestamp: describeStatefulSetData.view.creationTimestamp },
+                    listAgeNow,
+                  )}
                   childPods={describeStsChildPods}
                   stsName={describeTarget.name}
                 />

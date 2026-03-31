@@ -1,5 +1,6 @@
 import type { Pod } from "../api";
 import { getPodContainerNames } from "../api";
+import { creationTimestampToAgeSeconds } from "./k8sCreationTimestamp";
 import { aggregatePodHealthLabel } from "./statefulsetPods";
 
 const HEALTH_RANK: Record<string, number> = {
@@ -66,6 +67,7 @@ export function compareStatefulSetsForSort(
   b: StatefulSetSortRow,
   key: StatefulSetSortKey,
   getStats: (row: StatefulSetSortRow) => StatefulSetSortStats,
+  nowMs: number = Date.now(),
 ): number {
   const sa = getStats(a);
   const sb = getStats(b);
@@ -86,8 +88,8 @@ export function compareStatefulSetsForSort(
       return da - db;
     }
     case "age": {
-      const tsa = podAgeSeconds(a.metadata.creationTimestamp);
-      const tsb = podAgeSeconds(b.metadata.creationTimestamp);
+      const tsa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const tsb = creationTimestampToAgeSeconds(b.metadata, nowMs);
       if (tsa === null && tsb === null) return 0;
       if (tsa === null) return 1;
       if (tsb === null) return -1;
@@ -98,15 +100,6 @@ export function compareStatefulSetsForSort(
     default:
       return 0;
   }
-}
-
-function podAgeSeconds(creationTimestamp?: string): number | null {
-  if (!creationTimestamp) return null;
-  const start = new Date(creationTimestamp).getTime();
-  const now = Date.now();
-  const sec = Math.floor((now - start) / 1000);
-  if (Number.isNaN(sec) || sec < 0) return null;
-  return sec;
 }
 
 /** 与列表「Restarts」列一致：仅统计工作容器 restartCount */
@@ -126,7 +119,7 @@ function podHealthRank(pod: Pod): number {
  * 升序语义下的比较（direction 在 sortByState 中统一翻转）。
  * null 值（如无创建时间）排在末尾，保证稳定。
  */
-export function comparePodsForSort(a: Pod, b: Pod, key: PodSortKey): number {
+export function comparePodsForSort(a: Pod, b: Pod, key: PodSortKey, nowMs: number = Date.now()): number {
   switch (key) {
     case "name":
       return a.metadata.name.localeCompare(b.metadata.name, undefined, { sensitivity: "base", numeric: true });
@@ -141,8 +134,8 @@ export function comparePodsForSort(a: Pod, b: Pod, key: PodSortKey): number {
         numeric: true,
       });
     case "age": {
-      const sa = podAgeSeconds(a.metadata.creationTimestamp);
-      const sb = podAgeSeconds(b.metadata.creationTimestamp);
+      const sa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const sb = creationTimestampToAgeSeconds(b.metadata, nowMs);
       if (sa === null && sb === null) return 0;
       if (sa === null) return 1;
       if (sb === null) return -1;
@@ -195,7 +188,12 @@ export function buildStatefulSetSortStats(row: StatefulSetSortRow, ownedPods: Po
   return { podCount: ownedPods.length, healthRank };
 }
 
-export function compareDeploymentsForSort(a: DeploymentSortRow, b: DeploymentSortRow, key: DeploymentSortKey): number {
+export function compareDeploymentsForSort(
+  a: DeploymentSortRow,
+  b: DeploymentSortRow,
+  key: DeploymentSortKey,
+  nowMs: number = Date.now(),
+): number {
   switch (key) {
     case "name":
       return a.metadata.name.localeCompare(b.metadata.name, undefined, { sensitivity: "base", numeric: true });
@@ -217,8 +215,8 @@ export function compareDeploymentsForSort(a: DeploymentSortRow, b: DeploymentSor
       return ca - cb;
     }
     case "age": {
-      const sa = podAgeSeconds(a.metadata.creationTimestamp);
-      const sb = podAgeSeconds(b.metadata.creationTimestamp);
+      const sa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const sb = creationTimestampToAgeSeconds(b.metadata, nowMs);
       if (sa === null && sb === null) return 0;
       if (sa === null) return 1;
       if (sb === null) return -1;
