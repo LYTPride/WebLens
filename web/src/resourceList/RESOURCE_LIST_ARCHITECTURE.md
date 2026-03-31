@@ -14,6 +14,7 @@ raw cache    ──►  derive（Status / 健康 / 排序键等）──► filt
 - **watch**：增量源；事件到达后应 **立即** 调用 `applyPodWatchEvent` / `applyK8sNamespacedWatchEvent` 写入 raw cache，**不**经过 TTL 阻塞。
 - **作用域内跳过重复 list**：用 ref 记录「该作用域下最近一次成功 list 的 scopeKey + refresh nonce」，**切页复用内存**；仅在首次进入、应用新组合、手动刷新、nonce 变化时 HTTP list。
 - **派生**：如 Pod 表格 Status 用 `getPodStatusInfo(pod)`；健康提示用 `pod.healthLabel`（由后端 list/watch 计算）；**勿**把仅展示用的字符串当作唯一缓存字段。
+- **列表主标题（UI）**：`App.tsx` 中为 **`viewTitle[currentView] · namespace / 过滤后条数`**，**不**在标题中重复集群 ID / 组合括号（与页面上方「集群与命名空间 · 当前：…」分工，避免长 ID 挤占横向空间）。
 
 ## 代码地图
 

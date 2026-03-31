@@ -4,6 +4,11 @@
 
 ## 2026-03（近期）
 
+### 资源列表标题简化
+
+- 列表主标题统一为 **`资源类型 · namespace / 条数`**，去掉标题中的 **集群 ID / 组合括号**（与上方「集群与命名空间 · 当前：…」去重），减轻长集群名下顶部栏横向挤压；实现：`web/src/pages/App.tsx`。
+- 用户说明：`doc/guide/resource-lists.md`「列表标题格式」。
+
 ### 资源列表：服务端时间（serverTimeMs）与 Age
 
 - **后端**：各类资源 **HTTP list** 响应在 `items` 外统一附带 **`serverTimeMs`**；**watch** 每行事件 JSON 附带 **`serverTimeMs`**（`watchAndStream` / `watchPodsStream`）。
