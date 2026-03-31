@@ -2,6 +2,8 @@
 
 欢迎使用 WebLens 文档中心。本文档用于快速定位用户手册、开发文档与规划信息。
 
+根目录 `README.md` 与本页 **只概括重大核心能力**；具体交互与变更默认落在 `guide/`、`dev/` 与 `changelog.md`。
+
 ## 如何阅读
 
 - 如果你是使用者（运维/测试）：先看 `guide/`
@@ -12,15 +14,17 @@
 
 - [Pods 使用手册](./guide/pods.md)
 - [Deployments 使用手册](./guide/deployments.md)
+- [资源列表：筛选、排序与实时更新](./guide/resource-lists.md)
 - [Shell 使用手册](./guide/shell.md)
 - [文件管理面板使用手册](./guide/file-manager.md)
 
 ## 开发文档（dev）
 
 - [架构设计](./dev/architecture.md)
+- [资源列表数据流（list / watch / 缓存）](./dev/resource-list-dataflow.md)（规范正文见仓库 [`web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md`](../web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md)，含 **serverTimeMs**、Age、Watch 缺口 list 合并）
 - [Pod 状态标签模型](./dev/health-label-model.md)
 - [Shell 实现说明](./dev/shell-implementation.md)
-- [文件管理面板设计说明](./dev/file-manager-design.md)
+- [文件管理面板设计说明](./dev/file-manager-design.md)（含与列表共用的 **`ConfirmDialog` / `InputDialog`** 说明）
 - [开发变更记录](./dev/changelog.md)
 
 ## 路线规划

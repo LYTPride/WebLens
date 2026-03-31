@@ -7,7 +7,7 @@
 Pods 页面由三部分组成：
 
 - 顶部：集群组合选择（cluster + namespace）与应用按钮
-- 中部：Pods 表格（支持按 Name 过滤）
+- 中部：Pods 表格（支持按 Name 过滤、列排序与 Watch 实时重排；详见 [资源列表说明](./resource-lists.md)）
 - 底部：工作区（Logs / Shell / 编辑等标签）
 
 ## 状态标签
@@ -23,7 +23,7 @@ Pods 列表新增“状态标签”列，标签值为：
 
 ## 全局提示语
 
-当“当前范围（已应用的 cluster + namespace）”内存在任意非“健康” Pod 时，列表标题后会显示红色提示语。
+当“当前范围（已应用的 cluster + namespace）”内存在任意非“健康” Pod 时，列表标题后会显示红色提示语（文案提示可通过「状态标签」列排序快速定位问题 Pod）。
 
 注意：
 
@@ -37,11 +37,11 @@ Pods 列表新增“状态标签”列，标签值为：
 
 ## YAML 编辑
 
-底部面板中打开 **Edit** 时，YAML 编辑区与 Deployment 编辑共用同一套增强能力：
+底部面板中打开 **Edit** 时，与 Deployment 共用 **Monaco Editor**：
 
-- **缩进层级参考线**（Canvas 叠加，随内容滚动）
-- 滚动时编辑区上方的 **当前 key 路径面包屑**（便于定位深层嵌套）
-- 仍支持行号、右侧 minimap、关键字搜索、Cancel / Save / Save & Close
+- **Sticky Scroll**（Monaco 内置，缩进模型）：冻结区为 **真实 YAML 源码行**，含 **行号** 与 **语法着色**，视觉与正文一体；点击冻结行可跳转到该行（折叠区域由编辑器尽量展开可见）
+- 内置 **缩进参考线**、**右侧 minimap**、**折叠**
+- 仍支持关键字搜索、Cancel / Save / Save & Close
 
 ## 常用操作
 

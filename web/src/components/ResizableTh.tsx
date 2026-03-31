@@ -2,6 +2,8 @@ import React from "react";
 
 export interface ResizableThProps {
   label: React.ReactNode;
+  /** 表头标签右侧扩展（如排序箭头），与拖拽调宽手柄互不干扰 */
+  sortTrailing?: React.ReactNode;
   width: number;
   /** 表头基础样式（与页面 th 一致） */
   thBase: React.CSSProperties;
@@ -14,12 +16,14 @@ export interface ResizableThProps {
  */
 export const ResizableTh: React.FC<ResizableThProps> = ({
   label,
+  sortTrailing,
   width,
   thBase,
   sticky = true,
   onResizeStart,
 }) => (
   <th
+    className={sticky ? "wl-table-sticky-head" : undefined}
     style={{
       ...thBase,
       ...(sticky
@@ -39,16 +43,28 @@ export const ResizableTh: React.FC<ResizableThProps> = ({
       overflow: "hidden",
     }}
   >
-    <span
+    <div
       style={{
-        display: "block",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
+        display: "flex",
+        alignItems: "center",
+        gap: 2,
+        minWidth: 0,
+        paddingRight: sortTrailing ? 2 : 0,
       }}
     >
-      {label}
-    </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+      {sortTrailing}
+    </div>
     <div
       role="presentation"
       onMouseDown={onResizeStart}

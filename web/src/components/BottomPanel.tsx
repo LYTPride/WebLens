@@ -16,7 +16,7 @@ export interface PanelTab {
   /** 该 Pod 的容器列表（用于 Logs 容器下拉） */
   containers: string[];
   /** edit 标签：YAML 资源类型，默认 pod */
-  yamlKind?: "pod" | "deployment";
+  yamlKind?: "pod" | "deployment" | "statefulset";
 }
 
 interface BottomPanelProps {
@@ -37,6 +37,14 @@ const MIN_HEIGHT = 0.15;
 const MAX_HEIGHT = 0.85;
 const DEFAULT_HEIGHT = 0.4;
 
+/** Shell 标签右侧文件面板：每 tab.id 独立 */
+export interface ShellFilePanelState {
+  isExpanded: boolean;
+  hasUserInteracted: boolean;
+  /** 已消费首次引导（含已播放标题提示），避免重复 */
+  hasShownHint: boolean;
+}
+
 export const BottomPanel: React.FC<BottomPanelProps> = ({
   tabs,
   activeTabId,
@@ -53,8 +61,10 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
   const dragStartY = useRef(0);
   const dragStartRatio = useRef(0);
 
-  // Shell 工作区：右侧文件面板（按 tab 维度记忆展开状态/宽度/路径）
-  const [fileOpenByTab, setFileOpenByTab] = useState<Record<string, boolean>>({});
+  // Shell 工作区：右侧文件面板（按 tab 维度记忆展开/用户操作/首次提示）
+  const [shellFilePanelByTab, setShellFilePanelByTab] = useState<Record<string, ShellFilePanelState>>({});
+  /** 标题区引导动效：与 hasShownHint 配合；结束用 onAnimationEnd 清理，避免 Strict Mode 误清定时器 */
+  const [filePanelIntroVisualByTab, setFilePanelIntroVisualByTab] = useState<Record<string, boolean>>({});
   const [fileWidthByTab, setFileWidthByTab] = useState<Record<string, number>>({});
   const [filePathByTab, setFilePathByTab] = useState<Record<string, string>>({});
   const [fileDragging, setFileDragging] = useState(false);
@@ -80,6 +90,67 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
       window.removeEventListener("mouseup", onUp);
     };
   }, [fileDragging]);
+
+  useEffect(() => {
+    setShellFilePanelByTab((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const t of tabs) {
+        if (t.type !== "shell") continue;
+        if (next[t.id] === undefined) {
+          next[t.id] = {
+            isExpanded: true,
+            hasUserInteracted: false,
+            hasShownHint: false,
+          };
+          changed = true;
+        }
+      }
+      for (const id of Object.keys(next)) {
+        if (!tabs.some((x) => x.id === id && x.type === "shell")) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setFilePanelIntroVisualByTab((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const k of Object.keys(next)) {
+        if (!tabs.some((x) => x.id === k && x.type === "shell")) {
+          delete next[k];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [tabs]);
+
+  useEffect(() => {
+    const toHint: string[] = [];
+    for (const t of tabs) {
+      if (t.type !== "shell") continue;
+      const st = shellFilePanelByTab[t.id];
+      if (!st || st.hasUserInteracted || st.hasShownHint || !st.isExpanded) continue;
+      toHint.push(t.id);
+    }
+    if (toHint.length === 0) return;
+    setShellFilePanelByTab((prev) => {
+      const next = { ...prev };
+      for (const id of toHint) {
+        next[id] = { ...next[id], hasShownHint: true };
+      }
+      return next;
+    });
+    setFilePanelIntroVisualByTab((prev) => {
+      const next = { ...prev };
+      for (const id of toHint) {
+        next[id] = true;
+      }
+      return next;
+    });
+  }, [tabs, shellFilePanelByTab]);
 
   const handleDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -189,7 +260,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   : t.type === "logs"
                     ? `Logs: ${t.title}`
                     : t.type === "edit"
-                      ? `${t.yamlKind === "deployment" ? "Deployment" : "Pod"}: ${t.pod}`
+                      ? `${t.yamlKind === "deployment" ? "Deployment" : t.yamlKind === "statefulset" ? "StatefulSet" : "Pod"}: ${t.pod}`
                       : t.title}
               </span>
               <button
@@ -263,8 +334,8 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                     />
                   </div>
 
-                  {/* 右侧文件面板：默认收起为窄条 */}
-                  {fileOpenByTab[tab.id] ? (
+                  {/* 右侧文件面板：新建 Shell 标签默认展开（state 尚未写入首帧同效）；用户操作后按记忆恢复 */}
+                  {(shellFilePanelByTab[tab.id]?.isExpanded ?? true) ? (
                     <>
                       {/* 分隔拖拽条 */}
                       <div
@@ -297,6 +368,18 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                         }}
                       >
                         <div
+                          className={
+                            filePanelIntroVisualByTab[tab.id] ? "wl-file-panel-header-intro" : undefined
+                          }
+                          onAnimationEnd={(e) => {
+                            if (e.animationName !== "wl-file-panel-header-intro") return;
+                            setFilePanelIntroVisualByTab((prev) => {
+                              if (!prev[tab.id]) return prev;
+                              const n = { ...prev };
+                              delete n[tab.id];
+                              return n;
+                            });
+                          }}
                           style={{
                             padding: "10px 12px",
                             borderBottom: "1px solid #1e293b",
@@ -307,10 +390,40 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                             flexShrink: 0,
                           }}
                         >
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>文件管理</div>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 2,
+                              minWidth: 0,
+                            }}
+                          >
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>文件管理</div>
+                            {filePanelIntroVisualByTab[tab.id] && (
+                              <span style={{ fontSize: 11, color: "#64748b", fontWeight: 400 }}>
+                                支持上传 / 下载与目录操作
+                              </span>
+                            )}
+                          </div>
                           <button
                             type="button"
-                            onClick={() => setFileOpenByTab((prev) => ({ ...prev, [tab.id]: false }))}
+                            onClick={() =>
+                              setShellFilePanelByTab((prev) => {
+                                const cur = prev[tab.id] ?? {
+                                  isExpanded: true,
+                                  hasUserInteracted: false,
+                                  hasShownHint: false,
+                                };
+                                return {
+                                  ...prev,
+                                  [tab.id]: {
+                                    ...cur,
+                                    isExpanded: false,
+                                    hasUserInteracted: true,
+                                  },
+                                };
+                              })
+                            }
                             title="收起文件窗口"
                             style={{
                               padding: "2px 6px",
@@ -351,7 +464,23 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                     >
                       <button
                         type="button"
-                        onClick={() => setFileOpenByTab((prev) => ({ ...prev, [tab.id]: true }))}
+                        onClick={() =>
+                          setShellFilePanelByTab((prev) => {
+                            const cur = prev[tab.id] ?? {
+                              isExpanded: false,
+                              hasUserInteracted: false,
+                              hasShownHint: false,
+                            };
+                            return {
+                              ...prev,
+                              [tab.id]: {
+                                ...cur,
+                                isExpanded: true,
+                                hasUserInteracted: true,
+                              },
+                            };
+                          })
+                        }
                         title="展开文件窗口"
                         style={{
                           width: 20,

@@ -2,23 +2,20 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   applyDeploymentYaml,
   applyPodYaml,
+  applyStatefulSetYaml,
   fetchDeploymentYaml,
   fetchPodYaml,
+  fetchStatefulSetYaml,
 } from "../api";
 import { ClearableSearchInput } from "./ClearableSearchInput";
-import { YamlEditorWithGuides } from "./YamlEditorWithGuides";
-import { YamlScrollContextBar } from "./YamlScrollContextBar";
-import { buildYamlKeyPathPerLine, detectYamlIndentUnit } from "../utils/yamlStructure";
-
-const MINIMAP_WIDTH = 56;
-const LINE_HEIGHT = 18;
+import { YamlMonacoEditor, type YamlMonacoEditorHandle } from "./YamlMonacoEditor";
 
 interface PodYamlEditTabProps {
   clusterId: string;
   namespace: string;
   podName: string;
   /** 默认 Pod；Deployment 时与 podName 传部署名称 */
-  yamlKind?: "pod" | "deployment";
+  yamlKind?: "pod" | "deployment" | "statefulset";
   onClose: () => void;
   /** Deployment 保存时传入 API 返回的 JSON 对象，便于列表局部更新 */
   onSaved?: (result?: unknown) => void;
@@ -42,12 +39,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
-  const lineNumbersRef = useRef<HTMLDivElement>(null);
-  const minimapWrapRef = useRef<HTMLDivElement>(null);
-  const [viewportStyle, setViewportStyle] = useState<{ top: number; height: number }>({ top: 0, height: 0 });
-  const [minimapHeight, setMinimapHeight] = useState(0);
-  const [scrollPathLine, setScrollPathLine] = useState(0);
+  const editorRef = useRef<YamlMonacoEditorHandle>(null);
 
   const loadYaml = useCallback(async () => {
     setLoading(true);
@@ -56,7 +48,9 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
       const text =
         yamlKind === "deployment"
           ? await fetchDeploymentYaml(clusterId, namespace, podName)
-          : await fetchPodYaml(clusterId, namespace, podName);
+          : yamlKind === "statefulset"
+            ? await fetchStatefulSetYaml(clusterId, namespace, podName)
+            : await fetchPodYaml(clusterId, namespace, podName);
       setYaml(text);
       setInitialYaml(text);
     } catch (e: unknown) {
@@ -70,74 +64,6 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   useEffect(() => {
     if (isActive) loadYaml();
   }, [isActive, loadYaml]);
-
-  const updateViewportFromEditor = useCallback(() => {
-    const el = editorRef.current;
-    const wrap = minimapWrapRef.current;
-    const ln = lineNumbersRef.current;
-    if (ln && el) ln.scrollTop = el.scrollTop;
-    if (!wrap) return;
-    const h = wrap.clientHeight;
-    if (h && h !== minimapHeight) setMinimapHeight(h);
-    if (!el) return;
-    const { scrollTop, scrollHeight, clientHeight } = el;
-    if (scrollHeight <= clientHeight) {
-      setViewportStyle({ top: 0, height: h });
-      return;
-    }
-    setViewportStyle({
-      top: (scrollTop / scrollHeight) * h,
-      height: Math.max(20, (clientHeight / scrollHeight) * h),
-    });
-  }, []);
-
-  const yamlLines = useMemo(() => yaml.split("\n"), [yaml]);
-  const yamlIndentUnit = useMemo(() => detectYamlIndentUnit(yamlLines), [yamlLines]);
-  const keyPaths = useMemo(
-    () => buildYamlKeyPathPerLine(yaml, yamlIndentUnit),
-    [yaml, yamlIndentUnit],
-  );
-
-  const syncScrollPathFromEditor = useCallback(() => {
-    const el = editorRef.current;
-    if (!el || keyPaths.length === 0) {
-      setScrollPathLine(0);
-      return;
-    }
-    const line = Math.floor((el.scrollTop + LINE_HEIGHT / 2) / LINE_HEIGHT);
-    setScrollPathLine(Math.max(0, Math.min(keyPaths.length - 1, line)));
-  }, [keyPaths.length]);
-
-  const handleEditorScroll = useCallback(() => {
-    updateViewportFromEditor();
-    syncScrollPathFromEditor();
-  }, [updateViewportFromEditor, syncScrollPathFromEditor]);
-
-  useEffect(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    updateViewportFromEditor();
-    syncScrollPathFromEditor();
-  }, [yaml, updateViewportFromEditor, syncScrollPathFromEditor]);
-
-  useEffect(() => {
-    const wrap = minimapWrapRef.current;
-    if (!wrap) return;
-    const ro = new ResizeObserver(() => setMinimapHeight(wrap.clientHeight));
-    ro.observe(wrap);
-    setMinimapHeight(wrap.clientHeight);
-    return () => ro.disconnect();
-  }, []);
-
-  const handleMinimapClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const wrap = minimapWrapRef.current;
-    const el = editorRef.current;
-    if (!wrap || !el) return;
-    const rect = wrap.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    const ratio = y / rect.height;
-    el.scrollTop = ratio * el.scrollHeight - el.clientHeight / 2;
-  };
 
   const isDirty = yaml !== initialYaml;
 
@@ -158,27 +84,16 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   const scrollToMatch = useCallback(
     (idx: number, opts?: { focusEditor?: boolean }) => {
       const focusEditor = opts?.focusEditor ?? true;
-      const el = editorRef.current;
-      if (!el || total === 0) return;
+      const api = editorRef.current;
+      if (!api || total === 0) return;
       const target = matches[idx];
       if (!target) return;
       if (focusEditor) {
-        el.focus();
+        api.focus();
       }
-      el.setSelectionRange(target.start, target.end);
-      // 根据匹配所在行，手动滚动到视图中央附近，确保可见并同步 minimap
-      const before = yaml.slice(0, target.start);
-      const lineIndex = before.split("\n").length - 1; // 从 0 开始
-      const targetTop = lineIndex * LINE_HEIGHT;
-      const viewTop = targetTop - el.clientHeight / 2;
-      el.scrollTop = Math.max(0, viewTop);
-      // 额外触发一次 viewport、面包屑与 minimap 同步
-      setTimeout(() => {
-        updateViewportFromEditor();
-        syncScrollPathFromEditor();
-      }, 0);
+      api.selectRangeByOffset(target.start, target.end);
     },
-    [matches, total, yaml, updateViewportFromEditor, syncScrollPathFromEditor],
+    [matches, total],
   );
 
   const goPrev = () => {
@@ -192,7 +107,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   const goNext = () => {
     if (total === 0) return;
     setCurrentMatchIndex((i) => {
-      const next = (i + 1) % total;
+      const next = (i + 1 + total) % total;
       scrollToMatch(next, { focusEditor: true });
       return next;
     });
@@ -208,6 +123,10 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
     try {
       if (yamlKind === "deployment") {
         const data = await applyDeploymentYaml(clusterId, namespace, podName, yaml);
+        setInitialYaml(yaml);
+        onSaved?.(data);
+      } else if (yamlKind === "statefulset") {
+        const data = await applyStatefulSetYaml(clusterId, namespace, podName, yaml);
         setInitialYaml(yaml);
         onSaved?.(data);
       } else {
@@ -230,9 +149,6 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
     onClose();
   };
 
-  const safePathLine =
-    keyPaths.length === 0 ? 0 : Math.min(scrollPathLine, keyPaths.length - 1);
-
   if (loading) {
     return (
       <div style={{ padding: 24, color: "#94a3b8" }}>加载 YAML…</div>
@@ -252,7 +168,6 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         backgroundColor: "#0f172a",
       }}
     >
-      {/* 资源信息 + 操作按钮 */}
       <div
         style={{
           display: "flex",
@@ -266,7 +181,10 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#94a3b8", fontSize: 12 }}>
-          <span>Kind: {yamlKind === "deployment" ? "Deployment" : "Pod"}</span>
+          <span>
+            Kind:{" "}
+            {yamlKind === "deployment" ? "Deployment" : yamlKind === "statefulset" ? "StatefulSet" : "Pod"}
+          </span>
           <span>Name: {podName}</span>
           <span>Namespace: {namespace}</span>
         </div>
@@ -382,108 +300,9 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         </div>
       </div>
 
-      <YamlScrollContextBar segments={keyPaths[safePathLine] ?? []} />
-
-      {/* 编辑器 + 缩略图 */}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          overflow: "hidden",
-          width: "100%",
-        }}
-      >
-        {/* 行号 + 编辑区 */}
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            display: "flex",
-            overflow: "hidden",
-            width: "100%",
-          }}
-        >
-          <div
-            ref={lineNumbersRef}
-            style={{
-              width: 40,
-              flexShrink: 0,
-              overflow: "auto",
-              borderRight: "1px solid #1e293b",
-              backgroundColor: "#0f172a",
-              color: "#64748b",
-              fontSize: 12,
-              lineHeight: 1.5,
-              paddingTop: 10,
-              paddingRight: 8,
-              textAlign: "right",
-              fontFamily:
-                '"JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-            }}
-          >
-            {yamlLines.map((_, i) => (
-              <div key={i}>{i + 1}</div>
-            ))}
-          </div>
-          <YamlEditorWithGuides
-            ref={editorRef}
-            value={yaml}
-            onChange={setYaml}
-            lineHeight={LINE_HEIGHT}
-            fontSize={12}
-            onScroll={handleEditorScroll}
-          />
-        </div>
-
-        {/* 文档缩略与定位区（窄列，不占用过多宽度） */}
-        <div
-          ref={minimapWrapRef}
-          role="button"
-          tabIndex={0}
-          onClick={handleMinimapClick}
-          style={{
-            width: MINIMAP_WIDTH,
-            flex: "0 0 auto",
-            position: "relative",
-            overflow: "hidden",
-            borderLeft: "1px solid #1e293b",
-            backgroundColor: "#020617",
-            cursor: "pointer",
-          }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: 0,
-              padding: 2,
-              fontSize: 2,
-              lineHeight: 2,
-              fontFamily: "ui-monospace, monospace",
-              color: "#64748b",
-              whiteSpace: "pre",
-              wordBreak: "break-all",
-              opacity: 0.7,
-            }}
-          >
-            {yaml}
-          </div>
-          {/* 当前可见区域指示 */}
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: viewportStyle.top,
-              height: viewportStyle.height || 40,
-              backgroundColor: "rgba(148, 163, 184, 0.45)",
-              borderRadius: 2,
-              pointerEvents: "none",
-            }}
-          />
-        </div>
+      {/* Monaco：内置行号、YAML 高亮、右侧 minimap、编辑器内 sticky scroll（indentation 模型） */}
+      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+        <YamlMonacoEditor ref={editorRef} value={yaml} onChange={setYaml} />
       </div>
     </div>
   );

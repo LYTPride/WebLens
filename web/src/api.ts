@@ -15,6 +15,9 @@ export interface Pod {
     namespace: string;
     uid: string;
     creationTimestamp?: string;
+    /** 存在时表示 Pod 正在删除，Status 列应展示 Terminating */
+    deletionTimestamp?: string;
+    ownerReferences?: Array<{ kind: string; name: string; uid?: string; controller?: boolean }>;
   };
   status?: {
     phase?: string;
@@ -43,6 +46,8 @@ export interface Pod {
   spec?: {
     nodeName?: string;
     containers?: Array<{ name: string }>;
+    /** 列表接口若带 volumes，可用于展示 Pod 挂载的 PVC 名称 */
+    volumes?: Array<{ name?: string; persistentVolumeClaim?: { claimName?: string } }>;
   };
   // 后端计算得到的健康信息，仅用于前端标签展示与解释
   healthLabel?: "健康" | "关注" | "警告" | "严重";
@@ -167,6 +172,29 @@ export interface DeploymentDescribe {
   events: K8sEvent[];
 }
 
+/** StatefulSet 结构化 Describe（与后端 StatefulSetDescribeView 对齐） */
+export interface StatefulSetDescribeView {
+  name: string;
+  namespace: string;
+  serviceName?: string;
+  creationTimestamp?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  replicas: number;
+  readyReplicas: number;
+  currentReplicas: number;
+  updatedReplicas: number;
+  volumeClaimTemplateNames?: string[];
+  strategyType: string;
+  rollingPartition?: number | null;
+  podManagementPolicy?: string;
+}
+
+export interface StatefulSetDescribe {
+  view: StatefulSetDescribeView;
+  events: K8sEvent[];
+}
+
 export interface ClusterCombo {
   id: string;
   clusterId: string;
@@ -266,12 +294,15 @@ export async function fetchNamespaces(clusterId: string): Promise<string[]> {
   return (res.data.items || []).map((n) => n.metadata.name).sort();
 }
 
-export async function fetchPods(clusterId: string, namespace?: string) {
-  const res = await api.get<{ items: Pod[] }>(
+export async function fetchPods(clusterId: string, namespace?: string): Promise<ListWithServerTime<Pod>> {
+  const res = await api.get<ListWithServerTime<Pod>>(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods`,
-    { params: namespace ? { namespace } : {} },
+    {
+      params: namespace ? { namespace } : {},
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    },
   );
-  return res.data.items;
+  return { items: res.data.items || [], serverTimeMs: res.data.serverTimeMs };
 }
 
 export async function listContainerFiles(
@@ -360,6 +391,9 @@ export async function uploadContainerFile(
   container: string,
   dstPath: string,
   file: File,
+  opts?: {
+    onUploadProgress?: (ev: { loaded: number; total: number | null }) => void;
+  },
 ): Promise<void> {
   const form = new FormData();
   form.set("path", dstPath);
@@ -370,35 +404,122 @@ export async function uploadContainerFile(
     {
       params: { container },
       headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (e) => {
+        const loaded = e.loaded;
+        const total =
+          typeof e.total === "number" && e.total > 0 ? e.total : file.size > 0 ? file.size : null;
+        opts?.onUploadProgress?.({ loaded, total });
+      },
     },
   );
 }
 
-export type PodWatchEventType = "ADDED" | "MODIFIED" | "DELETED" | "ERROR";
+/**
+ * 通过 fetch 拉取容器文件打包（tar），便于统计已接收字节。
+ * 后端为流式响应时通常无 Content-Length，此时 total 为 null，仅 loaded 递增，不做假百分比。
+ */
+export async function downloadContainerArchiveBlob(
+  url: string,
+  opts?: {
+    signal?: AbortSignal;
+    onProgress?: (ev: { loaded: number; total: number | null }) => void;
+  },
+): Promise<Blob> {
+  const res = await fetch(url, { credentials: "same-origin", signal: opts?.signal });
+  const cl = res.headers.get("content-length");
+  const parsed = cl ? parseInt(cl, 10) : NaN;
+  const total = !Number.isNaN(parsed) && parsed > 0 ? parsed : null;
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const text = await res.text();
+      try {
+        const j = JSON.parse(text) as { error?: string };
+        if (j?.error) msg = j.error;
+      } catch {
+        if (text) msg = text.slice(0, 200);
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+
+  if (!res.body) {
+    const blob = await res.blob();
+    opts?.onProgress?.({ loaded: blob.size, total: total ?? (blob.size > 0 ? blob.size : null) });
+    return blob;
+  }
+
+  const reader = res.body.getReader();
+  let loaded = 0;
+  const chunks: BlobPart[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value?.byteLength) {
+      loaded += value.byteLength;
+      chunks.push(value);
+      opts?.onProgress?.({ loaded, total });
+    }
+  }
+  return new Blob(chunks);
+}
+
+export type PodWatchEventType = "ADDED" | "MODIFIED" | "DELETED" | "ERROR" | "BOOKMARK";
 
 export interface PodWatchEvent {
   type: PodWatchEventType;
   object: Pod;
+  serverTimeMs?: number;
 }
 
 export interface ResourceWatchEvent<T = any> {
   type: PodWatchEventType;
   object: T;
+  serverTimeMs?: number;
+}
+
+export interface ListWithServerTime<T> {
+  items: T[];
+  serverTimeMs?: number;
 }
 
 /**
  * 使用后端封装的 Kubernetes Watch API 做 Pod 实时变更监听。
  * 基于 fetch + ReadableStream 逐行读取 JSON 事件。
  */
+/** 消费 watch 行流；流正常结束或断开后由外层负责重连 */
+async function readWatchLineStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onLine: (line: string) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (line) onLine(line);
+    }
+  }
+}
+
 export function watchPods(
   clusterId: string,
   namespace: string | undefined,
   opts: {
     onEvent: (ev: PodWatchEvent) => void;
     onError?: (err: Error) => void;
+    /** 每次建立新 HTTP 连接并开始读流时调用（含首次与断线重连），用于 list 合并补齐 watch 缺口 */
+    onConnectionEstablished?: () => void;
   },
 ): () => void {
-  const ac = new AbortController();
   const base = typeof window !== "undefined" ? window.location.origin : "";
   const url = new URL(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods/watch`,
@@ -408,44 +529,71 @@ export function watchPods(
     url.searchParams.set("namespace", namespace);
   }
 
-  fetch(url.toString(), { signal: ac.signal })
-    .then(async (res) => {
-      if (!res.ok) {
-        throw new Error(res.statusText || `HTTP ${res.status}`);
-      }
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let idx: number;
-        // 按行分割，每行一个 JSON 事件
-        while ((idx = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, idx).trim();
-          buffer = buffer.slice(idx + 1);
-          if (!line) continue;
+  let cancelled = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let fetchAbort: AbortController | null = null;
+  const clearReconnect = () => {
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
+  const connect = () => {
+    if (cancelled) return;
+    fetchAbort = new AbortController();
+    const sig = fetchAbort.signal;
+    fetch(url.toString(), { signal: sig })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(res.statusText || `HTTP ${res.status}`);
+        }
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response body");
+        opts.onConnectionEstablished?.();
+        await readWatchLineStream(reader, (line) => {
           try {
             const ev = JSON.parse(line) as PodWatchEvent;
             if (ev && ev.object && ev.object.metadata) {
+              if (
+                typeof localStorage !== "undefined" &&
+                localStorage.getItem("weblens_debug_pod_age") === "1"
+              ) {
+                const o = ev.object;
+                // eslint-disable-next-line no-console
+                console.debug("[weblens watchPods]", ev.type, {
+                  name: o.metadata?.name,
+                  uid: o.metadata?.uid,
+                  creationTimestamp: o.metadata?.creationTimestamp,
+                });
+              }
               opts.onEvent(ev);
             }
           } catch (e) {
-            // 单条事件解析失败不影响后续
             // eslint-disable-next-line no-console
             console.warn("Failed to parse pods watch event:", e);
           }
-        }
-      }
-    })
-    .catch((err) => {
-      if (err?.name === "AbortError") return;
-      opts.onError?.(err);
-    });
+        });
+      })
+      .catch((err: Error) => {
+        if (err?.name === "AbortError" || cancelled) return;
+        opts.onError?.(err);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        clearReconnect();
+        reconnectTimer = setTimeout(connect, 600);
+      });
+  };
 
-  return () => ac.abort();
+  connect();
+
+  return () => {
+    cancelled = true;
+    clearReconnect();
+    fetchAbort?.abort();
+    fetchAbort = null;
+  };
 }
 
 /**
@@ -459,9 +607,9 @@ export function watchResourceList<T = any>(
   opts: {
     onEvent: (ev: ResourceWatchEvent<T>) => void;
     onError?: (err: Error) => void;
+    onConnectionEstablished?: () => void;
   },
 ): () => void {
-  const ac = new AbortController();
   const base = typeof window !== "undefined" ? window.location.origin : "";
   const path = resourcePath(kind);
   const url = new URL(
@@ -472,24 +620,28 @@ export function watchResourceList<T = any>(
     url.searchParams.set("namespace", namespace);
   }
 
-  fetch(url.toString(), { signal: ac.signal })
-    .then(async (res) => {
-      if (!res.ok) {
-        throw new Error(res.statusText || `HTTP ${res.status}`);
-      }
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let idx: number;
-        while ((idx = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, idx).trim();
-          buffer = buffer.slice(idx + 1);
-          if (!line) continue;
+  let cancelled = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let fetchAbort: AbortController | null = null;
+  const clearReconnect = () => {
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
+  const connect = () => {
+    if (cancelled) return;
+    fetchAbort = new AbortController();
+    fetch(url.toString(), { signal: fetchAbort.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(res.statusText || `HTTP ${res.status}`);
+        }
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response body");
+        opts.onConnectionEstablished?.();
+        await readWatchLineStream(reader, (line) => {
           try {
             const ev = JSON.parse(line) as ResourceWatchEvent<T>;
             if (ev && ev.object) {
@@ -499,15 +651,27 @@ export function watchResourceList<T = any>(
             // eslint-disable-next-line no-console
             console.warn("Failed to parse resource watch event:", e);
           }
-        }
-      }
-    })
-    .catch((err) => {
-      if (err?.name === "AbortError") return;
-      opts.onError?.(err);
-    });
+        });
+      })
+      .catch((err: Error) => {
+        if (err?.name === "AbortError" || cancelled) return;
+        opts.onError?.(err);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        clearReconnect();
+        reconnectTimer = setTimeout(connect, 600);
+      });
+  };
 
-  return () => ac.abort();
+  connect();
+
+  return () => {
+    cancelled = true;
+    clearReconnect();
+    fetchAbort?.abort();
+    fetchAbort = null;
+  };
 }
 
 /** 获取 Pod Describe 数据（Pod + Events） */
@@ -707,17 +871,88 @@ export async function deleteDeployment(
   );
 }
 
+export async function fetchStatefulSetDescribe(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<StatefulSetDescribe> {
+  const res = await api.get<StatefulSetDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/describe`,
+  );
+  return res.data;
+}
+
+export async function fetchStatefulSetYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+export async function applyStatefulSetYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  yamlBody: string,
+): Promise<unknown> {
+  const res = await api.put(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
+  return res.data;
+}
+
+export async function scaleStatefulSet(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  replicas: number,
+): Promise<unknown> {
+  const res = await api.patch(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
+    { replicas },
+  );
+  return res.data;
+}
+
+export async function restartStatefulSet(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<unknown> {
+  const res = await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+  );
+  return res.data;
+}
+
+export async function deleteStatefulSet(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  await api.delete(
+    `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+  );
+}
+
 /** 通用：按资源路径拉取 items（用于 Deployments / StatefulSets / ...） */
 export async function fetchResourceList<T = unknown>(
   clusterId: string,
   resourcePath: string,
   namespace?: string,
-): Promise<T[]> {
-  const res = await api.get<{ items: T[] }>(
+): Promise<ListWithServerTime<T>> {
+  const res = await api.get<ListWithServerTime<T>>(
     `/api/clusters/${encodeURIComponent(clusterId)}/${resourcePath}`,
     { params: namespace ? { namespace } : {} },
   );
-  return res.data.items || [];
+  return { items: res.data.items || [], serverTimeMs: res.data.serverTimeMs };
 }
 
 export type ResourceKind =
