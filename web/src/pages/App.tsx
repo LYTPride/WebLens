@@ -3037,7 +3037,7 @@ export const App: React.FC = () => {
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <h3 style={{ fontSize: 15, margin: 0 }}>
-                      {viewTitle[currentView]}（{effectiveClusterId ?? "未应用"}）
+                      {viewTitle[currentView]}
                       {currentView !== "nodes" && currentView !== "namespaces" && (
                         effectiveNamespace && effectiveNamespace !== ""
                           ? ` · ${effectiveNamespace}`
