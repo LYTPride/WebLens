@@ -14,6 +14,8 @@ import {
   formatTransferBytes,
   type TransferTask,
 } from "./FileTransferTasksPanel";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { InputDialog } from "./InputDialog";
 
 type Props = {
   clusterId: string;
@@ -72,6 +74,19 @@ export const FileManagerPanel: React.FC<Props> = ({
   const skipAddressBlurRef = useRef(false);
   // 仅用于区分：地址栏手动确认路径后的跳转失败，需要显示更友好的固定提示语
   const manualEnterPendingRef = useRef(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [inputDialog, setInputDialog] = useState<
+    | null
+    | {
+        kind: "rename" | "mkdir";
+        title: string;
+        label?: string;
+        initialValue: string;
+        placeholder?: string;
+      }
+  >(null);
+  const inputDialogRef = useRef(inputDialog);
+  inputDialogRef.current = inputDialog;
 
   useEffect(() => {
     const init = path ?? defaultPath;
@@ -351,49 +366,44 @@ export const FileManagerPanel: React.FC<Props> = ({
     }
   };
 
-  const doDelete = async () => {
+  const requestDelete = () => {
     if (selectedPaths.length === 0) return;
-    if (!window.confirm(`确定删除已勾选的 ${selectedPaths.length} 项吗？`)) return;
+    setDeleteConfirmOpen(true);
+  };
+
+  const executeDelete = async () => {
+    const paths = selectedPaths;
+    if (paths.length === 0) return;
     try {
-      await deleteInContainer(clusterId, namespace, pod, container, selectedPaths);
+      await deleteInContainer(clusterId, namespace, pod, container, paths);
       onToast?.("删除成功");
       refresh();
     } catch (e: any) {
       setError(e?.response?.data?.error ?? e?.message ?? "删除失败");
+      throw e;
     }
   };
 
-  const doRename = async () => {
+  const requestRename = () => {
     const one = Object.keys(selected).find((k) => selected[k]);
     if (!one) return;
-    const nextName = window.prompt("重命名为：", one);
-    if (!nextName || !nextName.trim() || nextName.trim() === one) return;
-    try {
-      await renameInContainer(
-        clusterId,
-        namespace,
-        pod,
-        container,
-        joinPath(currentPath, one),
-        joinPath(currentPath, nextName.trim()),
-      );
-      onToast?.("重命名成功");
-      refresh();
-    } catch (e: any) {
-      setError(e?.response?.data?.error ?? e?.message ?? "重命名失败");
-    }
+    setInputDialog({
+      kind: "rename",
+      title: "重命名",
+      label: "新名称",
+      initialValue: one,
+      placeholder: one,
+    });
   };
 
-  const doMkdir = async () => {
-    const name = window.prompt("新建文件夹名称：", "new-folder");
-    if (!name || !name.trim()) return;
-    try {
-      await mkdirInContainer(clusterId, namespace, pod, container, joinPath(currentPath, name.trim()));
-      onToast?.("文件夹已创建");
-      refresh();
-    } catch (e: any) {
-      setError(e?.response?.data?.error ?? e?.message ?? "创建失败");
-    }
+  const requestMkdir = () => {
+    setInputDialog({
+      kind: "mkdir",
+      title: "新建文件夹",
+      label: "文件夹名称",
+      initialValue: "new-folder",
+      placeholder: "new-folder",
+    });
   };
 
   const doUpload = async (file: File) => {
@@ -581,16 +591,16 @@ export const FileManagerPanel: React.FC<Props> = ({
         </button>
         <button
           type="button"
-          onClick={doDelete}
+          onClick={requestDelete}
           style={toolBtnStyle(selectedPaths.length === 0)}
           disabled={selectedPaths.length === 0}
         >
           删除
         </button>
-        <button type="button" onClick={doRename} style={toolBtnStyle(!canRename)} disabled={!canRename}>
+        <button type="button" onClick={requestRename} style={toolBtnStyle(!canRename)} disabled={!canRename}>
           重命名
         </button>
-        <button type="button" onClick={doMkdir} style={toolBtnStyle(false)}>
+        <button type="button" onClick={requestMkdir} style={toolBtnStyle(false)}>
           新建文件夹
         </button>
         <input
@@ -669,6 +679,69 @@ export const FileManagerPanel: React.FC<Props> = ({
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title={
+          selectedPaths.length === 1
+            ? "确认删除 1 项？"
+            : `确认删除 ${selectedPaths.length} 项？`
+        }
+        description="将从容器内永久删除所选路径，请谨慎操作。"
+        items={selectedPaths}
+        variant="danger"
+        zIndex={200}
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={executeDelete}
+      />
+      <InputDialog
+        open={!!inputDialog}
+        title={inputDialog?.title ?? ""}
+        label={inputDialog?.label}
+        initialValue={inputDialog?.initialValue ?? ""}
+        placeholder={inputDialog?.placeholder}
+        zIndex={200}
+        onClose={() => setInputDialog(null)}
+        onConfirm={async (value) => {
+          const dlg = inputDialogRef.current;
+          if (!dlg) return false;
+          if (dlg.kind === "rename") {
+            const orig = dlg.initialValue;
+            if (!value.trim() || value.trim() === orig) return false;
+            try {
+              await renameInContainer(
+                clusterId,
+                namespace,
+                pod,
+                container,
+                joinPath(currentPath, orig),
+                joinPath(currentPath, value.trim()),
+              );
+              onToast?.("重命名成功");
+              refresh();
+            } catch (e: any) {
+              setError(e?.response?.data?.error ?? e?.message ?? "重命名失败");
+              throw e;
+            }
+          } else {
+            if (!value.trim()) return false;
+            try {
+              await mkdirInContainer(
+                clusterId,
+                namespace,
+                pod,
+                container,
+                joinPath(currentPath, value.trim()),
+              );
+              onToast?.("文件夹已创建");
+              refresh();
+            } catch (e: any) {
+              setError(e?.response?.data?.error ?? e?.message ?? "创建失败");
+              throw e;
+            }
+          }
+        }}
+      />
     </div>
   );
 };

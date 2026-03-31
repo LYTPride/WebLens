@@ -81,6 +81,7 @@ import { useFocusInputWhenOpen } from "../hooks/useFocusInputWhenOpen";
 import { DescribeEventsSection } from "../components/describe/DescribeEventsSection";
 import { DeploymentDescribeContent } from "../components/describe/DeploymentDescribeContent";
 import { StatefulSetDescribeContent } from "../components/describe/StatefulSetDescribeContent";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useColumnResize } from "../hooks/useColumnResize";
 import { useSortedRowPositionChangeHighlight } from "../hooks/useSortedRowPositionChangeHighlight";
 import { useNowTick } from "../hooks/useNowTick";
@@ -454,6 +455,16 @@ export const App: React.FC = () => {
     keys: string[];
   } | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
+  /** 单行/单次危险操作统一确认（替代 window.confirm） */
+  const [actionConfirm, setActionConfirm] = useState<{
+    title: string;
+    description?: string;
+    items: string[];
+    variant: "danger" | "primary";
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const actionConfirmRef = useRef(actionConfirm);
+  actionConfirmRef.current = actionConfirm;
   /** Deployment 行上异步操作（restart/delete） */
   const [deploymentRowBusyKey, setDeploymentRowBusyKey] = useState<string | null>(null);
   const [statefulsetRowBusyKey, setStatefulsetRowBusyKey] = useState<string | null>(null);
@@ -1071,6 +1082,7 @@ export const App: React.FC = () => {
       }
     } catch (e: any) {
       setToastMessage(e?.response?.data?.error ?? e?.message ?? "批量操作失败");
+      throw e;
     } finally {
       setBatchBusy(false);
     }
@@ -2079,108 +2091,46 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
-      {batchConfirm && effectiveClusterId && (
-        <div
-          role="presentation"
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 185,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "rgba(0,0,0,0.5)",
-          }}
-          onClick={() => {
-            if (!batchBusy) setBatchConfirm(null);
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal
-            style={{
-              width: 440,
-              maxWidth: "92vw",
-              padding: 20,
-              borderRadius: 10,
-              border: "1px solid #334155",
-              backgroundColor: "#0f172a",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, color: "#e2e8f0" }}>
-              {batchConfirm.kind === "pods-delete" && `确认删除 ${batchConfirm.keys.length} 个 Pod？`}
-              {batchConfirm.kind === "deployments-delete" &&
-                `确认删除 ${batchConfirm.keys.length} 个 Deployment？`}
-              {batchConfirm.kind === "deployments-restart" &&
-                `确认重启 ${batchConfirm.keys.length} 个 Deployment？`}
-            </div>
-            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>
-              将处理以下资源（可滚动查看全部）：
-            </div>
-            <div
-              style={{
-                maxHeight: 220,
-                overflowY: "auto",
-                padding: "8px 10px",
-                borderRadius: 6,
-                border: "1px solid #1f2937",
-                backgroundColor: "#020617",
-                fontSize: 12,
-                color: "#cbd5e1",
-                lineHeight: 1.5,
-              }}
-            >
-              {batchConfirm.keys.map((k) => (
-                <div key={k} style={{ borderBottom: "1px solid #111827", padding: "4px 0" }}>
-                  {k}
-                </div>
-              ))}
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button
-                type="button"
-                disabled={batchBusy}
-                onClick={() => {
-                  if (!batchBusy) setBatchConfirm(null);
-                }}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  border: "1px solid #334155",
-                  backgroundColor: "transparent",
-                  color: "#94a3b8",
-                  cursor: batchBusy ? "not-allowed" : "pointer",
-                  fontSize: 13,
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                disabled={batchBusy}
-                onClick={() => void confirmBatchAction()}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  border: "none",
-                  backgroundColor: batchBusy
-                    ? "#334155"
-                    : batchConfirm.kind === "deployments-restart"
-                      ? "#0d9488"
-                      : "#b91c1c",
-                  color: "#fff",
-                  cursor: batchBusy ? "not-allowed" : "pointer",
-                  fontSize: 13,
-                }}
-              >
-                {batchBusy ? "执行中…" : "确定"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!batchConfirm && !!effectiveClusterId}
+        title={
+          batchConfirm?.kind === "pods-delete"
+            ? `确认删除 ${batchConfirm.keys.length} 个 Pod？`
+            : batchConfirm?.kind === "deployments-delete"
+              ? `确认删除 ${batchConfirm.keys.length} 个 Deployment？`
+              : batchConfirm?.kind === "deployments-restart"
+                ? `确认重启 ${batchConfirm.keys.length} 个 Deployment？`
+                : ""
+        }
+        description={
+          batchConfirm?.kind === "deployments-restart"
+            ? "将触发滚动更新，Pod 会按策略逐步重建。"
+            : batchConfirm?.kind === "deployments-delete"
+              ? "删除后不可恢复。"
+              : undefined
+        }
+        items={batchConfirm?.keys ?? []}
+        variant={batchConfirm?.kind === "deployments-restart" ? "primary" : "danger"}
+        busy={batchBusy}
+        busyText="执行中…"
+        onClose={() => {
+          if (!batchBusy) setBatchConfirm(null);
+        }}
+        onConfirm={confirmBatchAction}
+      />
+      <ConfirmDialog
+        open={!!actionConfirm}
+        title={actionConfirm?.title ?? ""}
+        description={actionConfirm?.description}
+        items={actionConfirm?.items ?? []}
+        variant={actionConfirm?.variant ?? "danger"}
+        onClose={() => setActionConfirm(null)}
+        onConfirm={async () => {
+          const ac = actionConfirmRef.current;
+          if (!ac) return;
+          await ac.onConfirm();
+        }}
+      />
       <header
         style={{
           flexShrink: 0,
@@ -3631,17 +3581,26 @@ export const App: React.FC = () => {
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            if (!effectiveClusterId || !window.confirm(`确定删除 Pod ${p.metadata.namespace}/${p.metadata.name}？`)) {
-                                              setPodMenuOpenKey(null); setPodMenuSubmenu(null);
-                                              return;
-                                            }
-                                            deletePod(effectiveClusterId, p.metadata.namespace, p.metadata.name)
-                                              .then(() => {
-                                                setPodMenuOpenKey(null); setPodMenuSubmenu(null);
-                                                setError(null);
-                                                // 依赖 watch 推送 DELETED/ADDED；delete 后再 loadPods 会整表覆盖，易丢失事件链与错误 Age。
-                                              })
-                                              .catch((err: any) => setError(err?.response?.data?.error ?? err?.message ?? "删除失败"));
+                                            setPodMenuOpenKey(null);
+                                            setPodMenuSubmenu(null);
+                                            if (!effectiveClusterId) return;
+                                            const ns = p.metadata.namespace;
+                                            const name = p.metadata.name;
+                                            setActionConfirm({
+                                              title: "确认删除 1 个 Pod？",
+                                              description: "删除后 Pod 将终止并从集群移除。",
+                                              items: [`${ns}/${name}`],
+                                              variant: "danger",
+                                              onConfirm: async () => {
+                                                try {
+                                                  await deletePod(effectiveClusterId, ns, name);
+                                                  setError(null);
+                                                } catch (err: any) {
+                                                  setError(err?.response?.data?.error ?? err?.message ?? "删除失败");
+                                                  throw err;
+                                                }
+                                              },
+                                            });
                                           }}
                                           className="wl-menu-item wl-menu-item-danger"
                                           style={menuItemStyleForDropdown}
@@ -3936,26 +3895,29 @@ export const App: React.FC = () => {
                                         disabled={rowBusy || !effectiveClusterId}
                                         onClick={() => {
                                           setDeploymentMenuOpenKey(null);
-                                          if (
-                                            !window.confirm(
-                                              `确定重启 Deployment ${ns}/${dname}？将触发滚动更新。`,
-                                            )
-                                          ) {
-                                            return;
-                                          }
-                                          setDeploymentRowBusyKey(menuKey);
-                                          restartDeployment(effectiveClusterId!, ns, dname)
-                                            .then((data) => {
-                                              setDeploymentItems((prev) => mergeDeploymentIntoList(prev, data));
-                                              setToastMessage("已触发重启");
-                                              setError(null);
-                                            })
-                                            .catch((err: any) => {
-                                              setToastMessage(
-                                                err?.response?.data?.error ?? err?.message ?? "重启失败",
-                                              );
-                                            })
-                                            .finally(() => setDeploymentRowBusyKey(null));
+                                          if (!effectiveClusterId) return;
+                                          setActionConfirm({
+                                            title: "确认重启 1 个 Deployment？",
+                                            description: "将触发滚动更新，Pod 会按策略逐步重建。",
+                                            items: [`${ns}/${dname}`],
+                                            variant: "primary",
+                                            onConfirm: async () => {
+                                              setDeploymentRowBusyKey(menuKey);
+                                              try {
+                                                const data = await restartDeployment(effectiveClusterId, ns, dname);
+                                                setDeploymentItems((prev) => mergeDeploymentIntoList(prev, data));
+                                                setToastMessage("已触发重启");
+                                                setError(null);
+                                              } catch (err: any) {
+                                                setToastMessage(
+                                                  err?.response?.data?.error ?? err?.message ?? "重启失败",
+                                                );
+                                                throw err;
+                                              } finally {
+                                                setDeploymentRowBusyKey(null);
+                                              }
+                                            },
+                                          });
                                         }}
                                       >
                                         <span style={{ marginRight: 8 }}>↻</span> Restart
@@ -3976,30 +3938,37 @@ export const App: React.FC = () => {
                                         disabled={rowBusy || !effectiveClusterId}
                                         onClick={() => {
                                           setDeploymentMenuOpenKey(null);
-                                          if (!window.confirm(`确定删除 Deployment ${ns}/${dname}？此操作不可恢复。`)) {
-                                            return;
-                                          }
-                                          setDeploymentRowBusyKey(menuKey);
-                                          deleteDeployment(effectiveClusterId!, ns, dname)
-                                            .then(() => {
-                                              setDeploymentItems((prev) =>
-                                                prev.filter(
-                                                  (it) =>
-                                                    !(
-                                                      it.metadata?.name === dname &&
-                                                      (it.metadata?.namespace ?? "") === ns
-                                                    ),
-                                                ),
-                                              );
-                                              setToastMessage("已删除 Deployment");
-                                              setError(null);
-                                            })
-                                            .catch((err: any) => {
-                                              setToastMessage(
-                                                err?.response?.data?.error ?? err?.message ?? "删除失败",
-                                              );
-                                            })
-                                            .finally(() => setDeploymentRowBusyKey(null));
+                                          if (!effectiveClusterId) return;
+                                          setActionConfirm({
+                                            title: "确认删除 1 个 Deployment？",
+                                            description: "删除后不可恢复。",
+                                            items: [`${ns}/${dname}`],
+                                            variant: "danger",
+                                            onConfirm: async () => {
+                                              setDeploymentRowBusyKey(menuKey);
+                                              try {
+                                                await deleteDeployment(effectiveClusterId, ns, dname);
+                                                setDeploymentItems((prev) =>
+                                                  prev.filter(
+                                                    (it) =>
+                                                      !(
+                                                        it.metadata?.name === dname &&
+                                                        (it.metadata?.namespace ?? "") === ns
+                                                      ),
+                                                  ),
+                                                );
+                                                setToastMessage("已删除 Deployment");
+                                                setError(null);
+                                              } catch (err: any) {
+                                                setToastMessage(
+                                                  err?.response?.data?.error ?? err?.message ?? "删除失败",
+                                                );
+                                                throw err;
+                                              } finally {
+                                                setDeploymentRowBusyKey(null);
+                                              }
+                                            },
+                                          });
                                         }}
                                       >
                                         <span style={{ marginRight: 8 }}>🗑</span> Delete
@@ -4317,26 +4286,35 @@ export const App: React.FC = () => {
                                           disabled={rowBusy || !effectiveClusterId}
                                           onClick={() => {
                                             setStatefulsetMenuOpenKey(null);
-                                            if (
-                                              !window.confirm(
-                                                `确定重启 StatefulSet ${ns}/${sname}？将按策略滚动更新 Pod。`,
-                                              )
-                                            ) {
-                                              return;
-                                            }
-                                            setStatefulsetRowBusyKey(menuKey);
-                                            restartStatefulSet(effectiveClusterId!, ns, sname)
-                                              .then((data) => {
-                                                setStatefulsetItems((prev) => mergeDeploymentIntoList(prev, data));
-                                                setToastMessage("已触发重启");
-                                                setError(null);
-                                              })
-                                              .catch((err: any) => {
-                                                setToastMessage(
-                                                  err?.response?.data?.error ?? err?.message ?? "重启失败",
-                                                );
-                                              })
-                                              .finally(() => setStatefulsetRowBusyKey(null));
+                                            if (!effectiveClusterId) return;
+                                            setActionConfirm({
+                                              title: "确认重启 1 个 StatefulSet？",
+                                              description: "将按策略滚动更新 Pod。",
+                                              items: [`${ns}/${sname}`],
+                                              variant: "primary",
+                                              onConfirm: async () => {
+                                                setStatefulsetRowBusyKey(menuKey);
+                                                try {
+                                                  const data = await restartStatefulSet(
+                                                    effectiveClusterId,
+                                                    ns,
+                                                    sname,
+                                                  );
+                                                  setStatefulsetItems((prev) =>
+                                                    mergeDeploymentIntoList(prev, data),
+                                                  );
+                                                  setToastMessage("已触发重启");
+                                                  setError(null);
+                                                } catch (err: any) {
+                                                  setToastMessage(
+                                                    err?.response?.data?.error ?? err?.message ?? "重启失败",
+                                                  );
+                                                  throw err;
+                                                } finally {
+                                                  setStatefulsetRowBusyKey(null);
+                                                }
+                                              },
+                                            });
                                           }}
                                         >
                                           <span style={{ marginRight: 8 }}>↻</span> Restart
@@ -4357,34 +4335,37 @@ export const App: React.FC = () => {
                                           disabled={rowBusy || !effectiveClusterId}
                                           onClick={() => {
                                             setStatefulsetMenuOpenKey(null);
-                                            if (
-                                              !window.confirm(
-                                                `确定删除 StatefulSet ${ns}/${sname}？此操作不可恢复。`,
-                                              )
-                                            ) {
-                                              return;
-                                            }
-                                            setStatefulsetRowBusyKey(menuKey);
-                                            deleteStatefulSet(effectiveClusterId!, ns, sname)
-                                              .then(() => {
-                                                setStatefulsetItems((prev) =>
-                                                  prev.filter(
-                                                    (it) =>
-                                                      !(
-                                                        it.metadata?.name === sname &&
-                                                        (it.metadata?.namespace ?? "") === ns
-                                                      ),
-                                                  ),
-                                                );
-                                                setToastMessage("已删除 StatefulSet");
-                                                setError(null);
-                                              })
-                                              .catch((err: any) => {
-                                                setToastMessage(
-                                                  err?.response?.data?.error ?? err?.message ?? "删除失败",
-                                                );
-                                              })
-                                              .finally(() => setStatefulsetRowBusyKey(null));
+                                            if (!effectiveClusterId) return;
+                                            setActionConfirm({
+                                              title: "确认删除 1 个 StatefulSet？",
+                                              description: "删除后不可恢复。",
+                                              items: [`${ns}/${sname}`],
+                                              variant: "danger",
+                                              onConfirm: async () => {
+                                                setStatefulsetRowBusyKey(menuKey);
+                                                try {
+                                                  await deleteStatefulSet(effectiveClusterId, ns, sname);
+                                                  setStatefulsetItems((prev) =>
+                                                    prev.filter(
+                                                      (it) =>
+                                                        !(
+                                                          it.metadata?.name === sname &&
+                                                          (it.metadata?.namespace ?? "") === ns
+                                                        ),
+                                                    ),
+                                                  );
+                                                  setToastMessage("已删除 StatefulSet");
+                                                  setError(null);
+                                                } catch (err: any) {
+                                                  setToastMessage(
+                                                    err?.response?.data?.error ?? err?.message ?? "删除失败",
+                                                  );
+                                                  throw err;
+                                                } finally {
+                                                  setStatefulsetRowBusyKey(null);
+                                                }
+                                              },
+                                            });
                                           }}
                                         >
                                           <span style={{ marginRight: 8 }}>🗑</span> Delete
@@ -4728,33 +4709,34 @@ export const App: React.FC = () => {
                                                           <button
                                                             type="button"
                                                             onClick={() => {
-                                                              if (
-                                                                !effectiveClusterId ||
-                                                                !window.confirm(
-                                                                  `确定删除 Pod ${p.metadata.namespace}/${p.metadata.name}？`,
-                                                                )
-                                                              ) {
-                                                                setPodMenuOpenKey(null);
-                                                                setPodMenuSubmenu(null);
-                                                                return;
-                                                              }
-                                                              deletePod(
-                                                                effectiveClusterId,
-                                                                p.metadata.namespace,
-                                                                p.metadata.name,
-                                                              )
-                                                                .then(() => {
-                                                                  setPodMenuOpenKey(null);
-                                                                  setPodMenuSubmenu(null);
-                                                                  setError(null);
-                                                                })
-                                                                .catch((err: any) =>
-                                                                  setError(
-                                                                    err?.response?.data?.error ??
-                                                                      err?.message ??
-                                                                      "删除失败",
-                                                                  ),
-                                                                );
+                                                              setPodMenuOpenKey(null);
+                                                              setPodMenuSubmenu(null);
+                                                              if (!effectiveClusterId) return;
+                                                              const ns0 = p.metadata.namespace;
+                                                              const name0 = p.metadata.name;
+                                                              setActionConfirm({
+                                                                title: "确认删除 1 个 Pod？",
+                                                                description: "删除后 Pod 将终止并从集群移除。",
+                                                                items: [`${ns0}/${name0}`],
+                                                                variant: "danger",
+                                                                onConfirm: async () => {
+                                                                  try {
+                                                                    await deletePod(
+                                                                      effectiveClusterId,
+                                                                      ns0,
+                                                                      name0,
+                                                                    );
+                                                                    setError(null);
+                                                                  } catch (err: any) {
+                                                                    setError(
+                                                                      err?.response?.data?.error ??
+                                                                        err?.message ??
+                                                                        "删除失败",
+                                                                    );
+                                                                    throw err;
+                                                                  }
+                                                                },
+                                                              });
                                                             }}
                                                             className="wl-menu-item wl-menu-item-danger"
                                                             style={menuItemStyleForDropdown}
