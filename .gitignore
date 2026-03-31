@@ -1,0 +1,15 @@
+# Frontend
+web/node_modules/
+web/dist/
+
+# Go build artifacts（本地调试生成）
+server/bin/
+
+# 发布打包临时目录
+release/
+
+# OS / IDE
+.DS_Store
+*.swp
+.idea/
+.vscode/

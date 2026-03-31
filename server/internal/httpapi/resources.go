@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -30,8 +31,9 @@ func isForbiddenClusterScope(err error) bool {
 	return strings.Contains(s, "forbidden") && strings.Contains(s, "cluster scope")
 }
 
-// listCacheEntry / listCache：针对各类 List 结果做一个极短 TTL（1 秒）的软缓存，
-// 用于吸收多个前端在同一时间段对同一资源的并发轮询请求，降低对 kube-apiserver 的压力。
+// listCacheEntry / listCache：针对各类 **HTTP List** 结果做一个极短 TTL（1 秒）的软缓存，
+// 用于吸收多个前端在同一时间段对同一资源的并发 list 请求，降低对 kube-apiserver 的压力。
+// Watch 流不走此缓存；实时增量仅依赖 watch + 前端 raw state reducer。
 type listCacheEntry struct {
 	ts   time.Time
 	data interface{}
@@ -331,6 +333,8 @@ func watchAndStream(c *gin.Context, id, ns string, w watch.Interface) {
 
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
+	// 关闭常见反向代理对响应体的缓冲，避免 watch 事件被攒批延迟（运维体感「一分钟才更新」）
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.WriteHeader(http.StatusOK)
 
 	flusher, ok := c.Writer.(http.Flusher)
@@ -350,14 +354,79 @@ func watchAndStream(c *gin.Context, id, ns string, w watch.Interface) {
 				return
 			}
 			out := struct {
-				Type   watch.EventType `json:"type"`
-				Object interface{}     `json:"object"`
+				Type         watch.EventType `json:"type"`
+				Object       interface{}     `json:"object"`
+				ServerTimeMs int64           `json:"serverTimeMs"`
 			}{
-				Type:   ev.Type,
-				Object: ev.Object,
+				Type:         ev.Type,
+				Object:       ev.Object,
+				ServerTimeMs: time.Now().UnixMilli(),
 			}
 			if err := enc.Encode(&out); err != nil {
 				log.Printf("watch encode error cluster=%s namespace=%s: %v", id, ns, err)
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// watchPodsStream 与 watchAndStream 相同协议，但对每个事件中的 Pod 调用 computePodHealth，
+// 输出结构与 GET /pods 列表一致（PodWithHealth），避免前端用 watch 增量覆盖后丢失 healthLabel 而回退为「健康」。
+func watchPodsStream(c *gin.Context, id, ns string, w watch.Interface) {
+	defer w.Stop()
+
+	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.WriteHeader(http.StatusOK)
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		log.Printf("watch pods cluster=%s namespace=%s: response writer does not support flush", id, ns)
+		return
+	}
+
+	enc := json.NewEncoder(c.Writer)
+	enc.SetEscapeHTML(false)
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case ev, ok := <-w.ResultChan():
+			if !ok {
+				return
+			}
+			var outObj interface{} = ev.Object
+			if pod, ok := ev.Object.(*corev1.Pod); ok {
+				if os.Getenv("WEBLENS_DEBUG_POD_WATCH") == "1" {
+					var age time.Duration
+					ct := ""
+					if !pod.CreationTimestamp.IsZero() {
+						age = time.Since(pod.CreationTimestamp.Time).Round(time.Second)
+						ct = pod.CreationTimestamp.UTC().Format(time.RFC3339Nano)
+					}
+					log.Printf(
+						"weblens watch pod cluster=%s ns=%s type=%v name=%s uid=%s creationTimestamp=%s serverAge=%v",
+						id, ns, ev.Type, pod.Name, pod.UID, ct, age,
+					)
+				}
+				p := *pod
+				h := computePodHealth(pod, time.Now())
+				outObj = PodWithHealth{Pod: p, PodHealth: h}
+			}
+			out := struct {
+				Type         watch.EventType `json:"type"`
+				Object       interface{}     `json:"object"`
+				ServerTimeMs int64           `json:"serverTimeMs"`
+			}{
+				Type:         ev.Type,
+				Object:       outObj,
+				ServerTimeMs: time.Now().UnixMilli(),
+			}
+			if err := enc.Encode(&out); err != nil {
+				log.Printf("watch pods encode error cluster=%s namespace=%s: %v", id, ns, err)
 				return
 			}
 			flusher.Flush()
@@ -406,13 +475,13 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		list, err := client.CoreV1().Namespaces().List(c.Request.Context(), metav1.ListOptions{})
 		if err != nil {
 			if isForbiddenClusterScope(err) {
-				c.JSON(http.StatusOK, gin.H{"items": []corev1.Namespace{}})
+				c.JSON(http.StatusOK, gin.H{"items": []corev1.Namespace{}, "serverTimeMs": time.Now().UnixMilli()})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// Nodes
@@ -420,7 +489,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		id := c.Param("id")
 		cacheKey := listCacheKey("nodes", id)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -434,7 +503,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// Pods（无集群级权限时：先按 ns 逐个合并；若 list namespaces 也被禁止则用 context 默认 namespace 或返回空）
@@ -446,7 +515,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("pods", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -471,7 +540,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 					// 返回 200 + 空列表，避免前端持续重试导致 UI 卡死。
 					if strings.Contains(err.Error(), "forbidden") {
 						log.Printf("pods list cluster=%s namespace=%s forbidden: %v", id, ns, err)
-						c.JSON(http.StatusOK, gin.H{"items": []corev1.Pod{}})
+						c.JSON(http.StatusOK, gin.H{"items": []corev1.Pod{}, "serverTimeMs": time.Now().UnixMilli()})
 						return
 					}
 					log.Printf("pods list cluster=%s namespace=%s: %v", id, ns, err)
@@ -494,7 +563,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 
 		setListCache(cacheKey, withHealth)
-		c.JSON(http.StatusOK, gin.H{"items": withHealth})
+		c.JSON(http.StatusOK, gin.H{"items": withHealth, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// Pods Watch：基于 Kubernetes Watch API 的实时变更流（用于前端 Resource Watch）
@@ -510,10 +579,10 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 
-		// 使用 resourceVersion=0：从当前状态开始发送 ADDED 事件，然后持续推送变更
+		// 不固定 ResourceVersion=0：与 apiserver「当前版本」对齐持续增量；AllowWatchBookmarks 利于长连接书签
 		w, err := client.CoreV1().Pods(ns).Watch(c.Request.Context(), metav1.ListOptions{
-			Watch:           true,
-			ResourceVersion: "0",
+			Watch:               true,
+			AllowWatchBookmarks: true,
 		})
 		if err != nil {
 			// 没有 watch 权限时返回 403，由前端决定是否回退到轮询
@@ -524,7 +593,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		watchAndStream(c, id, ns, w)
+		watchPodsStream(c, id, ns, w)
 	})
 
 	// Get Pod YAML（用于编辑）
@@ -675,7 +744,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("deployments", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -692,7 +761,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}})
+					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -700,7 +769,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// Deployments Watch
@@ -715,8 +784,8 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 		w, err := client.AppsV1().Deployments(ns).Watch(c.Request.Context(), metav1.ListOptions{
-			Watch:           true,
-			ResourceVersion: "0",
+			Watch:               true,
+			AllowWatchBookmarks: true,
 		})
 		if err != nil {
 			if isForbiddenClusterScope(err) {
@@ -882,7 +951,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("statefulsets", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -899,7 +968,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}})
+					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -907,7 +976,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// StatefulSets Watch
@@ -922,8 +991,8 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 		w, err := client.AppsV1().StatefulSets(ns).Watch(c.Request.Context(), metav1.ListOptions{
-			Watch:           true,
-			ResourceVersion: "0",
+			Watch:               true,
+			AllowWatchBookmarks: true,
 		})
 		if err != nil {
 			if isForbiddenClusterScope(err) {
@@ -944,7 +1013,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("daemonsets", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -961,7 +1030,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}})
+					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -969,7 +1038,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// DaemonSets Watch
@@ -1006,7 +1075,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("jobs", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -1023,7 +1092,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}})
+					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1031,7 +1100,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// Jobs Watch
@@ -1068,7 +1137,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("cronjobs", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -1085,7 +1154,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}})
+					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1093,7 +1162,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// CronJobs Watch
@@ -1130,7 +1199,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("events", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -1147,7 +1216,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []corev1.Event{}})
+					c.JSON(http.StatusOK, gin.H{"items": []corev1.Event{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1155,7 +1224,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// Events Watch
@@ -1192,7 +1261,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("configmaps", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -1209,7 +1278,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []corev1.ConfigMap{}})
+					c.JSON(http.StatusOK, gin.H{"items": []corev1.ConfigMap{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1217,7 +1286,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// ConfigMaps Watch
@@ -1254,7 +1323,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("secrets", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -1271,7 +1340,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []corev1.Secret{}})
+					c.JSON(http.StatusOK, gin.H{"items": []corev1.Secret{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1279,7 +1348,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// Secrets Watch
@@ -1316,7 +1385,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("services", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -1333,7 +1402,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []corev1.Service{}})
+					c.JSON(http.StatusOK, gin.H{"items": []corev1.Service{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1341,7 +1410,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// Services Watch
@@ -1378,7 +1447,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		cacheKey := listCacheKey("ingresses", id, ns)
 		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data})
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
 			return
 		}
 		client, ok := reg.Client(id)
@@ -1395,7 +1464,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 			if err != nil {
 				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}})
+					c.JSON(http.StatusOK, gin.H{"items": []interface{}{}, "serverTimeMs": time.Now().UnixMilli()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1403,7 +1472,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items})
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
 	})
 
 	// Ingresses Watch
@@ -1479,5 +1548,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		watchAndStream(c, id, ns, w)
 	})
+
+	RegisterStatefulSetRoutes(r, reg)
 }
 

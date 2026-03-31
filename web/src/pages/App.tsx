@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ClusterSummary,
   fetchClusters,
@@ -19,9 +19,7 @@ import {
   deletePod,
   type ResourceKind,
   watchPods,
-  type PodWatchEvent,
   watchResourceList,
-  type ResourceWatchEvent,
   fetchPodDescribe,
   fetchDeploymentDescribe,
   type PodDescribe,
@@ -29,18 +27,80 @@ import {
   scaleDeployment,
   restartDeployment,
   deleteDeployment,
+  fetchStatefulSetDescribe,
+  type StatefulSetDescribe,
+  scaleStatefulSet,
+  restartStatefulSet,
+  deleteStatefulSet,
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
 import { ResourceTable, type Column } from "../components/ResourceTable";
 import { BottomPanel, type PanelTab } from "../components/BottomPanel";
 import { ResizableTh } from "../components/ResizableTh";
+import { ResourceSortArrows } from "../components/ResourceSortArrows";
+import {
+  sortByState,
+  comparePodsForSort,
+  compareDeploymentsForSort,
+  compareStatefulSetsForSort,
+  isPodSortableColumnKey,
+  isDeploymentSortableColumnKey,
+  isStatefulSetSortableColumnKey,
+  buildStatefulSetSortStats,
+  type ResourceListSortState,
+  type PodSortKey,
+  type DeploymentSortKey,
+  type StatefulSetSortKey,
+  type StatefulSetSortRow,
+} from "../utils/resourceListSort";
+import {
+  podsOwnedByStatefulSet,
+  ordinalFromStsPodName,
+  formatOrdinalSummary,
+  aggregatePodHealthLabel,
+  podReadyColumn,
+  sortStsPodsTroubleshootFirst,
+  findSmallestOrdinalAbnormalPod,
+  stsTroubleshootSummaryLine,
+  podPersistentVolumeClaimNames,
+  isPodHealthAbnormal,
+  isHighRestartInStsGroup,
+} from "../utils/statefulsetPods";
+import { getPodStatusInfo } from "../utils/podTableStatus";
 import { ClearableSearchInput } from "../components/ClearableSearchInput";
+import {
+  WL_SEARCHABLE_DROPDOWN_INPUT_STYLE,
+  WL_SEARCHABLE_DROPDOWN_PANEL_STYLE,
+  WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE,
+  WL_SEARCHABLE_DROPDOWN_SCROLL_STYLE,
+  SearchableDropdownTwoColumnRow,
+  clusterOptionColumns,
+  kubeconfigDisplayFileName,
+} from "../components/SearchableDropdownPrimitives";
+import { useFocusInputWhenOpen } from "../hooks/useFocusInputWhenOpen";
 import { DescribeEventsSection } from "../components/describe/DescribeEventsSection";
 import { DeploymentDescribeContent } from "../components/describe/DeploymentDescribeContent";
+import { StatefulSetDescribeContent } from "../components/describe/StatefulSetDescribeContent";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useColumnResize } from "../hooks/useColumnResize";
+import { useSortedRowPositionChangeHighlight } from "../hooks/useSortedRowPositionChangeHighlight";
+import { useNowTick } from "../hooks/useNowTick";
+import { applyK8sNamespacedWatchEvent, applyPodWatchEvent } from "../resourceList/watchEventReducer";
+import { mergeNamespacedItemsWithListSnapshot, mergePodsWithListSnapshot } from "../resourceList/mergeListSnapshot";
+import { formatAgeFromMetadata, readCreationTimestampFromMetadata } from "../utils/k8sCreationTimestamp";
+import {
+  CLOCK_SKEW_WARN_THRESHOLD_MS,
+  getClockSkewMs,
+  getCurrentServerNow,
+  newServerClockSnapshot,
+  type ServerClockSnapshot,
+} from "../utils/serverClock";
 import copyIcon from "../assets/icon-copy.png";
 
 const ALL_NAMESPACES = "";
+
+/** 调试：localStorage `weblens_debug_pod_age=1` 时，每个 uid 在 Pods 表首次渲染打一次 */
+const loggedPodAgeRowByUid = new Set<string>();
 
 const POD_COLUMN_KEYS = [
   "name",
@@ -65,54 +125,21 @@ const POD_COLUMN_DEFAULTS: Record<(typeof POD_COLUMN_KEYS)[number], number> = {
   actions: 80,
 };
 
-/** 计算 Pod 存活时间（秒），用于“长时间 Pending/ContainerCreating”等判定 */
-function getPodAgeSeconds(creationTimestamp?: string): number | null {
-  if (!creationTimestamp) return null;
-  const start = new Date(creationTimestamp).getTime();
-  const now = Date.now();
-  const sec = Math.floor((now - start) / 1000);
-  if (Number.isNaN(sec) || sec < 0) return null;
-  return sec;
-}
-
-/** 根据 creationTimestamp 计算并格式化为存活时间
- *  < 1 分钟：按秒显示（Xs）
- *  < 1 小时：按整分和秒显示（XmYs）
- *  < 1 天：按整小时和分显示（XhYm）
- *  >= 1 天：按整天和小时显示（XdYh）
- */
-function formatPodAge(creationTimestamp?: string): string {
-  if (!creationTimestamp) return "-";
-  const start = new Date(creationTimestamp).getTime();
-  const now = Date.now();
-  const sec = Math.floor((now - start) / 1000);
-  if (sec < 0) return "-";
-  if (sec < 60) {
-    // 小于 1 分钟，按秒
-    return `${sec}s`;
-  }
-
-  const min = Math.floor(sec / 60);
-  const remainSec = sec % 60;
-  if (sec < 3600) {
-    // 小于 1 小时，按“整分钟+秒”
-    return `${min}m${remainSec ? `${remainSec}s` : ""}`;
-  }
-
-  const h = Math.floor(sec / 3600);
-  const remainMin = Math.floor((sec % 3600) / 60);
-  if (sec < 24 * 3600) {
-    // 小于 1 天，按“整小时+分钟”
-    return `${h}h${remainMin ? `${remainMin}m` : ""}`;
-  }
-
-  const d = Math.floor(sec / (24 * 3600));
-  const remainHour = Math.floor((sec % (24 * 3600)) / 3600);
-  // 大于等于 1 天，按“整天 + 小时”（上限）
-  return `${d}d${remainHour ? `${remainHour}h` : ""}`;
-}
-
 const MIN_COL_WIDTH = 40;
+
+/** 列表多选主键：namespace/name（与 watch 更新无关，Pod 重建改名后原 key 自然失效） */
+function nsNameRowKey(namespace: string, name: string): string {
+  return `${namespace}/${name}`;
+}
+
+function parseNsNameRowKey(key: string): { namespace: string; name: string } {
+  const i = key.indexOf("/");
+  if (i < 0) return { namespace: "", name: key };
+  return { namespace: key.slice(0, i), name: key.slice(i + 1) };
+}
+
+/** 行首勾选列宽度（不参与列宽拖拽） */
+const LIST_SELECT_COL_WIDTH = 40;
 
 const DEPLOY_COLUMN_KEYS = [
   "name",
@@ -146,6 +173,41 @@ function deployColumnMinWidth(key: string): number {
   return m[key] ?? MIN_COL_WIDTH;
 }
 
+const STS_COLUMN_KEYS = [
+  "name",
+  "namespace",
+  "pods",
+  "ready",
+  "ordinals",
+  "age",
+  "health",
+  "actions",
+] as const;
+const STS_COLUMN_DEFAULTS: Record<(typeof STS_COLUMN_KEYS)[number], number> = {
+  name: 200,
+  namespace: 110,
+  pods: 52,
+  ready: 72,
+  ordinals: 80,
+  age: 80,
+  health: 100,
+  actions: 84,
+};
+
+function stsColumnMinWidth(key: string): number {
+  const m: Record<string, number> = {
+    name: 100,
+    namespace: 72,
+    pods: 48,
+    ready: 56,
+    ordinals: 56,
+    age: 56,
+    health: 72,
+    actions: 52,
+  };
+  return m[key] ?? MIN_COL_WIDTH;
+}
+
 function mergeDeploymentIntoList(items: K8sItem[], updated: unknown): K8sItem[] {
   const u = updated as K8sItem;
   if (!u?.metadata?.name) return items;
@@ -162,6 +224,16 @@ const thStyle: React.CSSProperties = {
   borderBottom: "1px solid #1f2937",
   fontSize: 12,
   color: "#9ca3af",
+};
+
+/** 与 ResizableTh 默认 sticky 表头一致（定位、背景、底边），供首列勾选 th 使用，避免滚动时与表头脱节 */
+const stickyHeaderThCheckbox: React.CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 2,
+  backgroundColor: "#0f172a",
+  boxShadow: "0 1px 0 0 #1f2937",
+  boxSizing: "border-box",
 };
 
 const tdStyle: React.CSSProperties = {
@@ -197,6 +269,28 @@ type DeploymentRow = K8sItem & {
     conditions?: Array<{ type: string; status: string; reason?: string; message?: string }>;
   };
 };
+
+/** StatefulSet 列表行 */
+type StatefulSetRow = K8sItem & {
+  metadata: K8sItem["metadata"] & { creationTimestamp?: string };
+  spec?: { replicas?: number; serviceName?: string };
+  status?: {
+    replicas?: number;
+    readyReplicas?: number;
+    currentReplicas?: number;
+    updatedReplicas?: number;
+  };
+};
+
+/** 排序位移追踪 / 高亮用行 id（与表格行 key 策略一致） */
+function podTableSortRowId(p: Pod): string {
+  return p.metadata.uid;
+}
+
+function deploymentTableSortRowId(row: K8sItem): string {
+  const m = row.metadata;
+  return (m.uid as string) || `${m.namespace ?? ""}/${m.name}`;
+}
 
 function deploymentPodsColumn(d: DeploymentRow): string {
   const desired = typeof d.spec?.replicas === "number" ? d.spec!.replicas! : 0;
@@ -286,8 +380,11 @@ export const App: React.FC = () => {
   const [resourceItems, setResourceItems] = useState<K8sItem[]>([]);
   /** Deployments 专用列表（与其它通用 resourceItems 隔离，便于 Pods ⇄ Deployments 切换时缓存） */
   const [deploymentItems, setDeploymentItems] = useState<K8sItem[]>([]);
+  const [statefulsetItems, setStatefulsetItems] = useState<K8sItem[]>([]);
   const [resourceLoading, setResourceLoading] = useState(false);
   const [deploymentLoading, setDeploymentLoading] = useState(false);
+  const [statefulsetLoading, setStatefulsetLoading] = useState(false);
+  const [serverClockSnapshot, setServerClockSnapshot] = useState<ServerClockSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   /** 正在应用新的集群/命名空间选择，用于全局 loading 提示 */
   const [applyingSelection, setApplyingSelection] = useState(false);
@@ -322,6 +419,11 @@ export const App: React.FC = () => {
   /** 集群下拉：展开状态与搜索关键字 */
   const [clusterDropdownOpen, setClusterDropdownOpen] = useState(false);
   const [clusterSearchKeyword, setClusterSearchKeyword] = useState("");
+  /** 平台配置 · 集群选择：自定义下拉 + 搜索 */
+  const [configClusterPickOpen, setConfigClusterPickOpen] = useState(false);
+  const [configClusterSearchKeyword, setConfigClusterSearchKeyword] = useState("");
+  const configClusterSearchRef = useRef<HTMLInputElement>(null);
+  const clusterComboSearchRef = useRef<HTMLInputElement>(null);
   /** 集群组合选择：当前选中的组合（待应用） + 已应用组合 */
   const [activeComboId, setActiveComboId] = useState<string | null>(null);
   const [effectiveComboId, setEffectiveComboId] = useState<string | null>(null);
@@ -329,27 +431,57 @@ export const App: React.FC = () => {
   const [podMenuOpenKey, setPodMenuOpenKey] = useState<string | null>(null);
   /** Deployments 行三点菜单：namespace/name */
   const [deploymentMenuOpenKey, setDeploymentMenuOpenKey] = useState<string | null>(null);
+  const [statefulsetMenuOpenKey, setStatefulsetMenuOpenKey] = useState<string | null>(null);
   /** 点击「刷新列表」递增，仅强制重拉当前视图数据，不改变集群/命名空间作用域 */
   const [podsListNonce, setPodsListNonce] = useState(0);
   const [deploymentsListNonce, setDeploymentsListNonce] = useState(0);
-  /** Deployment Scale 弹窗 */
+  const [statefulsetsListNonce, setStatefulsetsListNonce] = useState(0);
+  /** Deployment / StatefulSet Scale 弹窗 */
   const [deployScaleModal, setDeployScaleModal] = useState<{
     namespace: string;
     name: string;
     current: number;
+    resource: "deployment" | "statefulset";
   } | null>(null);
   const [deployScaleInput, setDeployScaleInput] = useState("");
   const [deployScaleSaving, setDeployScaleSaving] = useState(false);
+  /** Pods / Deployments 多选（全局，跨搜索排序；与 listScopeKey、刷新列表联动清空） */
+  const [selectedPodKeys, setSelectedPodKeys] = useState<Set<string>>(() => new Set());
+  const [selectedDeploymentKeys, setSelectedDeploymentKeys] = useState<Set<string>>(() => new Set());
+  const podTableHeaderSelectRef = useRef<HTMLInputElement>(null);
+  const deployTableHeaderSelectRef = useRef<HTMLInputElement>(null);
+  const [batchConfirm, setBatchConfirm] = useState<{
+    kind: "pods-delete" | "deployments-delete" | "deployments-restart";
+    keys: string[];
+  } | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
+  /** 单行/单次危险操作统一确认（替代 window.confirm） */
+  const [actionConfirm, setActionConfirm] = useState<{
+    title: string;
+    description?: string;
+    items: string[];
+    variant: "danger" | "primary";
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const actionConfirmRef = useRef(actionConfirm);
+  actionConfirmRef.current = actionConfirm;
   /** Deployment 行上异步操作（restart/delete） */
   const [deploymentRowBusyKey, setDeploymentRowBusyKey] = useState<string | null>(null);
+  const [statefulsetRowBusyKey, setStatefulsetRowBusyKey] = useState<string | null>(null);
+  const [expandedStatefulSetKeys, setExpandedStatefulSetKeys] = useState<Set<string>>(() => new Set());
   /** 列表区按 Name 关键字搜索（Pods / Deployments / Ingresses 等共用） */
   const [nameFilter, setNameFilter] = useState("");
+  /** 列表单列排序：按视图分别记忆，仅「刷新列表」清空 */
+  const [podsListSort, setPodsListSort] = useState<ResourceListSortState<PodSortKey>>(null);
+  const [deploymentsListSort, setDeploymentsListSort] = useState<ResourceListSortState<DeploymentSortKey>>(null);
+  const [statefulsetsListSort, setStatefulsetsListSort] = useState<ResourceListSortState<StatefulSetSortKey>>(null);
   /** Pod 表列宽（可拖拽调整） */
   const [podColumnWidths, setPodColumnWidths] = useState<Record<string, number>>(() => ({ ...POD_COLUMN_DEFAULTS }));
   /** Deployments 表列宽 */
   const [deployColumnWidths, setDeployColumnWidths] = useState<Record<string, number>>(() => ({
     ...DEPLOY_COLUMN_DEFAULTS,
   }));
+  const [stsColumnWidths, setStsColumnWidths] = useState<Record<string, number>>(() => ({ ...STS_COLUMN_DEFAULTS }));
   const { beginResize: beginResizePod } = useColumnResize(
     podColumnWidths,
     setPodColumnWidths,
@@ -361,6 +493,12 @@ export const App: React.FC = () => {
     setDeployColumnWidths,
     DEPLOY_COLUMN_DEFAULTS as Record<string, number>,
     deployColumnMinWidth,
+  );
+  const { beginResize: beginResizeSts } = useColumnResize(
+    stsColumnWidths,
+    setStsColumnWidths,
+    STS_COLUMN_DEFAULTS as Record<string, number>,
+    stsColumnMinWidth,
   );
   /** 用户手动输入并点击「应用」的命名空间，避免 namespaces 接口返回后覆盖导致列表消失 */
   const manualNamespaceRef = useRef<{ clusterId: string; namespace: string } | null>(null);
@@ -380,18 +518,31 @@ export const App: React.FC = () => {
   /** 已应用作用域下最近一次成功 HTTP 列表拉取（用于 Pods / Deployments 切换时跳过重复请求） */
   const lastPodsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   const lastDeploymentsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
+  const lastStatefulsetsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
+  /** 「刷新列表」点击后用于在 HTTP 完成时显示成功/失败 toast，避免与普通列表加载混淆 */
+  const podsManualRefreshToastRef = useRef(false);
+  const deploymentsManualRefreshToastRef = useRef(false);
+  const statefulsetsManualRefreshToastRef = useRef(false);
+  /** watch 断线重连 / 可见性恢复时 list 合并补齐的节流（毫秒时间戳） */
+  const lastPodsWatchGapFillAtRef = useRef(0);
+  const lastDeploymentsWatchGapFillAtRef = useRef(0);
+  const lastStsWatchGapFillAtRef = useRef(0);
+  const prevPageVisibleForGapFillRef = useRef(
+    typeof document === "undefined" ? true : document.visibilityState === "visible",
+  );
   const currentViewRef = useRef<ResourceKind>("pods");
   /** 左侧边栏是否收起 */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   /** Describe 右侧弹层：Pod 或 Deployment */
   const [describeTarget, setDescribeTarget] = useState<{
-    kind: "pod" | "deployment";
+    kind: "pod" | "deployment" | "statefulset";
     clusterId: string;
     namespace: string;
     name: string;
   } | null>(null);
   const [describePodData, setDescribePodData] = useState<PodDescribe | null>(null);
   const [describeDeploymentData, setDescribeDeploymentData] = useState<DeploymentDescribe | null>(null);
+  const [describeStatefulSetData, setDescribeStatefulSetData] = useState<StatefulSetDescribe | null>(null);
   const [describeLoading, setDescribeLoading] = useState(false);
   const [describeError, setDescribeError] = useState<string | null>(null);
   const [describeWidthRatio, setDescribeWidthRatio] = useState(0.5);
@@ -407,6 +558,91 @@ export const App: React.FC = () => {
     [effectiveClusterId, effectiveNamespace, applyRevision],
   );
 
+  const listAgeTickActive =
+    !!effectiveClusterId &&
+    (currentView === "pods" ||
+      currentView === "deployments" ||
+      currentView === "statefulsets" ||
+      describeTarget !== null);
+
+  const clientNowTick = useNowTick(1000, listAgeTickActive);
+  const listAgeNow = useMemo(
+    () => getCurrentServerNow(serverClockSnapshot, clientNowTick),
+    [serverClockSnapshot, clientNowTick],
+  );
+  const serverClockSkewMs = useMemo(() => Math.round(getClockSkewMs(listAgeNow)), [listAgeNow]);
+  const showServerClockSkewHint = Math.abs(serverClockSkewMs) > CLOCK_SKEW_WARN_THRESHOLD_MS;
+
+  useEffect(() => {
+    loggedPodAgeRowByUid.clear();
+    setSelectedPodKeys(new Set());
+    setSelectedDeploymentKeys(new Set());
+  }, [listScopeKey]);
+
+  useEffect(() => {
+    setSelectedPodKeys((prev) => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(pods.map((p) => nsNameRowKey(p.metadata.namespace, p.metadata.name)));
+      const next = new Set<string>();
+      for (const k of prev) {
+        if (valid.has(k)) next.add(k);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [pods]);
+
+  useEffect(() => {
+    setSelectedDeploymentKeys((prev) => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(
+        deploymentItems.map((it) => nsNameRowKey(it.metadata.namespace ?? "", it.metadata.name)),
+      );
+      const next = new Set<string>();
+      for (const k of prev) {
+        if (valid.has(k)) next.add(k);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [deploymentItems]);
+
+  useFocusInputWhenOpen(clusterDropdownOpen, clusterComboSearchRef, true);
+  useFocusInputWhenOpen(configClusterPickOpen, configClusterSearchRef, true);
+
+  useEffect(() => {
+    if (!configModalOpen) {
+      setConfigClusterPickOpen(false);
+      setConfigClusterSearchKeyword("");
+    }
+  }, [configModalOpen]);
+
+  useEffect(() => {
+    if (configActiveTab !== "combos") {
+      setConfigClusterPickOpen(false);
+    }
+  }, [configActiveTab]);
+
+  const configClusterPickFiltered = useMemo(() => {
+    const k = configClusterSearchKeyword.trim().toLowerCase();
+    return clusters.filter((c) => {
+      if (!k) return true;
+      const f = kubeconfigDisplayFileName(c.filePath).toLowerCase();
+      return f.includes(k) || c.name.toLowerCase().includes(k) || c.id.toLowerCase().includes(k);
+    });
+  }, [clusters, configClusterSearchKeyword]);
+
+  const clusterComboDropdownFiltered = useMemo(() => {
+    const k = clusterSearchKeyword.trim().toLowerCase();
+    return clusterCombos.filter((combo) => {
+      if (!k) return true;
+      const cluster = clusters.find((c) => c.id === combo.clusterId);
+      const fileName = kubeconfigDisplayFileName(cluster?.filePath ?? "");
+      const text = [cluster?.name, fileName, combo.namespace, combo.alias]
+        .join(" ")
+        .toLowerCase();
+      return text.includes(k);
+    });
+  }, [clusterCombos, clusters, clusterSearchKeyword]);
+
   useEffect(() => {
     currentViewRef.current = currentView;
   }, [currentView]);
@@ -415,20 +651,22 @@ export const App: React.FC = () => {
     setPodMenuOpenKey(null);
     setPodMenuSubmenu(null);
     setDeploymentMenuOpenKey(null);
+    setStatefulsetMenuOpenKey(null);
   }, [currentView]);
 
   useEffect(() => {
-    if (!podMenuOpenKey && !deploymentMenuOpenKey) return;
+    if (!podMenuOpenKey && !deploymentMenuOpenKey && !statefulsetMenuOpenKey) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setPodMenuOpenKey(null);
         setPodMenuSubmenu(null);
         setDeploymentMenuOpenKey(null);
+        setStatefulsetMenuOpenKey(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [podMenuOpenKey, deploymentMenuOpenKey]);
+  }, [podMenuOpenKey, deploymentMenuOpenKey, statefulsetMenuOpenKey]);
 
   useEffect(() => {
     activeClusterNsRef.current = { clusterId: effectiveClusterId, namespace: effectiveNamespace };
@@ -492,7 +730,7 @@ export const App: React.FC = () => {
           }
         })
         .finally(() => setDescribeLoading(false));
-    } else {
+    } else if (describeTarget.kind === "deployment") {
       setDescribeDeploymentData(null);
       fetchDeploymentDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
         .then((data) => {
@@ -510,6 +748,24 @@ export const App: React.FC = () => {
           }
         })
         .finally(() => setDescribeLoading(false));
+    } else {
+      setDescribeStatefulSetData(null);
+      fetchStatefulSetDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
+        .then((data) => {
+          setDescribeStatefulSetData(data);
+          setDescribeError(null);
+        })
+        .catch((e: any) => {
+          const status = e?.response?.status;
+          const backendMsg = e?.response?.data?.error;
+          if (status === 404) {
+            setDescribeStatefulSetData(null);
+            setDescribeError("StatefulSet 已不存在或已被删除");
+          } else {
+            setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
+          }
+        })
+        .finally(() => setDescribeLoading(false));
     }
   }, [describeTarget]);
 
@@ -518,6 +774,7 @@ export const App: React.FC = () => {
     if (!describeTarget) {
       setDescribePodData(null);
       setDescribeDeploymentData(null);
+      setDescribeStatefulSetData(null);
       setDescribeError(null);
       setDescribeLoading(false);
       return;
@@ -648,6 +905,41 @@ export const App: React.FC = () => {
     });
   };
 
+  const openDescribeForStatefulSet = (s: StatefulSetRow) => {
+    if (!effectiveClusterId) return;
+    setDescribeTarget({
+      kind: "statefulset",
+      clusterId: effectiveClusterId,
+      namespace: s.metadata.namespace ?? "",
+      name: s.metadata.name,
+    });
+  };
+
+  const openEditStatefulSetTab = (s: StatefulSetRow) => {
+    if (!effectiveClusterId) return;
+    const ns = s.metadata.namespace ?? "";
+    const name = s.metadata.name;
+    const id = `edit-sts-${ns}-${name}`;
+    setPanelTabs((prev) => {
+      const exists = prev.some((t) => t.id === id);
+      if (exists) return prev;
+      const tab: PanelTab = {
+        id,
+        type: "edit",
+        clusterId: effectiveClusterId,
+        namespace: ns,
+        pod: name,
+        container: "",
+        title: `${name} (StatefulSet)`,
+        containers: [],
+        yamlKind: "statefulset",
+      };
+      return [...prev, tab];
+    });
+    setActivePanelTabId(id);
+    setStatefulsetMenuOpenKey(null);
+  };
+
   const loadClusters = async () => {
     const items = await fetchClusters();
     setClusters(items);
@@ -722,9 +1014,17 @@ export const App: React.FC = () => {
     setApplyRevision((v) => v + 1);
   };
 
-  const loadPods = async (clusterId: string, namespace: string) => {
+  // 必须稳定引用：否则 Pods 的 useEffect 在每次任意 state 重渲染时都会 cleanup+重连 watch，
+  // 造成 ADDED/MODIFIED 丢失，新 Pod 只能等下一次 HTTP list 才出现且 Age 已偏大。
+  const syncServerClock = useCallback((serverTimeMs?: number) => {
+    if (typeof serverTimeMs !== "number" || !Number.isFinite(serverTimeMs) || serverTimeMs <= 0) return;
+    setServerClockSnapshot(newServerClockSnapshot(serverTimeMs));
+  }, []);
+
+  const loadPods = useCallback(async (clusterId: string, namespace: string) => {
     const requestedNs = namespace || undefined;
-    const items = await fetchPods(clusterId, requestedNs);
+    const { items, serverTimeMs } = await fetchPods(clusterId, requestedNs);
+    syncServerClock(serverTimeMs);
     const cur = activeClusterNsRef.current;
     if (cur.clusterId !== clusterId || (cur.namespace || "") !== (requestedNs ?? "")) {
       return;
@@ -732,7 +1032,61 @@ export const App: React.FC = () => {
     setPods(items);
     setApplyingSelection(false);
     setError(null);
-  };
+  }, [syncServerClock]);
+
+  const confirmBatchAction = useCallback(async () => {
+    if (!batchConfirm || !effectiveClusterId) return;
+    const keys = batchConfirm.keys;
+    const kind = batchConfirm.kind;
+    setBatchBusy(true);
+    setError(null);
+    try {
+      const nsApi = effectiveNamespace || undefined;
+      if (kind === "pods-delete") {
+        for (const key of keys) {
+          const { namespace, name } = parseNsNameRowKey(key);
+          await deletePod(effectiveClusterId, namespace, name);
+        }
+        setSelectedPodKeys(new Set());
+        setBatchConfirm(null);
+        setToastMessage(`已删除 ${keys.length} 个 Pod`);
+        // 不调用 loadPods：全表覆盖会与 watch 竞态并抹掉刚 ADDED 的新 Pod；删除增量交给 watch。
+      } else if (kind === "deployments-delete") {
+        for (const key of keys) {
+          const { namespace, name } = parseNsNameRowKey(key);
+          await deleteDeployment(effectiveClusterId, namespace, name);
+        }
+        setSelectedDeploymentKeys(new Set());
+        setBatchConfirm(null);
+        setToastMessage(`已删除 ${keys.length} 个 Deployment`);
+        setDeploymentItems((prev) =>
+          prev.filter((it) => {
+            const k = nsNameRowKey(it.metadata.namespace ?? "", it.metadata.name);
+            return !keys.includes(k);
+          }),
+        );
+      } else {
+        for (const key of keys) {
+          const { namespace, name } = parseNsNameRowKey(key);
+          await restartDeployment(effectiveClusterId, namespace, name);
+        }
+        setBatchConfirm(null);
+        setToastMessage(`已触发 ${keys.length} 个 Deployment 重启`);
+        const { items: refreshed, serverTimeMs } = await fetchResourceList<K8sItem>(
+          effectiveClusterId,
+          "deployments",
+          nsApi,
+        );
+        syncServerClock(serverTimeMs);
+        setDeploymentItems(refreshed as K8sItem[]);
+      }
+    } catch (e: any) {
+      setToastMessage(e?.response?.data?.error ?? e?.message ?? "批量操作失败");
+      throw e;
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [batchConfirm, effectiveClusterId, effectiveNamespace, syncServerClock]);
 
   const loadResourceList = useCallback(async () => {
     if (!effectiveClusterId) return;
@@ -740,7 +1094,8 @@ export const App: React.FC = () => {
     const ns =
       currentView === "nodes" || currentView === "namespaces" ? undefined : (effectiveNamespace || undefined);
     fetchResourceList(effectiveClusterId, currentView, ns)
-      .then((items) => {
+      .then(({ items, serverTimeMs }) => {
+        syncServerClock(serverTimeMs);
         setResourceItems(items as K8sItem[]);
         setError(null);
       })
@@ -756,7 +1111,88 @@ export const App: React.FC = () => {
         setResourceLoading(false);
         setApplyingSelection(false);
       });
-  }, [effectiveClusterId, currentView, effectiveNamespace]);
+  }, [effectiveClusterId, currentView, effectiveNamespace, syncServerClock]);
+
+  const WATCH_GAP_FILL_MIN_MS = 2500;
+
+  const runPodsWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible) return;
+    const viewOk =
+      currentViewRef.current === "pods" ||
+      currentViewRef.current === "statefulsets" ||
+      currentViewRef.current === "deployments";
+    if (!viewOk) return;
+    const t = Date.now();
+    if (t - lastPodsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastPodsWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchPods(cid, ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      setPods((prev) => mergePodsWithListSnapshot(prev, items, ns));
+    } catch {
+      /* 静默补齐，避免打断 watch 主链路 */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
+  const runDeploymentsWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible || currentViewRef.current !== "deployments") return;
+    const t = Date.now();
+    if (t - lastDeploymentsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastDeploymentsWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchResourceList<K8sItem>(cid, "deployments", ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      if (currentViewRef.current !== "deployments") return;
+      setDeploymentItems((prev) => mergeNamespacedItemsWithListSnapshot(prev, items as K8sItem[], ns));
+    } catch {
+      /* silent */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
+  const runStatefulsetsWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible || currentViewRef.current !== "statefulsets") return;
+    const t = Date.now();
+    if (t - lastStsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastStsWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchResourceList<K8sItem>(cid, "statefulsets", ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      if (currentViewRef.current !== "statefulsets") return;
+      setStatefulsetItems((prev) => mergeNamespacedItemsWithListSnapshot(prev, items as K8sItem[], ns));
+    } catch {
+      /* silent */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
+  useEffect(() => {
+    const wasVisible = prevPageVisibleForGapFillRef.current;
+    prevPageVisibleForGapFillRef.current = pageVisible;
+    if (!effectiveClusterId || !pageVisible || wasVisible) return;
+    const needsPodsData =
+      currentView === "pods" || currentView === "statefulsets" || currentView === "deployments";
+    if (needsPodsData) void runPodsWatchGapFill();
+    if (currentView === "deployments") void runDeploymentsWatchGapFill();
+    if (currentView === "statefulsets") void runStatefulsetsWatchGapFill();
+  }, [
+    pageVisible,
+    effectiveClusterId,
+    currentView,
+    runPodsWatchGapFill,
+    runDeploymentsWatchGapFill,
+    runStatefulsetsWatchGapFill,
+  ]);
 
   useEffect(() => {
     loadClusters().catch((e: any) => setError(e?.message || "Failed to load clusters")).finally(() => setLoading(false));
@@ -867,18 +1303,21 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!effectiveClusterId) return;
     if (!pageVisible) return;
-    const isPods = currentView === "pods";
+    // Deployments 页也保持 Pods watch：避免在 Deployments 上操作 rollout 时 Pods 内存列表冻结，切回 Pods 滞后
+    const needsPodsData =
+      currentView === "pods" || currentView === "statefulsets" || currentView === "deployments";
 
-    if (!isPods && podsWatchCancelRef.current) {
+    if (!needsPodsData && podsWatchCancelRef.current) {
       podsWatchCancelRef.current();
       podsWatchCancelRef.current = null;
     }
-    if (isPods && resourceWatchCancelRef.current) {
+    // 仅在纯 Pods 视图下清理 resourceWatch：避免切断 Deployments / StatefulSets 正在使用的同 ref watch
+    if (needsPodsData && resourceWatchCancelRef.current && currentView === "pods") {
       resourceWatchCancelRef.current();
       resourceWatchCancelRef.current = null;
     }
 
-    if (!isPods) return;
+    if (!needsPodsData) return;
 
     if (podsWatchCancelRef.current) {
       podsWatchCancelRef.current();
@@ -897,15 +1336,23 @@ export const App: React.FC = () => {
       loadPods(effectiveClusterId, effectiveNamespace)
         .then(() => {
           const cur = activeClusterNsRef.current;
-          if (
-            cur.clusterId === effectiveClusterId &&
-            (cur.namespace || "") === (effectiveNamespace || "") &&
-            currentViewRef.current === "pods"
-          ) {
+          // 与当前视图无关：在 Deployments 等页后台 loadPods 成功后也要更新 ref，
+          // 否则切回 Pods 会误判「从未 list」而重复全量请求，列表体感滞后。
+          if (cur.clusterId === effectiveClusterId && (cur.namespace || "") === (effectiveNamespace || "")) {
             lastPodsListFetchRef.current = { scope: scopeKey, nonce: podsListNonce };
+          }
+          if (podsManualRefreshToastRef.current) {
+            podsManualRefreshToastRef.current = false;
+            if (currentViewRef.current === "pods" || currentViewRef.current === "statefulsets") {
+              setToastMessage("列表已刷新");
+            }
           }
         })
         .catch((e: any) => {
+          if (podsManualRefreshToastRef.current) {
+            podsManualRefreshToastRef.current = false;
+            setToastMessage("刷新失败，请稍后重试");
+          }
           const status = e?.response?.status;
           const backendMsg = e?.response?.data?.error as string | undefined;
 
@@ -932,39 +1379,18 @@ export const App: React.FC = () => {
         });
     }
 
-    const applyEvent = (prev: Pod[], ev: PodWatchEvent): Pod[] => {
-      const obj = ev.object;
-      if (!obj?.metadata?.uid) return prev;
-      const uid = obj.metadata.uid;
-      const ns = obj.metadata.namespace;
-      if (effectiveNamespace && effectiveNamespace !== "" && ns !== effectiveNamespace) {
-        return prev;
-      }
-      if (ev.type === "DELETED") {
-        return prev.filter((p) => p.metadata.uid !== uid);
-      }
-      let replaced = false;
-      const next = prev.map((p) => {
-        if (p.metadata.uid === uid) {
-          replaced = true;
-          return obj;
-        }
-        return p;
-      });
-      if (!replaced) {
-        next.push(obj);
-      }
-      return next;
-    };
-
     const cancel = watchPods(effectiveClusterId, effectiveNamespace || undefined, {
       onEvent: (ev) => {
-        setPods((prev) => applyEvent(prev, ev));
+        syncServerClock(ev.serverTimeMs);
+        setPods((prev) => applyPodWatchEvent(prev, ev, effectiveNamespace));
       },
       onError: (err) => {
         // eslint-disable-next-line no-console
         console.error("pods watch error:", err);
         setError(err?.message || "Pods Watch 失败，请检查集群权限或稍后重试");
+      },
+      onConnectionEstablished: () => {
+        void runPodsWatchGapFill();
       },
     });
     podsWatchCancelRef.current = cancel;
@@ -980,9 +1406,11 @@ export const App: React.FC = () => {
     effectiveNamespace,
     currentView,
     pageVisible,
-    loadPods,
     listScopeKey,
     podsListNonce,
+    loadPods,
+    runPodsWatchGapFill,
+    syncServerClock,
   ]);
 
   // Deployments：独立列表状态 + 与 Pods 相同的「作用域内跳过重复 HTTP」策略
@@ -991,10 +1419,6 @@ export const App: React.FC = () => {
     if (!pageVisible) return;
     if (currentView !== "deployments") return;
 
-    if (podsWatchCancelRef.current) {
-      podsWatchCancelRef.current();
-      podsWatchCancelRef.current = null;
-    }
     if (resourceWatchCancelRef.current) {
       resourceWatchCancelRef.current();
       resourceWatchCancelRef.current = null;
@@ -1014,15 +1438,30 @@ export const App: React.FC = () => {
       setDeploymentLoading(true);
       setError(null);
       fetchResourceList<K8sItem>(effectiveClusterId, "deployments", ns)
-        .then((items) => {
+        .then(({ items, serverTimeMs }) => {
+          syncServerClock(serverTimeMs);
           const cur = activeClusterNsRef.current;
-          if (currentViewRef.current !== "deployments") return;
-          if (cur.clusterId !== effectiveClusterId || (cur.namespace || "") !== (effectiveNamespace || "")) return;
+          if (currentViewRef.current !== "deployments") {
+            if (deploymentsManualRefreshToastRef.current) deploymentsManualRefreshToastRef.current = false;
+            return;
+          }
+          if (cur.clusterId !== effectiveClusterId || (cur.namespace || "") !== (effectiveNamespace || "")) {
+            if (deploymentsManualRefreshToastRef.current) deploymentsManualRefreshToastRef.current = false;
+            return;
+          }
           setDeploymentItems(items as K8sItem[]);
           setError(null);
           lastDeploymentsListFetchRef.current = { scope: scopeKey, nonce: deploymentsListNonce };
+          if (deploymentsManualRefreshToastRef.current) {
+            deploymentsManualRefreshToastRef.current = false;
+            setToastMessage("列表已刷新");
+          }
         })
         .catch((err: any) => {
+          if (deploymentsManualRefreshToastRef.current) {
+            deploymentsManualRefreshToastRef.current = false;
+            setToastMessage("刷新失败，请稍后重试");
+          }
           const status = err?.response?.status;
           const backendMsg = err?.response?.data?.error;
           if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
@@ -1036,52 +1475,24 @@ export const App: React.FC = () => {
         });
     }
 
-    const applyDeployEvent = (prev: K8sItem[], ev: ResourceWatchEvent<K8sItem>): K8sItem[] => {
-      const obj = ev.object as K8sItem;
-      const meta = (obj as any).metadata || {};
-      const name: string = meta.name;
-      const itemNs: string | undefined = meta.namespace;
-      if (!name) return prev;
-      if (effectiveNamespace && effectiveNamespace !== "" && itemNs && itemNs !== effectiveNamespace) {
-        return prev;
-      }
-      const key = `${itemNs || ""}/${name}`;
-      if (ev.type === "DELETED") {
-        return prev.filter((i) => {
-          const m = (i as any).metadata || {};
-          const k = `${m.namespace || ""}/${m.name}`;
-          return k !== key;
-        });
-      }
-      let replaced = false;
-      const next = prev.map((i) => {
-        const m = (i as any).metadata || {};
-        const k = `${m.namespace || ""}/${m.name}`;
-        if (k === key) {
-          replaced = true;
-          return obj;
-        }
-        return i;
-      });
-      if (!replaced) {
-        next.push(obj);
-      }
-      return next;
-    };
-
     const cancel = watchResourceList<K8sItem>(effectiveClusterId, "deployments", ns, {
       onEvent: (ev) => {
-        setDeploymentItems((prev) => applyDeployEvent(prev, ev));
+        syncServerClock(ev.serverTimeMs);
+        setDeploymentItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
       },
       onError: (err) => {
         // eslint-disable-next-line no-console
         console.error("deployments watch error:", err);
         fetchResourceList<K8sItem>(effectiveClusterId, "deployments", ns)
-          .then((items) => {
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
             if (currentViewRef.current !== "deployments") return;
             setDeploymentItems(items as K8sItem[]);
           })
           .catch(() => {});
+      },
+      onConnectionEstablished: () => {
+        void runDeploymentsWatchGapFill();
       },
     });
     resourceWatchCancelRef.current = cancel;
@@ -1099,13 +1510,115 @@ export const App: React.FC = () => {
     pageVisible,
     listScopeKey,
     deploymentsListNonce,
+    runDeploymentsWatchGapFill,
+    syncServerClock,
+  ]);
+
+  // StatefulSets：独立列表 + Watch；不关闭 Pods Watch（实例数据复用 Pods 缓存）
+  useEffect(() => {
+    if (!effectiveClusterId) return;
+    if (!pageVisible) return;
+    if (currentView !== "statefulsets") return;
+
+    if (resourceWatchCancelRef.current) {
+      resourceWatchCancelRef.current();
+      resourceWatchCancelRef.current = null;
+    }
+
+    const scopeKey = listScopeKey;
+    const last = lastStatefulsetsListFetchRef.current;
+    const needStsHttp = !last || last.scope !== scopeKey || last.nonce !== statefulsetsListNonce;
+    const ns = effectiveNamespace || undefined;
+
+    if (!needStsHttp) {
+      setApplyingSelection(false);
+    }
+
+    if (needStsHttp) {
+      setStatefulsetLoading(true);
+      setError(null);
+      fetchResourceList<K8sItem>(effectiveClusterId, "statefulsets", ns)
+        .then(({ items, serverTimeMs }) => {
+          syncServerClock(serverTimeMs);
+          const cur = activeClusterNsRef.current;
+          if (currentViewRef.current !== "statefulsets") {
+            if (statefulsetsManualRefreshToastRef.current) statefulsetsManualRefreshToastRef.current = false;
+            return;
+          }
+          if (cur.clusterId !== effectiveClusterId || (cur.namespace || "") !== (effectiveNamespace || "")) {
+            if (statefulsetsManualRefreshToastRef.current) statefulsetsManualRefreshToastRef.current = false;
+            return;
+          }
+          setStatefulsetItems(items as K8sItem[]);
+          setError(null);
+          lastStatefulsetsListFetchRef.current = { scope: scopeKey, nonce: statefulsetsListNonce };
+          if (statefulsetsManualRefreshToastRef.current) {
+            statefulsetsManualRefreshToastRef.current = false;
+            setToastMessage("列表已刷新");
+          }
+        })
+        .catch((err: any) => {
+          if (statefulsetsManualRefreshToastRef.current) {
+            statefulsetsManualRefreshToastRef.current = false;
+            setToastMessage("刷新失败，请稍后重试");
+          }
+          const status = err?.response?.status;
+          const backendMsg = err?.response?.data?.error;
+          if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
+          else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
+          else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+          else setError(err?.message || "加载失败，请稍后重试");
+        })
+        .finally(() => {
+          setStatefulsetLoading(false);
+          setApplyingSelection(false);
+        });
+    }
+
+    const cancel = watchResourceList<K8sItem>(effectiveClusterId, "statefulsets", ns, {
+      onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
+        setStatefulsetItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
+      },
+      onError: (err) => {
+        // eslint-disable-next-line no-console
+        console.error("statefulsets watch error:", err);
+        fetchResourceList<K8sItem>(effectiveClusterId, "statefulsets", ns)
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
+            if (currentViewRef.current !== "statefulsets") return;
+            setStatefulsetItems(items as K8sItem[]);
+          })
+          .catch(() => {});
+      },
+      onConnectionEstablished: () => {
+        void runStatefulsetsWatchGapFill();
+      },
+    });
+    resourceWatchCancelRef.current = cancel;
+
+    return () => {
+      if (resourceWatchCancelRef.current) {
+        resourceWatchCancelRef.current();
+        resourceWatchCancelRef.current = null;
+      }
+    };
+  }, [
+    effectiveClusterId,
+    effectiveNamespace,
+    currentView,
+    pageVisible,
+    listScopeKey,
+    statefulsetsListNonce,
+    runStatefulsetsWatchGapFill,
+    syncServerClock,
   ]);
 
   // 其它非 Pods、非 Deployments 资源：沿用原 Watch + HTTP 列表逻辑（每次进入视图仍拉取，保持改动最小）
   useEffect(() => {
     if (!effectiveClusterId) return;
     if (!pageVisible) return;
-    if (currentView === "pods" || currentView === "deployments") return;
+    if (currentView === "pods" || currentView === "deployments" || currentView === "statefulsets") return;
 
     if (resourceWatchCancelRef.current) {
       resourceWatchCancelRef.current();
@@ -1114,46 +1627,14 @@ export const App: React.FC = () => {
 
     loadResourceList();
 
-    const applyEvent = (prev: K8sItem[], ev: ResourceWatchEvent<K8sItem>): K8sItem[] => {
-      const obj = ev.object as K8sItem;
-      const meta = (obj as any).metadata || {};
-      const name: string = meta.name;
-      const itemNs: string | undefined = meta.namespace;
-      if (!name) return prev;
-      if (effectiveNamespace && effectiveNamespace !== "" && itemNs && itemNs !== effectiveNamespace) {
-        return prev;
-      }
-      const key = `${itemNs || ""}/${name}`;
-      if (ev.type === "DELETED") {
-        return prev.filter((i) => {
-          const m = (i as any).metadata || {};
-          const k = `${m.namespace || ""}/${m.name}`;
-          return k !== key;
-        });
-      }
-      let replaced = false;
-      const next = prev.map((i) => {
-        const m = (i as any).metadata || {};
-        const k = `${m.namespace || ""}/${m.name}`;
-        if (k === key) {
-          replaced = true;
-          return obj;
-        }
-        return i;
-      });
-      if (!replaced) {
-        next.push(obj);
-      }
-      return next;
-    };
-
     const cancel = watchResourceList<K8sItem>(
       effectiveClusterId,
       currentView,
       currentView === "nodes" || currentView === "namespaces" ? undefined : effectiveNamespace || undefined,
       {
         onEvent: (ev) => {
-          setResourceItems((prev) => applyEvent(prev, ev));
+          syncServerClock(ev.serverTimeMs);
+          setResourceItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
         },
         onError: (err) => {
           // eslint-disable-next-line no-console
@@ -1170,7 +1651,7 @@ export const App: React.FC = () => {
         resourceWatchCancelRef.current = null;
       }
     };
-  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible, loadResourceList, applyRevision]);
+  }, [effectiveClusterId, effectiveNamespace, currentView, pageVisible, loadResourceList, applyRevision, syncServerClock]);
 
   const viewTitle: Record<ResourceKind, string> = {
     pods: "Pods",
@@ -1208,43 +1689,6 @@ export const App: React.FC = () => {
     [pods],
   );
 
-  /** 计算单个 Pod 的状态文案及重启次数（不再做行级异常标红） */
-  const getPodStatusInfo = (pod: Pod): { text: string; restarts: number } => {
-    const phase = pod.status?.phase || "-";
-    const overallReason = pod.status?.reason || "";
-    const containerStatuses = pod.status?.containerStatuses || [];
-    const initStatuses = (pod.status as any)?.initContainerStatuses || [];
-    const allStatuses: Array<any> = [...containerStatuses, ...initStatuses];
-
-    let waitingReason = "";
-    for (let i = 0; i < allStatuses.length; i += 1) {
-      const st = allStatuses[i]?.state;
-      const r = st?.waiting?.reason || st?.terminated?.reason;
-      if (r) {
-        waitingReason = r;
-        break;
-      }
-    }
-
-    let display = phase;
-    if (waitingReason) {
-      // 当容器等待/退出理由与 kubectl get pods 中类似（如 CrashLoopBackOff）时，优先显示该 reason
-      display = waitingReason;
-    } else if (overallReason) {
-      display = overallReason;
-    }
-    if (!display) display = "-";
-
-    const restarts =
-      containerStatuses.reduce((s, cs) => s + (typeof cs.restartCount === "number" ? cs.restartCount : 0), 0) || 0;
-
-    const ageSec = getPodAgeSeconds(pod.metadata.creationTimestamp) ?? 0;
-    const phaseLower = (phase || "").toLowerCase();
-    const reasonLower = (waitingReason || overallReason || "").toLowerCase();
-
-    return { text: display, restarts };
-  };
-
   const filteredResourceItems = useMemo(
     () =>
       nameFilter.trim()
@@ -1261,10 +1705,193 @@ export const App: React.FC = () => {
     return deploymentItems.filter((i) => (i.metadata?.name ?? "").toLowerCase().includes(k));
   }, [deploymentItems, nameFilter]);
 
+  const filteredStatefulSets = useMemo(() => {
+    const k = nameFilter.trim().toLowerCase();
+    if (!k) return statefulsetItems;
+    return statefulsetItems.filter((i) => (i.metadata?.name ?? "").toLowerCase().includes(k));
+  }, [statefulsetItems, nameFilter]);
+
+  const statefulsetStsStatsByKey = useMemo(() => {
+    const m = new Map<string, { owned: Pod[]; stats: ReturnType<typeof buildStatefulSetSortStats> }>();
+    for (const raw of filteredStatefulSets) {
+      const s = raw as StatefulSetRow;
+      const ns = s.metadata.namespace ?? "";
+      const name = s.metadata.name;
+      const key = `${ns}/${name}`;
+      const owned = podsOwnedByStatefulSet(pods, name, ns);
+      m.set(key, { owned, stats: buildStatefulSetSortStats(s, owned) });
+    }
+    return m;
+  }, [filteredStatefulSets, pods]);
+
+  const sortedStatefulSets = useMemo(() => {
+    const getStats = (row: StatefulSetRow) => {
+      const k = `${row.metadata.namespace ?? ""}/${row.metadata.name}`;
+      return statefulsetStsStatsByKey.get(k)?.stats ?? buildStatefulSetSortStats(row, []);
+    };
+    const byAge = statefulsetsListSort?.key === "age";
+    return sortByState(
+      filteredStatefulSets as StatefulSetSortRow[],
+      statefulsetsListSort,
+      byAge
+        ? (a, b, key) => compareStatefulSetsForSort(a, b, key, getStats, listAgeNow)
+        : (a, b, key) => compareStatefulSetsForSort(a, b, key, getStats),
+    );
+  }, [
+    filteredStatefulSets,
+    statefulsetsListSort,
+    statefulsetStsStatsByKey,
+    statefulsetsListSort?.key === "age" ? listAgeNow : 0,
+  ]);
+
+  const hasNonHealthyStatefulSets = useMemo(() => {
+    for (const raw of statefulsetItems) {
+      const s = raw as StatefulSetRow;
+      const ns = s.metadata.namespace ?? "";
+      const name = s.metadata.name;
+      const owned = podsOwnedByStatefulSet(pods, name, ns);
+      if (aggregatePodHealthLabel(owned) !== "健康") return true;
+    }
+    return false;
+  }, [statefulsetItems, pods]);
+
+  const describeStsChildPods = useMemo(() => {
+    if (!describeTarget || describeTarget.kind !== "statefulset") return [] as Pod[];
+    return podsOwnedByStatefulSet(pods, describeTarget.name, describeTarget.namespace);
+  }, [describeTarget, pods]);
+
+  const sortedPods = useMemo(() => {
+    const byAge = podsListSort?.key === "age";
+    return sortByState(
+      filteredPods,
+      podsListSort,
+      byAge ? (a, b, k) => comparePodsForSort(a, b, k, listAgeNow) : comparePodsForSort,
+    );
+  }, [filteredPods, podsListSort, podsListSort?.key === "age" ? listAgeNow : 0]);
+
+  const sortedDeployments = useMemo(() => {
+    const byAge = deploymentsListSort?.key === "age";
+    return sortByState(
+      filteredDeployments,
+      deploymentsListSort,
+      byAge ? (a, b, k) => compareDeploymentsForSort(a, b, k, listAgeNow) : compareDeploymentsForSort,
+    );
+  }, [filteredDeployments, deploymentsListSort, deploymentsListSort?.key === "age" ? listAgeNow : 0]);
+
+  const visiblePodKeysSet = useMemo(
+    () => new Set(sortedPods.map((p) => nsNameRowKey(p.metadata.namespace, p.metadata.name))),
+    [sortedPods],
+  );
+  const podSelectedNotVisibleCount = useMemo(
+    () => [...selectedPodKeys].filter((k) => !visiblePodKeysSet.has(k)).length,
+    [selectedPodKeys, visiblePodKeysSet],
+  );
+
+  const visibleDeploymentKeysSet = useMemo(
+    () =>
+      new Set(
+        sortedDeployments.map((d) =>
+          nsNameRowKey((d as DeploymentRow).metadata.namespace ?? "", (d as DeploymentRow).metadata.name),
+        ),
+      ),
+    [sortedDeployments],
+  );
+  const deploymentSelectedNotVisibleCount = useMemo(
+    () => [...selectedDeploymentKeys].filter((k) => !visibleDeploymentKeysSet.has(k)).length,
+    [selectedDeploymentKeys, visibleDeploymentKeysSet],
+  );
+
+  const podSortMembershipKey = useMemo(
+    () =>
+      [...filteredPods]
+        .map((p) => podTableSortRowId(p))
+        .filter(Boolean)
+        .sort()
+        .join("|"),
+    [filteredPods],
+  );
+
+  const podsSortSpecKey = podsListSort ? `${podsListSort.key}:${podsListSort.direction}` : "";
+
+  const podsSortMoveHighlight = useSortedRowPositionChangeHighlight({
+    sortedRows: sortedPods,
+    sortActive: !!podsListSort,
+    getId: podTableSortRowId,
+    membershipKey: podSortMembershipKey,
+    sortSpecKey: podsSortSpecKey,
+    viewActive: currentView === "pods",
+  });
+
+  const deploymentSortMembershipKey = useMemo(
+    () =>
+      [...filteredDeployments]
+        .map((d) => deploymentTableSortRowId(d))
+        .filter(Boolean)
+        .sort()
+        .join("|"),
+    [filteredDeployments],
+  );
+
+  const deploymentsSortSpecKey = deploymentsListSort
+    ? `${deploymentsListSort.key}:${deploymentsListSort.direction}`
+    : "";
+
+  const deploymentsSortMoveHighlight = useSortedRowPositionChangeHighlight({
+    sortedRows: sortedDeployments,
+    sortActive: !!deploymentsListSort,
+    getId: deploymentTableSortRowId,
+    membershipKey: deploymentSortMembershipKey,
+    sortSpecKey: deploymentsSortSpecKey,
+    viewActive: currentView === "deployments",
+  });
+
+  const podTableTotalWidth = useMemo(
+    () =>
+      LIST_SELECT_COL_WIDTH +
+      POD_COLUMN_KEYS.reduce((s, k) => s + (podColumnWidths[k] ?? POD_COLUMN_DEFAULTS[k]), 0),
+    [podColumnWidths],
+  );
+
   const deployTableTotalWidth = useMemo(
     () =>
+      LIST_SELECT_COL_WIDTH +
       DEPLOY_COLUMN_KEYS.reduce((s, k) => s + (deployColumnWidths[k] ?? DEPLOY_COLUMN_DEFAULTS[k]), 0),
     [deployColumnWidths],
+  );
+
+  useEffect(() => {
+    const el = podTableHeaderSelectRef.current;
+    if (!el) return;
+    const vis = sortedPods.map((p) => nsNameRowKey(p.metadata.namespace, p.metadata.name));
+    if (vis.length === 0) {
+      el.checked = false;
+      el.indeterminate = false;
+      return;
+    }
+    const nSel = vis.filter((k) => selectedPodKeys.has(k)).length;
+    el.checked = nSel === vis.length;
+    el.indeterminate = nSel > 0 && nSel < vis.length;
+  }, [sortedPods, selectedPodKeys]);
+
+  useEffect(() => {
+    const el = deployTableHeaderSelectRef.current;
+    if (!el) return;
+    const vis = sortedDeployments.map((d) =>
+      nsNameRowKey((d as DeploymentRow).metadata.namespace ?? "", (d as DeploymentRow).metadata.name),
+    );
+    if (vis.length === 0) {
+      el.checked = false;
+      el.indeterminate = false;
+      return;
+    }
+    const nSel = vis.filter((k) => selectedDeploymentKeys.has(k)).length;
+    el.checked = nSel === vis.length;
+    el.indeterminate = nSel > 0 && nSel < vis.length;
+  }, [sortedDeployments, selectedDeploymentKeys]);
+
+  const stsTableTotalWidth = useMemo(
+    () => STS_COLUMN_KEYS.reduce((s, k) => s + (stsColumnWidths[k] ?? STS_COLUMN_DEFAULTS[k]), 0),
+    [stsColumnWidths],
   );
 
   const genericColumns: Column<K8sItem>[] = [
@@ -1314,6 +1941,7 @@ export const App: React.FC = () => {
     >
       {toastMessage && (
         <div
+          key={toastMessage}
           style={{
             position: "fixed",
             top: 56,
@@ -1365,7 +1993,7 @@ export const App: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <div id="deploy-scale-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "#e2e8f0" }}>
-              调整副本数
+              调整副本数（{deployScaleModal.resource === "statefulset" ? "StatefulSet" : "Deployment"}）
             </div>
             <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>
               {deployScaleModal.namespace}/{deployScaleModal.name} · 当前 {deployScaleModal.current}
@@ -1417,9 +2045,27 @@ export const App: React.FC = () => {
                     return;
                   }
                   setDeployScaleSaving(true);
-                  scaleDeployment(effectiveClusterId, deployScaleModal.namespace, deployScaleModal.name, n)
+                  const scaleFn =
+                    deployScaleModal.resource === "statefulset"
+                      ? scaleStatefulSet(
+                          effectiveClusterId,
+                          deployScaleModal.namespace,
+                          deployScaleModal.name,
+                          n,
+                        )
+                      : scaleDeployment(
+                          effectiveClusterId,
+                          deployScaleModal.namespace,
+                          deployScaleModal.name,
+                          n,
+                        );
+                  scaleFn
                     .then((data) => {
-                      setDeploymentItems((prev) => mergeDeploymentIntoList(prev, data));
+                      if (deployScaleModal.resource === "statefulset") {
+                        setStatefulsetItems((prev) => mergeDeploymentIntoList(prev, data));
+                      } else {
+                        setDeploymentItems((prev) => mergeDeploymentIntoList(prev, data));
+                      }
                       setDeployScaleModal(null);
                       setToastMessage("副本数已更新");
                       setError(null);
@@ -1445,6 +2091,46 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={!!batchConfirm && !!effectiveClusterId}
+        title={
+          batchConfirm?.kind === "pods-delete"
+            ? `确认删除 ${batchConfirm.keys.length} 个 Pod？`
+            : batchConfirm?.kind === "deployments-delete"
+              ? `确认删除 ${batchConfirm.keys.length} 个 Deployment？`
+              : batchConfirm?.kind === "deployments-restart"
+                ? `确认重启 ${batchConfirm.keys.length} 个 Deployment？`
+                : ""
+        }
+        description={
+          batchConfirm?.kind === "deployments-restart"
+            ? "将触发滚动更新，Pod 会按策略逐步重建。"
+            : batchConfirm?.kind === "deployments-delete"
+              ? "删除后不可恢复。"
+              : undefined
+        }
+        items={batchConfirm?.keys ?? []}
+        variant={batchConfirm?.kind === "deployments-restart" ? "primary" : "danger"}
+        busy={batchBusy}
+        busyText="执行中…"
+        onClose={() => {
+          if (!batchBusy) setBatchConfirm(null);
+        }}
+        onConfirm={confirmBatchAction}
+      />
+      <ConfirmDialog
+        open={!!actionConfirm}
+        title={actionConfirm?.title ?? ""}
+        description={actionConfirm?.description}
+        items={actionConfirm?.items ?? []}
+        variant={actionConfirm?.variant ?? "danger"}
+        onClose={() => setActionConfirm(null)}
+        onConfirm={async () => {
+          const ac = actionConfirmRef.current;
+          if (!ac) return;
+          await ac.onConfirm();
+        }}
+      />
       <header
         style={{
           flexShrink: 0,
@@ -1705,26 +2391,90 @@ export const App: React.FC = () => {
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 13, color: "#9ca3af" }}>集群选择</span>
-                    <select
-                      value={comboClusterId}
-                      onChange={(e) => setComboClusterId(e.target.value)}
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: 6,
-                        border: "1px solid #1f2937",
-                        backgroundColor: "#0f172a",
-                        color: "#e5e7eb",
-                        fontSize: 13,
-                        minWidth: 220,
-                      }}
-                    >
-                      <option value="">请选择集群</option>
-                      {clusters.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}（{c.filePath.replace(/^.*[/\\]/, "")}）
-                        </option>
-                      ))}
-                    </select>
+                    <div style={{ position: "relative" }}>
+                      <button
+                        type="button"
+                        onClick={() => setConfigClusterPickOpen((o) => !o)}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #1f2937",
+                          backgroundColor: "#0f172a",
+                          color: "#e5e7eb",
+                          fontSize: 13,
+                          minWidth: 280,
+                          maxWidth: 420,
+                          textAlign: "left",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {(() => {
+                          if (!comboClusterId) return "请选择集群";
+                          const c = clusters.find((cl) => cl.id === comboClusterId);
+                          if (!c) return `集群 id：${comboClusterId}`;
+                          const { left, right } = clusterOptionColumns(c);
+                          return `${left} · ${right}`;
+                        })()}
+                      </button>
+                      {configClusterPickOpen && (
+                        <>
+                          <div
+                            style={{ position: "fixed", inset: 0, zIndex: 105 }}
+                            onClick={() => setConfigClusterPickOpen(false)}
+                            aria-hidden
+                          />
+                          <div
+                            style={{
+                              ...WL_SEARCHABLE_DROPDOWN_PANEL_STYLE,
+                              zIndex: 106,
+                              minWidth: 360,
+                              maxWidth: "min(92vw, 520px)",
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div style={WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE}>
+                              <ClearableSearchInput
+                                ref={configClusterSearchRef}
+                                value={configClusterSearchKeyword}
+                                onChange={setConfigClusterSearchKeyword}
+                                placeholder="搜索 kubeconfig 文件名 / 集群名"
+                                style={{ width: "100%", boxSizing: "border-box" }}
+                                inputStyle={WL_SEARCHABLE_DROPDOWN_INPUT_STYLE}
+                              />
+                            </div>
+                            <div style={WL_SEARCHABLE_DROPDOWN_SCROLL_STYLE}>
+                              {clusters.length === 0 && (
+                                <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
+                                  暂无集群，请先配置 kubeconfig 目录并刷新。
+                                </div>
+                              )}
+                              {clusters.length > 0 &&
+                                configClusterPickFiltered.length === 0 && (
+                                  <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
+                                    无匹配的集群，请调整关键字或点击「刷新」更新列表。
+                                  </div>
+                                )}
+                              {configClusterPickFiltered.map((c, idx, arr) => {
+                                const { left, right } = clusterOptionColumns(c);
+                                return (
+                                  <SearchableDropdownTwoColumnRow
+                                    key={c.id}
+                                    left={left}
+                                    right={right}
+                                    selected={c.id === comboClusterId}
+                                    borderBottom={idx < arr.length - 1}
+                                    onClick={() => {
+                                      setComboClusterId(c.id);
+                                      setConfigClusterPickOpen(false);
+                                    }}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={reloadClusters}
@@ -2120,98 +2870,55 @@ export const App: React.FC = () => {
                           aria-hidden
                         />
                         <div
-                          style={{
-                            position: "absolute",
-                            top: "100%",
-                            left: 0,
-                            marginTop: 4,
-                            minWidth: 320,
-                            maxHeight: 320,
-                            backgroundColor: "#0f172a",
-                            border: "1px solid #1e293b",
-                            borderRadius: 8,
-                            boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-                            zIndex: 41,
-                            overflow: "hidden",
-                            display: "flex",
-                            flexDirection: "column",
-                          }}
+                          style={{ ...WL_SEARCHABLE_DROPDOWN_PANEL_STYLE, zIndex: 41 }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div style={{ margin: 8, minWidth: 0 }}>
+                          <div style={WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE}>
                             <ClearableSearchInput
+                              ref={clusterComboSearchRef}
                               value={clusterSearchKeyword}
                               onChange={setClusterSearchKeyword}
                               placeholder="搜索 kubeconfig 文件名 / 命名空间 / 组合别名关键字"
                               style={{ width: "100%", boxSizing: "border-box" }}
-                              inputStyle={{
-                                padding: "6px 10px",
-                                borderRadius: 6,
-                                border: "1px solid #1f2937",
-                                backgroundColor: "#020617",
-                                color: "#e5e7eb",
-                                fontSize: 13,
-                              }}
+                              inputStyle={WL_SEARCHABLE_DROPDOWN_INPUT_STYLE}
                             />
                           </div>
-                          <div style={{ overflowY: "auto", flex: 1, maxHeight: 260 }}>
-                            {clusterCombos
-                              .filter((combo) => {
-                                const k = clusterSearchKeyword.trim().toLowerCase();
-                                if (!k) return true;
-                                const cluster = clusters.find((c) => c.id === combo.clusterId);
-                                const fileName = cluster?.filePath.replace(/^.*[/\\]/, "") || "";
-                                const text = [
-                                  cluster?.name,
-                                  fileName,
-                                  combo.namespace,
-                                  combo.alias,
-                                ]
-                                  .join(" ")
-                                  .toLowerCase();
-                                return text.includes(k);
-                              })
-                              .map((combo) => {
-                                const cluster = clusters.find((c) => c.id === combo.clusterId);
-                                const fileName = cluster?.filePath.replace(/^.*[/\\]/, "") || "";
-                                const ns = combo.namespace || "所有命名空间";
-                                const title = combo.alias
-                                  ? `${combo.alias}（${cluster?.name ?? combo.clusterId} · ${ns}）`
-                                  : `${cluster?.name ?? combo.clusterId} · ${ns}`;
-                                return (
-                                  <button
-                                    key={combo.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setActiveComboId(combo.id);
-                                      setClusterDropdownOpen(false);
-                                      setClusterSearchKeyword("");
-                                    }}
-                                    style={{
-                                      display: "block",
-                                      width: "100%",
-                                      padding: "8px 12px",
-                                      textAlign: "left",
-                                      fontSize: 13,
-                                      color: combo.id === activeComboId ? "#38bdf8" : "#e2e8f0",
-                                      backgroundColor: combo.id === activeComboId ? "#1e293b" : "transparent",
-                                      border: "none",
-                                      cursor: "pointer",
-                                      borderBottom: "1px solid #1e293b",
-                                    }}
-                                  >
-                                    <div>{title}</div>
-                                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-                                      {cluster ? fileName : `集群未找到：${combo.clusterId}`}
-                                    </div>
-                                  </button>
-                                );
-                              })}
+                          <div style={WL_SEARCHABLE_DROPDOWN_SCROLL_STYLE}>
                             {clusterCombos.length === 0 && (
                               <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
                                 暂未添加组合，请先在右上角“平台配置 · 集群组合设置”中添加。
                               </div>
                             )}
+                            {clusterCombos.length > 0 && clusterComboDropdownFiltered.length === 0 && (
+                              <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
+                                无匹配组合，请调整关键字。
+                              </div>
+                            )}
+                            {clusterComboDropdownFiltered.map((combo, idx, arr) => {
+                              const cluster = clusters.find((c) => c.id === combo.clusterId);
+                              const fileName = cluster
+                                ? kubeconfigDisplayFileName(cluster.filePath)
+                                : `集群未找到：${combo.clusterId}`;
+                              const ns = combo.namespace || "所有命名空间";
+                              const name = cluster?.name ?? combo.clusterId;
+                              const right = combo.alias
+                                ? `${combo.alias} · ${name} · ${ns}`
+                                : `${name} · ${ns}`;
+                              return (
+                                <SearchableDropdownTwoColumnRow
+                                  key={combo.id}
+                                  left={fileName}
+                                  right={right}
+                                  selected={combo.id === activeComboId}
+                                  borderBottom={idx < arr.length - 1}
+                                  onClick={() => {
+                                    setActiveComboId(combo.id);
+                                    setClusterDropdownOpen(false);
+                                    setClusterSearchKeyword("");
+                                  }}
+                                />
+                              );
+                            })}
                           </div>
                         </div>
                       </>
@@ -2280,7 +2987,7 @@ export const App: React.FC = () => {
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <h3 style={{ fontSize: 15, margin: 0 }}>
-                      {viewTitle[currentView]}（{effectiveClusterId ?? "未应用"}）
+                      {viewTitle[currentView]}
                       {currentView !== "nodes" && currentView !== "namespaces" && (
                         effectiveNamespace && effectiveNamespace !== ""
                           ? ` · ${effectiveNamespace}`
@@ -2291,14 +2998,32 @@ export const App: React.FC = () => {
                         ? filteredPods.length
                         : currentView === "deployments"
                           ? filteredDeployments.length
-                          : filteredResourceItems.length}
+                          : currentView === "statefulsets"
+                            ? filteredStatefulSets.length
+                            : filteredResourceItems.length}
                     </h3>
-                    {(currentView === "pods" || currentView === "deployments") && (
+                    {(currentView === "pods" ||
+                      currentView === "deployments" ||
+                      currentView === "statefulsets") && (
                       <button
                         type="button"
                         onClick={() => {
-                          if (currentView === "pods") setPodsListNonce((n) => n + 1);
-                          else setDeploymentsListNonce((n) => n + 1);
+                          setToastMessage("正在刷新列表...");
+                          if (currentView === "pods") {
+                            podsManualRefreshToastRef.current = true;
+                            setPodsListSort(null);
+                            setSelectedPodKeys(new Set());
+                            setPodsListNonce((n) => n + 1);
+                          } else if (currentView === "deployments") {
+                            deploymentsManualRefreshToastRef.current = true;
+                            setDeploymentsListSort(null);
+                            setSelectedDeploymentKeys(new Set());
+                            setDeploymentsListNonce((n) => n + 1);
+                          } else {
+                            statefulsetsManualRefreshToastRef.current = true;
+                            setStatefulsetsListSort(null);
+                            setStatefulsetsListNonce((n) => n + 1);
+                          }
                         }}
                         style={{
                           padding: "4px 10px",
@@ -2314,11 +3039,176 @@ export const App: React.FC = () => {
                         刷新列表
                       </button>
                     )}
+                    {currentView === "pods" && selectedPodKeys.size > 0 && (
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                          flexWrap: "wrap",
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #334155",
+                          backgroundColor: "#1e293b",
+                          fontSize: 12,
+                          color: "#e2e8f0",
+                        }}
+                      >
+                        <span>
+                          已选 {selectedPodKeys.size} 项
+                          {podSelectedNotVisibleCount > 0 && (
+                            <span style={{ color: "#94a3b8" }}>
+                              {" "}
+                              （其中 {podSelectedNotVisibleCount} 项当前未显示）
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={!effectiveClusterId}
+                          onClick={() =>
+                            setBatchConfirm({
+                              kind: "pods-delete",
+                              keys: [...selectedPodKeys].sort(),
+                            })
+                          }
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: 4,
+                            border: "1px solid #7f1d1d",
+                            backgroundColor: "rgba(127,29,29,0.35)",
+                            color: "#fecaca",
+                            cursor: effectiveClusterId ? "pointer" : "not-allowed",
+                            fontSize: 11,
+                          }}
+                        >
+                          删除
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPodKeys(new Set())}
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: 4,
+                            border: "1px solid #334155",
+                            backgroundColor: "transparent",
+                            color: "#94a3b8",
+                            cursor: "pointer",
+                            fontSize: 11,
+                          }}
+                        >
+                          取消选择
+                        </button>
+                      </div>
+                    )}
+                    {currentView === "deployments" && selectedDeploymentKeys.size > 0 && (
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                          flexWrap: "wrap",
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #334155",
+                          backgroundColor: "#1e293b",
+                          fontSize: 12,
+                          color: "#e2e8f0",
+                        }}
+                      >
+                        <span>
+                          已选 {selectedDeploymentKeys.size} 项
+                          {deploymentSelectedNotVisibleCount > 0 && (
+                            <span style={{ color: "#94a3b8" }}>
+                              {" "}
+                              （其中 {deploymentSelectedNotVisibleCount} 项当前未显示）
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={!effectiveClusterId}
+                          onClick={() =>
+                            setBatchConfirm({
+                              kind: "deployments-delete",
+                              keys: [...selectedDeploymentKeys].sort(),
+                            })
+                          }
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: 4,
+                            border: "1px solid #7f1d1d",
+                            backgroundColor: "rgba(127,29,29,0.35)",
+                            color: "#fecaca",
+                            cursor: effectiveClusterId ? "pointer" : "not-allowed",
+                            fontSize: 11,
+                          }}
+                        >
+                          删除
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!effectiveClusterId}
+                          onClick={() =>
+                            setBatchConfirm({
+                              kind: "deployments-restart",
+                              keys: [...selectedDeploymentKeys].sort(),
+                            })
+                          }
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: 4,
+                            border: "1px solid #334155",
+                            backgroundColor: "rgba(13,148,136,0.25)",
+                            color: "#99f6e4",
+                            cursor: effectiveClusterId ? "pointer" : "not-allowed",
+                            fontSize: 11,
+                          }}
+                        >
+                          重启
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDeploymentKeys(new Set())}
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: 4,
+                            border: "1px solid #334155",
+                            backgroundColor: "transparent",
+                            color: "#94a3b8",
+                            cursor: "pointer",
+                            fontSize: 11,
+                          }}
+                        >
+                          取消选择
+                        </button>
+                      </div>
+                    )}
                     {applyingSelection && (
                       <span style={{ fontSize: 12, color: "#38bdf8" }}>
                         正在根据新的集群与命名空间加载资源…
                       </span>
                     )}
+                    {!applyingSelection &&
+                      (currentView === "pods" || currentView === "deployments" || currentView === "statefulsets") &&
+                      showServerClockSkewHint && (
+                        <span
+                          title={`本地与服务端时间偏差约 ${Math.abs(serverClockSkewMs)}ms`}
+                          style={{
+                            fontSize: 12,
+                            color: "#fbbf24",
+                            marginLeft: 12,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>
+                            ⏱
+                          </span>
+                          本地时间与集群时间存在偏差，Age 已按服务端时间校准
+                        </span>
+                      )}
                     {!applyingSelection && currentView === "pods" && hasNonHealthyPods && (
                       <span
                         style={{
@@ -2335,7 +3225,26 @@ export const App: React.FC = () => {
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
-                        当前范围内存在非“健康”状态的 Pod，请及时关注。
+                        当前范围内存在非“健康”状态的 Pod，可按状态标签排序快速定位。
+                      </span>
+                    )}
+                    {!applyingSelection && currentView === "statefulsets" && hasNonHealthyStatefulSets && (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          color: "#f87171",
+                          marginLeft: 12,
+                          fontWeight: 700,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
+                        }}
+                      >
+                        <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
+                          ⚠
+                        </span>
+                        当前范围内存在异常 StatefulSet，请重点关注实例健康状态与存储情况。
                       </span>
                     )}
                   </div>
@@ -2371,7 +3280,7 @@ export const App: React.FC = () => {
                 <>
                   <table
                     style={{
-                      width: POD_COLUMN_KEYS.reduce((s, k) => s + (podColumnWidths[k] ?? POD_COLUMN_DEFAULTS[k]), 0),
+                      width: podTableTotalWidth,
                       minWidth: "100%",
                       borderCollapse: "collapse",
                       backgroundColor: "#020617",
@@ -2379,12 +3288,43 @@ export const App: React.FC = () => {
                     }}
                   >
                     <colgroup>
+                      <col style={{ width: LIST_SELECT_COL_WIDTH }} />
                       {POD_COLUMN_KEYS.map((key) => (
                         <col key={key} style={{ width: podColumnWidths[key] ?? POD_COLUMN_DEFAULTS[key] }} />
                       ))}
                     </colgroup>
                     <thead>
                       <tr>
+                        <th
+                          className="wl-table-sticky-head"
+                          style={{
+                            ...thStyle,
+                            ...stickyHeaderThCheckbox,
+                            width: LIST_SELECT_COL_WIDTH,
+                            maxWidth: LIST_SELECT_COL_WIDTH,
+                            minWidth: LIST_SELECT_COL_WIDTH,
+                            textAlign: "center",
+                            verticalAlign: "middle",
+                          }}
+                        >
+                          <input
+                            ref={podTableHeaderSelectRef}
+                            type="checkbox"
+                            aria-label="全选当前可见 Pod"
+                            onChange={() => {
+                              const vis = sortedPods.map((p) =>
+                                nsNameRowKey(p.metadata.namespace, p.metadata.name),
+                              );
+                              setSelectedPodKeys((prev) => {
+                                const next = new Set(prev);
+                                const allOn = vis.length > 0 && vis.every((k) => next.has(k));
+                                if (allOn) vis.forEach((k) => next.delete(k));
+                                else vis.forEach((k) => next.add(k));
+                                return next;
+                              });
+                            }}
+                          />
+                        </th>
                         {(
                           ["Name", "Namespace", "Node", "存活时间", "状态标签", "Status", "Restarts", "容器数", "操作"] as const
                         ).map((label, i) => {
@@ -2394,6 +3334,15 @@ export const App: React.FC = () => {
                             <ResizableTh
                               key={key}
                               label={label}
+                              sortTrailing={
+                                isPodSortableColumnKey(key) ? (
+                                  <ResourceSortArrows
+                                    activeDirection={podsListSort?.key === key ? podsListSort.direction : null}
+                                    onPickAsc={() => setPodsListSort({ key, direction: "asc" })}
+                                    onPickDesc={() => setPodsListSort({ key, direction: "desc" })}
+                                  />
+                                ) : undefined
+                              }
                               width={w}
                               thBase={thStyle}
                               onResizeStart={beginResizePod(key)}
@@ -2403,10 +3352,27 @@ export const App: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="wl-table-body">
-                      {filteredPods.map((p) => {
+                      {sortedPods.map((p) => {
                         const { text: statusText, restarts } = getPodStatusInfo(p);
                         const node = p.spec?.nodeName ?? "-";
-                        const age = formatPodAge(p.metadata.creationTimestamp);
+                        const age = formatAgeFromMetadata(p.metadata, listAgeNow);
+                        if (
+                          typeof localStorage !== "undefined" &&
+                          localStorage.getItem("weblens_debug_pod_age") === "1"
+                        ) {
+                          const u = p.metadata.uid;
+                          if (u && !loggedPodAgeRowByUid.has(u)) {
+                            loggedPodAgeRowByUid.add(u);
+                            // eslint-disable-next-line no-console
+                            console.debug("[weblens pod row first render]", {
+                              name: p.metadata.name,
+                              uid: u,
+                              eventHint: "pods-table",
+                              creationTimestamp: readCreationTimestampFromMetadata(p.metadata),
+                              ageLabel: age,
+                            });
+                          }
+                        }
                         const containerCount = getPodContainerNames(p).length;
                         const menuKey = `${p.metadata.namespace}/${p.metadata.name}`;
                         const containers = getPodContainerNames(p);
@@ -2422,6 +3388,7 @@ export const App: React.FC = () => {
 
                         const healthLabel = p.healthLabel || "健康";
                         const reasonsText = (p.healthReasons || []).join("；");
+                        const podRowSelectKey = nsNameRowKey(p.metadata.namespace, p.metadata.name);
                         let healthBg = "rgba(22,163,74,0.15)";
                         let healthBorder = "rgba(22,163,74,0.6)";
                         let healthColor = "#bbf7d0";
@@ -2439,7 +3406,32 @@ export const App: React.FC = () => {
                           healthColor = "#fecaca";
                         }
                           return (
-                          <tr key={p.metadata.uid} className="wl-table-row">
+                          <tr
+                            key={p.metadata.uid}
+                            className={`wl-table-row${
+                              podsSortMoveHighlight.has(p.metadata.uid) ? " wl-row-sort-position-changed" : ""
+                            }`}
+                          >
+                            <td
+                              style={{ ...tdStyle, width: LIST_SELECT_COL_WIDTH, textAlign: "center" }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedPodKeys.has(podRowSelectKey)}
+                                aria-label={`选择 Pod ${podRowSelectKey}`}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  const on = e.target.checked;
+                                  setSelectedPodKeys((prev) => {
+                                    const next = new Set(prev);
+                                    if (on) next.add(podRowSelectKey);
+                                    else next.delete(podRowSelectKey);
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </td>
                             <td style={baseCellNoWrap} title={p.metadata.name}>
                               <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
                                 <button
@@ -2589,17 +3581,26 @@ export const App: React.FC = () => {
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            if (!effectiveClusterId || !window.confirm(`确定删除 Pod ${p.metadata.namespace}/${p.metadata.name}？`)) {
-                                              setPodMenuOpenKey(null); setPodMenuSubmenu(null);
-                                              return;
-                                            }
-                                            deletePod(effectiveClusterId, p.metadata.namespace, p.metadata.name)
-                                              .then(() => {
-                                                setPodMenuOpenKey(null); setPodMenuSubmenu(null);
-                                                setError(null);
-                                                loadPods(effectiveClusterId!, effectiveNamespace);
-                                              })
-                                              .catch((err: any) => setError(err?.response?.data?.error ?? err?.message ?? "删除失败"));
+                                            setPodMenuOpenKey(null);
+                                            setPodMenuSubmenu(null);
+                                            if (!effectiveClusterId) return;
+                                            const ns = p.metadata.namespace;
+                                            const name = p.metadata.name;
+                                            setActionConfirm({
+                                              title: "确认删除 1 个 Pod？",
+                                              description: "删除后 Pod 将终止并从集群移除。",
+                                              items: [`${ns}/${name}`],
+                                              variant: "danger",
+                                              onConfirm: async () => {
+                                                try {
+                                                  await deletePod(effectiveClusterId, ns, name);
+                                                  setError(null);
+                                                } catch (err: any) {
+                                                  setError(err?.response?.data?.error ?? err?.message ?? "删除失败");
+                                                  throw err;
+                                                }
+                                              },
+                                            });
                                           }}
                                           className="wl-menu-item wl-menu-item-danger"
                                           style={menuItemStyleForDropdown}
@@ -2645,12 +3646,44 @@ export const App: React.FC = () => {
                     }}
                   >
                     <colgroup>
+                      <col style={{ width: LIST_SELECT_COL_WIDTH }} />
                       {DEPLOY_COLUMN_KEYS.map((k) => (
                         <col key={k} style={{ width: deployColumnWidths[k] ?? DEPLOY_COLUMN_DEFAULTS[k] }} />
                       ))}
                     </colgroup>
                     <thead>
                       <tr>
+                        <th
+                          className="wl-table-sticky-head"
+                          style={{
+                            ...thStyle,
+                            ...stickyHeaderThCheckbox,
+                            width: LIST_SELECT_COL_WIDTH,
+                            maxWidth: LIST_SELECT_COL_WIDTH,
+                            minWidth: LIST_SELECT_COL_WIDTH,
+                            textAlign: "center",
+                            verticalAlign: "middle",
+                          }}
+                        >
+                          <input
+                            ref={deployTableHeaderSelectRef}
+                            type="checkbox"
+                            aria-label="全选当前可见 Deployment"
+                            onChange={() => {
+                              const vis = sortedDeployments.map((raw) => {
+                                const d = raw as DeploymentRow;
+                                return nsNameRowKey(d.metadata.namespace ?? "", d.metadata.name);
+                              });
+                              setSelectedDeploymentKeys((prev) => {
+                                const next = new Set(prev);
+                                const allOn = vis.length > 0 && vis.every((k) => next.has(k));
+                                if (allOn) vis.forEach((k) => next.delete(k));
+                                else vis.forEach((k) => next.add(k));
+                                return next;
+                              });
+                            }}
+                          />
+                        </th>
                         {(
                           [
                             { label: "Name", key: "name" as const },
@@ -2665,6 +3698,17 @@ export const App: React.FC = () => {
                           <ResizableTh
                             key={key}
                             label={label}
+                            sortTrailing={
+                              isDeploymentSortableColumnKey(key) ? (
+                                <ResourceSortArrows
+                                  activeDirection={
+                                    deploymentsListSort?.key === key ? deploymentsListSort.direction : null
+                                  }
+                                  onPickAsc={() => setDeploymentsListSort({ key, direction: "asc" })}
+                                  onPickDesc={() => setDeploymentsListSort({ key, direction: "desc" })}
+                                />
+                              ) : undefined
+                            }
                             width={deployColumnWidths[key] ?? DEPLOY_COLUMN_DEFAULTS[key]}
                             thBase={thStyle}
                             onResizeStart={beginResizeDeploy(key)}
@@ -2675,21 +3719,22 @@ export const App: React.FC = () => {
                     <tbody className="wl-table-body">
                       {deploymentLoading && deploymentItems.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={7} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
                             加载中…
                           </td>
                         </tr>
                       )}
-                      {!deploymentLoading && filteredDeployments.length === 0 && (
+                      {!deploymentLoading && sortedDeployments.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={7} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
                             暂无 Deployment
                           </td>
                         </tr>
                       )}
-                      {filteredDeployments.map((raw) => {
+                      {sortedDeployments.map((raw) => {
                         const d = raw as DeploymentRow;
                         const menuKey = `${d.metadata.namespace ?? ""}/${d.metadata.name}`;
+                        const deploySortRowId = deploymentTableSortRowId(d);
                         const isMenuOpen = deploymentMenuOpenKey === menuKey;
                         const rowBusy = deploymentRowBusyKey === menuKey;
                         const baseCell: React.CSSProperties = {
@@ -2699,11 +3744,39 @@ export const App: React.FC = () => {
                           whiteSpace: "nowrap",
                           maxWidth: 0,
                         };
-                        const age = formatPodAge(d.metadata.creationTimestamp);
+                        const age = formatAgeFromMetadata(d.metadata, listAgeNow);
                         const ns = d.metadata.namespace ?? "";
                         const dname = d.metadata.name;
+                        const deployRowSelectKey = nsNameRowKey(ns, dname);
                         return (
-                          <tr key={(d.metadata.uid as string) || menuKey} className="wl-table-row">
+                          <tr
+                            key={(d.metadata.uid as string) || menuKey}
+                            className={`wl-table-row${
+                              deploymentsSortMoveHighlight.has(deploySortRowId)
+                                ? " wl-row-sort-position-changed"
+                                : ""
+                            }`}
+                          >
+                            <td
+                              style={{ ...tdStyle, width: LIST_SELECT_COL_WIDTH, textAlign: "center" }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedDeploymentKeys.has(deployRowSelectKey)}
+                                aria-label={`选择 Deployment ${deployRowSelectKey}`}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  const on = e.target.checked;
+                                  setSelectedDeploymentKeys((prev) => {
+                                    const next = new Set(prev);
+                                    if (on) next.add(deployRowSelectKey);
+                                    else next.delete(deployRowSelectKey);
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </td>
                             <td style={baseCell} title={d.metadata.name}>
                               <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
                                 <button
@@ -2809,6 +3882,7 @@ export const App: React.FC = () => {
                                             namespace: ns,
                                             name: dname,
                                             current: d.spec?.replicas ?? 0,
+                                            resource: "deployment",
                                           });
                                         }}
                                       >
@@ -2821,26 +3895,29 @@ export const App: React.FC = () => {
                                         disabled={rowBusy || !effectiveClusterId}
                                         onClick={() => {
                                           setDeploymentMenuOpenKey(null);
-                                          if (
-                                            !window.confirm(
-                                              `确定重启 Deployment ${ns}/${dname}？将触发滚动更新。`,
-                                            )
-                                          ) {
-                                            return;
-                                          }
-                                          setDeploymentRowBusyKey(menuKey);
-                                          restartDeployment(effectiveClusterId!, ns, dname)
-                                            .then((data) => {
-                                              setDeploymentItems((prev) => mergeDeploymentIntoList(prev, data));
-                                              setToastMessage("已触发重启");
-                                              setError(null);
-                                            })
-                                            .catch((err: any) => {
-                                              setToastMessage(
-                                                err?.response?.data?.error ?? err?.message ?? "重启失败",
-                                              );
-                                            })
-                                            .finally(() => setDeploymentRowBusyKey(null));
+                                          if (!effectiveClusterId) return;
+                                          setActionConfirm({
+                                            title: "确认重启 1 个 Deployment？",
+                                            description: "将触发滚动更新，Pod 会按策略逐步重建。",
+                                            items: [`${ns}/${dname}`],
+                                            variant: "primary",
+                                            onConfirm: async () => {
+                                              setDeploymentRowBusyKey(menuKey);
+                                              try {
+                                                const data = await restartDeployment(effectiveClusterId, ns, dname);
+                                                setDeploymentItems((prev) => mergeDeploymentIntoList(prev, data));
+                                                setToastMessage("已触发重启");
+                                                setError(null);
+                                              } catch (err: any) {
+                                                setToastMessage(
+                                                  err?.response?.data?.error ?? err?.message ?? "重启失败",
+                                                );
+                                                throw err;
+                                              } finally {
+                                                setDeploymentRowBusyKey(null);
+                                              }
+                                            },
+                                          });
                                         }}
                                       >
                                         <span style={{ marginRight: 8 }}>↻</span> Restart
@@ -2861,30 +3938,37 @@ export const App: React.FC = () => {
                                         disabled={rowBusy || !effectiveClusterId}
                                         onClick={() => {
                                           setDeploymentMenuOpenKey(null);
-                                          if (!window.confirm(`确定删除 Deployment ${ns}/${dname}？此操作不可恢复。`)) {
-                                            return;
-                                          }
-                                          setDeploymentRowBusyKey(menuKey);
-                                          deleteDeployment(effectiveClusterId!, ns, dname)
-                                            .then(() => {
-                                              setDeploymentItems((prev) =>
-                                                prev.filter(
-                                                  (it) =>
-                                                    !(
-                                                      it.metadata?.name === dname &&
-                                                      (it.metadata?.namespace ?? "") === ns
-                                                    ),
-                                                ),
-                                              );
-                                              setToastMessage("已删除 Deployment");
-                                              setError(null);
-                                            })
-                                            .catch((err: any) => {
-                                              setToastMessage(
-                                                err?.response?.data?.error ?? err?.message ?? "删除失败",
-                                              );
-                                            })
-                                            .finally(() => setDeploymentRowBusyKey(null));
+                                          if (!effectiveClusterId) return;
+                                          setActionConfirm({
+                                            title: "确认删除 1 个 Deployment？",
+                                            description: "删除后不可恢复。",
+                                            items: [`${ns}/${dname}`],
+                                            variant: "danger",
+                                            onConfirm: async () => {
+                                              setDeploymentRowBusyKey(menuKey);
+                                              try {
+                                                await deleteDeployment(effectiveClusterId, ns, dname);
+                                                setDeploymentItems((prev) =>
+                                                  prev.filter(
+                                                    (it) =>
+                                                      !(
+                                                        it.metadata?.name === dname &&
+                                                        (it.metadata?.namespace ?? "") === ns
+                                                      ),
+                                                  ),
+                                                );
+                                                setToastMessage("已删除 Deployment");
+                                                setError(null);
+                                              } catch (err: any) {
+                                                setToastMessage(
+                                                  err?.response?.data?.error ?? err?.message ?? "删除失败",
+                                                );
+                                                throw err;
+                                              } finally {
+                                                setDeploymentRowBusyKey(null);
+                                              }
+                                            },
+                                          });
                                         }}
                                       >
                                         <span style={{ marginRight: 8 }}>🗑</span> Delete
@@ -2895,6 +3979,803 @@ export const App: React.FC = () => {
                               </div>
                             </td>
                           </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              ) : currentView === "statefulsets" ? (
+                <>
+                  <table
+                    style={{
+                      width: stsTableTotalWidth,
+                      minWidth: "100%",
+                      borderCollapse: "collapse",
+                      backgroundColor: "#020617",
+                      tableLayout: "fixed",
+                    }}
+                  >
+                    <colgroup>
+                      {STS_COLUMN_KEYS.map((k) => (
+                        <col key={k} style={{ width: stsColumnWidths[k] ?? STS_COLUMN_DEFAULTS[k] }} />
+                      ))}
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        {(
+                          [
+                            { label: "Name", key: "name" as const },
+                            { label: "Namespace", key: "namespace" as const },
+                            { label: "Pods", key: "pods" as const },
+                            { label: "Ready", key: "ready" as const },
+                            { label: "Ordinals", key: "ordinals" as const },
+                            { label: "存活时间", key: "age" as const },
+                            { label: "状态标签", key: "health" as const },
+                            { label: "操作", key: "actions" as const },
+                          ] as const
+                        ).map(({ label, key }) => (
+                          <ResizableTh
+                            key={key}
+                            label={label}
+                            sortTrailing={
+                              isStatefulSetSortableColumnKey(key) ? (
+                                <ResourceSortArrows
+                                  activeDirection={
+                                    statefulsetsListSort?.key === key ? statefulsetsListSort.direction : null
+                                  }
+                                  onPickAsc={() => setStatefulsetsListSort({ key, direction: "asc" })}
+                                  onPickDesc={() => setStatefulsetsListSort({ key, direction: "desc" })}
+                                />
+                              ) : undefined
+                            }
+                            width={stsColumnWidths[key] ?? STS_COLUMN_DEFAULTS[key]}
+                            thBase={thStyle}
+                            onResizeStart={beginResizeSts(key)}
+                          />
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="wl-table-body">
+                      {statefulsetLoading && statefulsetItems.length === 0 && (
+                        <tr className="wl-table-row">
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                            加载中…
+                          </td>
+                        </tr>
+                      )}
+                      {!statefulsetLoading && sortedStatefulSets.length === 0 && (
+                        <tr className="wl-table-row">
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                            暂无 StatefulSet
+                          </td>
+                        </tr>
+                      )}
+                      {sortedStatefulSets.map((raw) => {
+                        const s = raw as StatefulSetRow;
+                        const menuKey = `${s.metadata.namespace ?? ""}/${s.metadata.name}`;
+                        const isMenuOpen = statefulsetMenuOpenKey === menuKey;
+                        const rowBusy = statefulsetRowBusyKey === menuKey;
+                        const owned =
+                          statefulsetStsStatsByKey.get(menuKey)?.owned ??
+                          podsOwnedByStatefulSet(pods, s.metadata.name, s.metadata.namespace ?? "");
+                        const baseCell: React.CSSProperties = {
+                          ...tdStyle,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          maxWidth: 0,
+                        };
+                        const age = formatAgeFromMetadata(s.metadata, listAgeNow);
+                        const ns = s.metadata.namespace ?? "";
+                        const sname = s.metadata.name;
+                        const expanded = expandedStatefulSetKeys.has(menuKey);
+                        const podCount =
+                          typeof s.status?.replicas === "number" ? s.status.replicas : owned.length;
+                        const desired = s.spec?.replicas ?? 0;
+                        const readyN = s.status?.readyReplicas ?? 0;
+                        const readyStr = `${readyN}/${desired}`;
+                        const ordinalNums = owned
+                          .map((p) => ordinalFromStsPodName(sname, p.metadata.name))
+                          .filter((x): x is number => x != null);
+                        const ordinalsStr = formatOrdinalSummary(ordinalNums);
+                        const stsHealthLabel = aggregatePodHealthLabel(owned);
+                        const stsReasonsText = owned
+                          .flatMap((p) => (p.healthReasons || []).map((r) => `${p.metadata.name}: ${r}`))
+                          .join("；");
+                        let stsHealthBg = "rgba(22,163,74,0.15)";
+                        let stsHealthBorder = "rgba(22,163,74,0.6)";
+                        let stsHealthColor = "#bbf7d0";
+                        if (stsHealthLabel === "关注") {
+                          stsHealthBg = "rgba(202,138,4,0.18)";
+                          stsHealthBorder = "rgba(234,179,8,0.7)";
+                          stsHealthColor = "#facc15";
+                        } else if (stsHealthLabel === "警告") {
+                          stsHealthBg = "rgba(249,115,22,0.2)";
+                          stsHealthBorder = "rgba(249,115,22,0.75)";
+                          stsHealthColor = "#fed7aa";
+                        } else if (stsHealthLabel === "严重") {
+                          stsHealthBg = "rgba(185,28,28,0.25)";
+                          stsHealthBorder = "rgba(248,113,113,0.85)";
+                          stsHealthColor = "#fecaca";
+                        }
+                        const childPodsSorted = sortStsPodsTroubleshootFirst(owned, sname);
+                        const primaryAbnormalPod = findSmallestOrdinalAbnormalPod(owned, sname);
+                        const stsExpandSummary = stsTroubleshootSummaryLine(owned, sname);
+                        return (
+                          <Fragment key={(s.metadata.uid as string) || menuKey}>
+                            <tr
+                              className="wl-table-row"
+                              onClick={() => {
+                                setExpandedStatefulSetKeys((prev) => {
+                                  const n = new Set(prev);
+                                  if (n.has(menuKey)) n.delete(menuKey);
+                                  else n.add(menuKey);
+                                  return n;
+                                });
+                              }}
+                              style={{ cursor: "pointer" }}
+                            >
+                              <td style={baseCell} title={s.metadata.name}>
+                                <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setExpandedStatefulSetKeys((prev) => {
+                                        const n = new Set(prev);
+                                        if (n.has(menuKey)) n.delete(menuKey);
+                                        else n.add(menuKey);
+                                        return n;
+                                      });
+                                    }}
+                                    style={{
+                                      marginRight: 4,
+                                      padding: "0 4px",
+                                      border: "none",
+                                      background: "none",
+                                      color: "#94a3b8",
+                                      cursor: "pointer",
+                                      flexShrink: 0,
+                                      fontSize: 12,
+                                    }}
+                                    title={expanded ? "收起实例" : "展开实例"}
+                                    aria-expanded={expanded}
+                                  >
+                                    {expanded ? "▾" : "▸"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openDescribeForStatefulSet(s);
+                                    }}
+                                    style={{
+                                      padding: 0,
+                                      margin: 0,
+                                      border: "none",
+                                      background: "none",
+                                      color: "inherit",
+                                      cursor: "pointer",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                      minWidth: 0,
+                                    }}
+                                  >
+                                    {s.metadata.name}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      copyName(s.metadata.name);
+                                    }}
+                                    style={copyNameButtonStyle}
+                                    title="复制名称"
+                                  >
+                                    <img
+                                      src={copyIcon}
+                                      alt="复制"
+                                      style={{ height: 14, width: "auto", display: "block" }}
+                                    />
+                                  </button>
+                                </span>
+                              </td>
+                              <td style={baseCell} title={s.metadata.namespace}>
+                                {s.metadata.namespace ?? "-"}
+                              </td>
+                              <td style={baseCell} title={String(podCount)}>
+                                {podCount}
+                              </td>
+                              <td style={baseCell} title={readyStr}>
+                                {readyStr}
+                              </td>
+                              <td style={baseCell} title={ordinalsStr}>
+                                {ordinalsStr}
+                              </td>
+                              <td style={baseCell} title={age}>
+                                {age}
+                              </td>
+                              <td style={baseCell} onClick={(e) => e.stopPropagation()}>
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    padding: "2px 8px",
+                                    borderRadius: 999,
+                                    backgroundColor: stsHealthBg,
+                                    border: `1px solid ${stsHealthBorder}`,
+                                    color: stsHealthColor,
+                                    fontSize: 11,
+                                    maxWidth: "100%",
+                                    boxSizing: "border-box",
+                                    cursor: stsReasonsText ? "default" : "inherit",
+                                  }}
+                                  title={stsReasonsText || undefined}
+                                >
+                                  {stsHealthLabel}
+                                </span>
+                              </td>
+                              <td style={{ ...tdStyle, overflow: "visible" }} onClick={(e) => e.stopPropagation()}>
+                                <div style={{ position: "relative" }}>
+                                  <button
+                                    type="button"
+                                    className="wl-table-menu-trigger"
+                                    disabled={rowBusy || !effectiveClusterId}
+                                    onClick={() =>
+                                      setStatefulsetMenuOpenKey((k) => (k === menuKey ? null : menuKey))
+                                    }
+                                    style={{
+                                      width: 28,
+                                      height: 28,
+                                      borderRadius: "50%",
+                                      cursor: rowBusy ? "not-allowed" : "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontSize: 16,
+                                      lineHeight: 1,
+                                      opacity: rowBusy ? 0.5 : 1,
+                                    }}
+                                    title="操作"
+                                  >
+                                    ⋮
+                                  </button>
+                                  {isMenuOpen && (
+                                    <>
+                                      <div
+                                        style={{ position: "fixed", inset: 0, zIndex: 40 }}
+                                        onClick={() => setStatefulsetMenuOpenKey(null)}
+                                        aria-hidden
+                                      />
+                                      <div
+                                        className="wl-table-dropdown-menu"
+                                        style={{
+                                          position: "absolute",
+                                          right: 0,
+                                          top: "100%",
+                                          marginTop: 4,
+                                          minWidth: 160,
+                                          zIndex: 41,
+                                          padding: "4px 0",
+                                        }}
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <button
+                                          type="button"
+                                          className="wl-menu-item"
+                                          style={menuItemStyleForDropdown}
+                                          disabled={rowBusy}
+                                          onClick={() => {
+                                            setStatefulsetMenuOpenKey(null);
+                                            setDeployScaleInput(String(s.spec?.replicas ?? 0));
+                                            setDeployScaleModal({
+                                              namespace: ns,
+                                              name: sname,
+                                              current: s.spec?.replicas ?? 0,
+                                              resource: "statefulset",
+                                            });
+                                          }}
+                                        >
+                                          <span style={{ marginRight: 8 }}>⇅</span> Scale
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="wl-menu-item"
+                                          style={menuItemStyleForDropdown}
+                                          disabled={rowBusy || !effectiveClusterId}
+                                          onClick={() => {
+                                            setStatefulsetMenuOpenKey(null);
+                                            if (!effectiveClusterId) return;
+                                            setActionConfirm({
+                                              title: "确认重启 1 个 StatefulSet？",
+                                              description: "将按策略滚动更新 Pod。",
+                                              items: [`${ns}/${sname}`],
+                                              variant: "primary",
+                                              onConfirm: async () => {
+                                                setStatefulsetRowBusyKey(menuKey);
+                                                try {
+                                                  const data = await restartStatefulSet(
+                                                    effectiveClusterId,
+                                                    ns,
+                                                    sname,
+                                                  );
+                                                  setStatefulsetItems((prev) =>
+                                                    mergeDeploymentIntoList(prev, data),
+                                                  );
+                                                  setToastMessage("已触发重启");
+                                                  setError(null);
+                                                } catch (err: any) {
+                                                  setToastMessage(
+                                                    err?.response?.data?.error ?? err?.message ?? "重启失败",
+                                                  );
+                                                  throw err;
+                                                } finally {
+                                                  setStatefulsetRowBusyKey(null);
+                                                }
+                                              },
+                                            });
+                                          }}
+                                        >
+                                          <span style={{ marginRight: 8 }}>↻</span> Restart
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="wl-menu-item"
+                                          style={menuItemStyleForDropdown}
+                                          disabled={rowBusy}
+                                          onClick={() => openEditStatefulSetTab(s)}
+                                        >
+                                          <span style={{ marginRight: 8 }}>✎</span> Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="wl-menu-item wl-menu-item-danger"
+                                          style={menuItemStyleForDropdown}
+                                          disabled={rowBusy || !effectiveClusterId}
+                                          onClick={() => {
+                                            setStatefulsetMenuOpenKey(null);
+                                            if (!effectiveClusterId) return;
+                                            setActionConfirm({
+                                              title: "确认删除 1 个 StatefulSet？",
+                                              description: "删除后不可恢复。",
+                                              items: [`${ns}/${sname}`],
+                                              variant: "danger",
+                                              onConfirm: async () => {
+                                                setStatefulsetRowBusyKey(menuKey);
+                                                try {
+                                                  await deleteStatefulSet(effectiveClusterId, ns, sname);
+                                                  setStatefulsetItems((prev) =>
+                                                    prev.filter(
+                                                      (it) =>
+                                                        !(
+                                                          it.metadata?.name === sname &&
+                                                          (it.metadata?.namespace ?? "") === ns
+                                                        ),
+                                                    ),
+                                                  );
+                                                  setToastMessage("已删除 StatefulSet");
+                                                  setError(null);
+                                                } catch (err: any) {
+                                                  setToastMessage(
+                                                    err?.response?.data?.error ?? err?.message ?? "删除失败",
+                                                  );
+                                                  throw err;
+                                                } finally {
+                                                  setStatefulsetRowBusyKey(null);
+                                                }
+                                              },
+                                            });
+                                          }}
+                                        >
+                                          <span style={{ marginRight: 8 }}>🗑</span> Delete
+                                        </button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                            {expanded && (
+                              <tr className="wl-table-row">
+                                <td
+                                  colSpan={8}
+                                  style={{
+                                    ...tdStyle,
+                                    padding: "8px 12px 12px",
+                                    backgroundColor: "#0f172a",
+                                    cursor: "default",
+                                    borderBottom: "1px solid #111827",
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      color: "#94a3b8",
+                                      marginBottom: 8,
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    实例列表（异常优先）
+                                  </div>
+                                  {stsExpandSummary && (
+                                    <div
+                                      style={{
+                                        marginBottom: 10,
+                                        padding: "8px 10px",
+                                        borderRadius: 6,
+                                        border: "1px solid rgba(234,179,8,0.35)",
+                                        backgroundColor: "rgba(234,179,8,0.08)",
+                                        fontSize: 12,
+                                        color: "#e2e8f0",
+                                        lineHeight: 1.5,
+                                      }}
+                                    >
+                                      <div>{stsExpandSummary}</div>
+                                      <div style={{ marginTop: 6, fontSize: 11, color: "#64748b" }}>
+                                        Ordinal 顺序提示：建议先核对较小序号实例；下表已将异常实例置顶并按严重度排序。
+                                      </div>
+                                    </div>
+                                  )}
+                                  <table
+                                    style={{
+                                      width: "100%",
+                                      borderCollapse: "collapse",
+                                      backgroundColor: "#020617",
+                                      tableLayout: "fixed",
+                                    }}
+                                  >
+                                    <thead>
+                                      <tr style={{ color: "#9ca3af", fontSize: 12, textAlign: "left" }}>
+                                        <th style={{ ...thStyle, width: "7%" }}>Ordinal</th>
+                                        <th style={{ ...thStyle, width: "18%" }}>Pod Name</th>
+                                        <th style={{ ...thStyle, width: "10%" }}>状态标签</th>
+                                        <th style={{ ...thStyle, width: "8%" }}>Ready</th>
+                                        <th style={{ ...thStyle, width: "7%" }}>Restarts</th>
+                                        <th style={{ ...thStyle, width: "14%" }}>PVC</th>
+                                        <th style={{ ...thStyle, width: "14%" }}>Node</th>
+                                        <th style={{ ...thStyle, width: "22%" }}>操作</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="wl-table-body">
+                                      {childPodsSorted.length === 0 ? (
+                                        <tr>
+                                          <td colSpan={8} style={{ ...tdStyle, color: "#64748b" }}>
+                                            暂无关联 Pod（等待 Pods 列表同步或副本为 0）
+                                          </td>
+                                        </tr>
+                                      ) : (
+                                        childPodsSorted.map((p) => {
+                                          const ord = ordinalFromStsPodName(sname, p.metadata.name);
+                                          const { restarts } = getPodStatusInfo(p);
+                                          const highRestart = isHighRestartInStsGroup(
+                                            p,
+                                            childPodsSorted,
+                                            (pp) => getPodStatusInfo(pp).restarts,
+                                          );
+                                          const pvcNames = podPersistentVolumeClaimNames(p);
+                                          const pvcTitle = pvcNames.length ? pvcNames.join(", ") : "—";
+                                          const abnormalRow = isPodHealthAbnormal(p);
+                                          const isPrimaryAbnormal =
+                                            !!primaryAbnormalPod && p.metadata.uid === primaryAbnormalPod.metadata.uid;
+                                          const pMenuKey = `${p.metadata.namespace}/${p.metadata.name}`;
+                                          const pContainers = getPodContainerNames(p);
+                                          const pMenuOpen = podMenuOpenKey === pMenuKey;
+                                          const hl = p.healthLabel || "健康";
+                                          const reasonsText = (p.healthReasons || []).join("；");
+                                          let hBg = "rgba(22,163,74,0.15)";
+                                          let hBr = "rgba(22,163,74,0.6)";
+                                          let hCol = "#bbf7d0";
+                                          if (hl === "关注") {
+                                            hBg = "rgba(202,138,4,0.18)";
+                                            hBr = "rgba(234,179,8,0.7)";
+                                            hCol = "#facc15";
+                                          } else if (hl === "警告") {
+                                            hBg = "rgba(249,115,22,0.2)";
+                                            hBr = "rgba(249,115,22,0.75)";
+                                            hCol = "#fed7aa";
+                                          } else if (hl === "严重") {
+                                            hBg = "rgba(185,28,28,0.25)";
+                                            hBr = "rgba(248,113,113,0.85)";
+                                            hCol = "#fecaca";
+                                          }
+                                          const rowShell: React.CSSProperties = {
+                                            backgroundColor: abnormalRow ? "rgba(248,113,113,0.06)" : undefined,
+                                            boxShadow: isPrimaryAbnormal
+                                              ? "inset 3px 0 0 rgba(250,204,21,0.9)"
+                                              : abnormalRow
+                                                ? "inset 3px 0 0 rgba(249,115,22,0.45)"
+                                                : undefined,
+                                          };
+                                          return (
+                                            <tr key={p.metadata.uid} className="wl-table-row" style={rowShell}>
+                                              <td style={tdStyle}>
+                                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                                  <span>{ord ?? "—"}</span>
+                                                  {isPrimaryAbnormal && (
+                                                    <span
+                                                      style={{
+                                                        fontSize: 9,
+                                                        fontWeight: 700,
+                                                        padding: "1px 5px",
+                                                        borderRadius: 4,
+                                                        backgroundColor: "rgba(234,179,8,0.2)",
+                                                        border: "1px solid rgba(250,204,21,0.55)",
+                                                        color: "#facc15",
+                                                        flexShrink: 0,
+                                                      }}
+                                                      title="ordinal 最小的异常实例"
+                                                    >
+                                                      优先检查
+                                                    </span>
+                                                  )}
+                                                </span>
+                                              </td>
+                                              <td style={{ ...tdStyle, overflow: "hidden" }}>
+                                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => openDescribeForPod(p)}
+                                                    style={{
+                                                      padding: 0,
+                                                      border: "none",
+                                                      background: "none",
+                                                      color: "#e5e7eb",
+                                                      cursor: "pointer",
+                                                      textAlign: "left",
+                                                      overflow: "hidden",
+                                                      textOverflow: "ellipsis",
+                                                      whiteSpace: "nowrap",
+                                                    }}
+                                                    title={p.metadata.name}
+                                                  >
+                                                    {p.metadata.name}
+                                                  </button>
+                                                  {ord != null && (
+                                                    <span
+                                                      style={{
+                                                        fontSize: 10,
+                                                        color: "#64748b",
+                                                        flexShrink: 0,
+                                                      }}
+                                                    >
+                                                      #{ord}
+                                                    </span>
+                                                  )}
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => copyName(p.metadata.name)}
+                                                    style={copyNameButtonStyle}
+                                                    title="复制 Pod 名称"
+                                                  >
+                                                    <img
+                                                      src={copyIcon}
+                                                      alt="复制"
+                                                      style={{ height: 14, width: "auto", display: "block" }}
+                                                    />
+                                                  </button>
+                                                </span>
+                                              </td>
+                                              <td style={tdStyle}>
+                                                <span
+                                                  style={{
+                                                    display: "inline-flex",
+                                                    padding: "2px 8px",
+                                                    borderRadius: 999,
+                                                    backgroundColor: hBg,
+                                                    border: `1px solid ${hBr}`,
+                                                    color: hCol,
+                                                    fontSize: 11,
+                                                  }}
+                                                  title={reasonsText || undefined}
+                                                >
+                                                  {hl}
+                                                </span>
+                                              </td>
+                                              <td style={tdStyle}>{podReadyColumn(p)}</td>
+                                              <td
+                                                style={{
+                                                  ...tdStyle,
+                                                  color: highRestart ? "#fb923c" : undefined,
+                                                  fontWeight: highRestart ? 600 : undefined,
+                                                }}
+                                                title={highRestart ? "本组内重启偏高，建议结合日志排查" : undefined}
+                                              >
+                                                {restarts}
+                                              </td>
+                                              <td
+                                                style={{
+                                                  ...tdStyle,
+                                                  overflow: "hidden",
+                                                  textOverflow: "ellipsis",
+                                                  whiteSpace: "nowrap",
+                                                }}
+                                                title={pvcTitle}
+                                              >
+                                                {pvcNames.length ? pvcNames.join(", ") : "—"}
+                                              </td>
+                                              <td
+                                                style={{ ...tdStyle, overflow: "hidden", textOverflow: "ellipsis" }}
+                                                title={p.spec?.nodeName ?? "-"}
+                                              >
+                                                {p.spec?.nodeName ?? "-"}
+                                              </td>
+                                              <td style={{ ...tdStyle, overflow: "visible" }}>
+                                                <div style={{ position: "relative" }}>
+                                                  <button
+                                                    type="button"
+                                                    className="wl-table-menu-trigger"
+                                                    onClick={() =>
+                                                      setPodMenuOpenKey((k) =>
+                                                        k === pMenuKey ? null : pMenuKey,
+                                                      )
+                                                    }
+                                                    style={{
+                                                      width: 28,
+                                                      height: 28,
+                                                      borderRadius: "50%",
+                                                      cursor: "pointer",
+                                                      display: "flex",
+                                                      alignItems: "center",
+                                                      justifyContent: "center",
+                                                      fontSize: 16,
+                                                      lineHeight: 1,
+                                                    }}
+                                                    title="操作"
+                                                  >
+                                                    ⋮
+                                                  </button>
+                                                  {pMenuOpen && (
+                                                    <>
+                                                      <div
+                                                        style={{ position: "fixed", inset: 0, zIndex: 40 }}
+                                                        onClick={() => {
+                                                          setPodMenuOpenKey(null);
+                                                          setPodMenuSubmenu(null);
+                                                        }}
+                                                        aria-hidden
+                                                      />
+                                                      <div
+                                                        className="wl-table-dropdown-menu"
+                                                        style={{
+                                                          position: "absolute",
+                                                          right: 0,
+                                                          top: "100%",
+                                                          marginTop: 4,
+                                                          minWidth: 140,
+                                                          zIndex: 41,
+                                                          padding: "4px 0",
+                                                          display: "flex",
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                      >
+                                                        <div
+                                                          style={{
+                                                            padding: "4px 0",
+                                                            borderRight: podMenuSubmenu ? "1px solid #334155" : undefined,
+                                                          }}
+                                                        >
+                                                          <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                              setPodMenuSubmenu((sub) =>
+                                                                sub === "shell" ? null : "shell",
+                                                              )
+                                                            }
+                                                            className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
+                                                            style={{
+                                                              ...menuItemStyleForDropdown,
+                                                              display: "flex",
+                                                              alignItems: "center",
+                                                              justifyContent: "space-between",
+                                                              width: "100%",
+                                                            }}
+                                                          >
+                                                            <span>
+                                                              <span style={{ marginRight: 8 }}>⌘</span> Shell
+                                                            </span>
+                                                            <span style={{ fontSize: 10 }}>▸</span>
+                                                          </button>
+                                                          <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                              setPodMenuSubmenu((sub) =>
+                                                                sub === "logs" ? null : "logs",
+                                                              )
+                                                            }
+                                                            className={`wl-menu-item${podMenuSubmenu === "logs" ? " is-active" : ""}`}
+                                                            style={{
+                                                              ...menuItemStyleForDropdown,
+                                                              display: "flex",
+                                                              alignItems: "center",
+                                                              justifyContent: "space-between",
+                                                              width: "100%",
+                                                            }}
+                                                          >
+                                                            <span>
+                                                              <span style={{ marginRight: 8 }}>≡</span> Logs
+                                                            </span>
+                                                            <span style={{ fontSize: 10 }}>▸</span>
+                                                          </button>
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => openEditTab(p)}
+                                                            className="wl-menu-item"
+                                                            style={menuItemStyleForDropdown}
+                                                          >
+                                                            <span style={{ marginRight: 8 }}>✎</span> Edit
+                                                          </button>
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                              setPodMenuOpenKey(null);
+                                                              setPodMenuSubmenu(null);
+                                                              if (!effectiveClusterId) return;
+                                                              const ns0 = p.metadata.namespace;
+                                                              const name0 = p.metadata.name;
+                                                              setActionConfirm({
+                                                                title: "确认删除 1 个 Pod？",
+                                                                description: "删除后 Pod 将终止并从集群移除。",
+                                                                items: [`${ns0}/${name0}`],
+                                                                variant: "danger",
+                                                                onConfirm: async () => {
+                                                                  try {
+                                                                    await deletePod(
+                                                                      effectiveClusterId,
+                                                                      ns0,
+                                                                      name0,
+                                                                    );
+                                                                    setError(null);
+                                                                  } catch (err: any) {
+                                                                    setError(
+                                                                      err?.response?.data?.error ??
+                                                                        err?.message ??
+                                                                        "删除失败",
+                                                                    );
+                                                                    throw err;
+                                                                  }
+                                                                },
+                                                              });
+                                                            }}
+                                                            className="wl-menu-item wl-menu-item-danger"
+                                                            style={menuItemStyleForDropdown}
+                                                          >
+                                                            <span style={{ marginRight: 8 }}>🗑</span> Delete
+                                                          </button>
+                                                        </div>
+                                                        {podMenuSubmenu && (
+                                                          <div style={{ minWidth: 100, padding: "4px 0" }}>
+                                                            {pContainers.map((c) => (
+                                                              <button
+                                                                key={c}
+                                                                type="button"
+                                                                onClick={() =>
+                                                                  openPanelTab(podMenuSubmenu, p, c)
+                                                                }
+                                                                className="wl-menu-item"
+                                                                style={menuItemStyleForDropdown}
+                                                              >
+                                                                {c}
+                                                              </button>
+                                                            ))}
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                    </>
+                                                  )}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
                         );
                       })}
                     </tbody>
@@ -2927,6 +4808,9 @@ export const App: React.FC = () => {
         onEditSaved={(tab, result) => {
           if (tab.yamlKind === "deployment" && result) {
             setDeploymentItems((prev) => mergeDeploymentIntoList(prev, result));
+          }
+          if (tab.yamlKind === "statefulset" && result) {
+            setStatefulsetItems((prev) => mergeDeploymentIntoList(prev, result));
           }
         }}
       />
@@ -3003,8 +4887,12 @@ export const App: React.FC = () => {
             >
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <span style={{ fontSize: 14, fontWeight: 600 }}>
-                  {describeTarget.kind === "deployment" ? "Deployment" : "Pod"}: {describeTarget.namespace}/
-                  {describeTarget.name}
+                  {describeTarget.kind === "deployment"
+                    ? "Deployment"
+                    : describeTarget.kind === "statefulset"
+                      ? "StatefulSet"
+                      : "Pod"}
+                  : {describeTarget.namespace}/{describeTarget.name}
                 </span>
                 {describeError && (
                   <span style={{ fontSize: 12, color: "#f97373", marginTop: 2 }}>错误：{describeError}</span>
@@ -3155,7 +5043,22 @@ export const App: React.FC = () => {
                 <DeploymentDescribeContent
                   view={describeDeploymentData.view}
                   events={describeDeploymentData.events ?? []}
-                  ageLabel={formatPodAge(describeDeploymentData.view.creationTimestamp)}
+                  ageLabel={formatAgeFromMetadata(
+                    { creationTimestamp: describeDeploymentData.view.creationTimestamp },
+                    listAgeNow,
+                  )}
+                />
+              )}
+              {!describeLoading && describeTarget.kind === "statefulset" && describeStatefulSetData && (
+                <StatefulSetDescribeContent
+                  view={describeStatefulSetData.view}
+                  events={describeStatefulSetData.events ?? []}
+                  ageLabel={formatAgeFromMetadata(
+                    { creationTimestamp: describeStatefulSetData.view.creationTimestamp },
+                    listAgeNow,
+                  )}
+                  childPods={describeStsChildPods}
+                  stsName={describeTarget.name}
                 />
               )}
             </div>

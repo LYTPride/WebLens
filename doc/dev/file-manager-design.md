@@ -7,6 +7,7 @@
 ## 前端设计
 
 - 组件：`FileManagerPanel.tsx`
+- 交互组件：删除确认使用 **`ConfirmDialog`**，重命名/新建目录使用 **`InputDialog`**（与 `App.tsx` 资源列表批量确认同源视觉规范；`zIndex` 约 200，盖过底部面板）。
 - 容器：集成在 `BottomPanel` 的 Shell 标签页右侧
 - 状态按 tab 维度隔离：
   - 面板展开状态
