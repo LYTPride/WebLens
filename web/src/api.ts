@@ -195,6 +195,104 @@ export interface StatefulSetDescribe {
   events: K8sEvent[];
 }
 
+/** Ingress 结构化 Describe（与后端 IngressDescribeView 对齐） */
+export interface IngressRuleRowView {
+  host: string;
+  path: string;
+  pathType: string;
+  serviceName: string;
+  port: string;
+  tlsHint: string;
+}
+
+export interface IngressTLSView {
+  secretName: string;
+  hosts?: string[];
+}
+
+export interface IngressBackendView {
+  serviceName: string;
+  port: string;
+}
+
+export interface IngressDescribeView {
+  name: string;
+  namespace: string;
+  ingressClassName?: string;
+  creationTimestamp?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  hostCount: number;
+  pathCount: number;
+  tlsConfigured: boolean;
+  hasDefaultBackend: boolean;
+  rules: IngressRuleRowView[];
+  tls: IngressTLSView[];
+  defaultBackend?: IngressBackendView;
+}
+
+export interface IngressDescribe {
+  view: IngressDescribeView;
+  events: K8sEvent[];
+}
+
+/** Service 结构化 Describe（与后端 ServiceDescribeView 对齐） */
+export interface ServicePortView {
+  name: string;
+  protocol: string;
+  port: number;
+  targetPort: string;
+  nodePort?: number;
+}
+
+export interface ServiceEndpointRowView {
+  ip: string;
+  ports: string;
+  ready: boolean;
+  nodeName?: string;
+  podName?: string;
+  podHealth?: string;
+  podPhase?: string;
+  note?: string;
+}
+
+export interface ServiceIngressRefView {
+  ingressName: string;
+  host: string;
+  path: string;
+}
+
+export interface ServiceRelatedPodView {
+  name: string;
+  phase: string;
+  healthLabel: string;
+}
+
+export interface ServiceDescribeView {
+  name: string;
+  namespace: string;
+  creationTimestamp?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  type: string;
+  clusterIP: string;
+  externalName?: string;
+  sessionAffinity: string;
+  loadBalancerIngress?: string[];
+  ports: ServicePortView[];
+  selector?: Record<string, string>;
+  endpointReadyCount: number;
+  endpointNotReadyCount: number;
+  endpointRows: ServiceEndpointRowView[];
+  relatedPods: ServiceRelatedPodView[];
+  referencedByIngresses: ServiceIngressRefView[];
+}
+
+export interface ServiceDescribe {
+  view: ServiceDescribeView;
+  events: K8sEvent[];
+}
+
 export interface ClusterCombo {
   id: string;
   clusterId: string;
@@ -942,6 +1040,100 @@ export async function deleteStatefulSet(
   );
 }
 
+export async function fetchIngressDescribe(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<IngressDescribe> {
+  const res = await api.get<IngressDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/describe`,
+  );
+  return res.data;
+}
+
+export async function fetchIngressYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+export async function applyIngressYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  yamlBody: string,
+): Promise<unknown> {
+  const res = await api.put(
+    `/api/clusters/${encodeURIComponent(clusterId)}/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
+  return res.data;
+}
+
+export async function deleteIngress(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  await api.delete(
+    `/api/clusters/${encodeURIComponent(clusterId)}/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+  );
+}
+
+export async function fetchServiceDescribe(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<ServiceDescribe> {
+  const res = await api.get<ServiceDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/describe`,
+  );
+  return res.data;
+}
+
+export async function fetchServiceYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+export async function applyServiceYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  yamlBody: string,
+): Promise<unknown> {
+  const res = await api.put(
+    `/api/clusters/${encodeURIComponent(clusterId)}/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
+  return res.data;
+}
+
+export async function deleteService(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  await api.delete(
+    `/api/clusters/${encodeURIComponent(clusterId)}/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+  );
+}
+
 /** 通用：按资源路径拉取 items（用于 Deployments / StatefulSets / ...） */
 export async function fetchResourceList<T = unknown>(
   clusterId: string,
@@ -967,6 +1159,8 @@ export type ResourceKind =
   | "secrets"
   | "services"
   | "ingresses"
+  /** 仅内部用于 Services 页关联 watch，不出现在侧栏 */
+  | "endpoints"
   | "nodes"
   | "namespaces";
 

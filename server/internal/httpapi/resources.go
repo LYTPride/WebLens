@@ -1439,6 +1439,67 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 		watchAndStream(c, id, ns, w)
 	})
 
+	// Endpoints（供 Services 页关联展示；不单独做 UI 资源类型）
+	r.GET("/api/clusters/:id/endpoints", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		cacheKey := listCacheKey("endpoints", id, ns)
+		if data, ok := getListFromCache(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
+			return
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		list, err := client.CoreV1().Endpoints(ns).List(c.Request.Context(), metav1.ListOptions{})
+		if err != nil {
+			if ns == corev1.NamespaceAll && isForbiddenClusterScope(err) {
+				if def := defaultNamespaceForCluster(reg, id); def != "" {
+					list, err = client.CoreV1().Endpoints(def).List(c.Request.Context(), metav1.ListOptions{})
+				}
+			}
+			if err != nil {
+				if isForbiddenClusterScope(err) {
+					c.JSON(http.StatusOK, gin.H{"items": []corev1.Endpoints{}, "serverTimeMs": time.Now().UnixMilli()})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		setListCache(cacheKey, list.Items)
+		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
+	})
+
+	r.GET("/api/clusters/:id/endpoints/watch", func(c *gin.Context) {
+		id, ns := c.Param("id"), c.Query("namespace")
+		if ns == "" {
+			ns = corev1.NamespaceAll
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		w, err := client.CoreV1().Endpoints(ns).Watch(c.Request.Context(), metav1.ListOptions{
+			Watch:           true,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if isForbiddenClusterScope(err) {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		watchAndStream(c, id, ns, w)
+	})
+
 	// Ingresses
 	r.GET("/api/clusters/:id/ingresses", func(c *gin.Context) {
 		id, ns := c.Param("id"), c.Query("namespace")
@@ -1550,5 +1611,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 	})
 
 	RegisterStatefulSetRoutes(r, reg)
+	RegisterIngressRoutes(r, reg)
+	RegisterServiceRoutes(r, reg)
 }
 
