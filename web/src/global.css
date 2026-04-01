@@ -187,6 +187,117 @@ th.wl-table-sticky-head input[type="checkbox"] {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
+/* 跨资源联动入口（Ingress / Services / 后续资源页复用）：轻量胶囊，非主按钮、非默认超链接 */
+.wl-resource-jump {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: max-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 3px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: #7dd3fc;
+  background-color: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.wl-resource-jump:hover {
+  background-color: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #bae6fd;
+}
+
+.wl-resource-jump:active {
+  background-color: rgba(56, 189, 248, 0.24);
+  border-color: rgba(56, 189, 248, 0.65);
+}
+
+.wl-resource-jump:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+.wl-resource-jump:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wl-resource-jump--compact {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wl-resource-jump__text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  text-align: inherit;
+}
+
+/* 资源名称：可换行正文 + 复制 + 可选联动（非按钮、非省略胶囊） */
+.wl-resource-name-with-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.wl-resource-name-with-copy__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.wl-resource-name-with-copy__tools {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.wl-resource-name-with-copy__copy {
+  margin: 0;
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  border-radius: 4px;
+  color: inherit;
+}
+
+.wl-resource-name-with-copy__copy:hover {
+  background-color: rgba(148, 163, 184, 0.12);
+}
+
+.wl-resource-name-with-copy__copy:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
 /* ClearableSearchInput 清空按钮 */
 .wl-clearable-search-clear {
   position: absolute;

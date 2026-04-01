@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * 表头列宽拖拽：与 Pods / Deployments 列表共用。
+ * 表头列宽拖拽底层实现；资源页请优先用 `useResourceListColumnResize` 统一接状态与总宽。
  * @param minForKey 可按列设置最小宽度，避免拖得过窄
  */
 export function useColumnResize(

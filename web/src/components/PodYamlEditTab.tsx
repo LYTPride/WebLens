@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyDeploymentYaml,
+  applyIngressYaml,
   applyPodYaml,
+  applyServiceYaml,
   applyStatefulSetYaml,
   fetchDeploymentYaml,
+  fetchIngressYaml,
   fetchPodYaml,
+  fetchServiceYaml,
   fetchStatefulSetYaml,
 } from "../api";
 import { ClearableSearchInput } from "./ClearableSearchInput";
@@ -15,7 +19,7 @@ interface PodYamlEditTabProps {
   namespace: string;
   podName: string;
   /** 默认 Pod；Deployment 时与 podName 传部署名称 */
-  yamlKind?: "pod" | "deployment" | "statefulset";
+  yamlKind?: "pod" | "deployment" | "statefulset" | "ingress" | "service";
   onClose: () => void;
   /** Deployment 保存时传入 API 返回的 JSON 对象，便于列表局部更新 */
   onSaved?: (result?: unknown) => void;
@@ -50,7 +54,11 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
           ? await fetchDeploymentYaml(clusterId, namespace, podName)
           : yamlKind === "statefulset"
             ? await fetchStatefulSetYaml(clusterId, namespace, podName)
-            : await fetchPodYaml(clusterId, namespace, podName);
+            : yamlKind === "ingress"
+              ? await fetchIngressYaml(clusterId, namespace, podName)
+              : yamlKind === "service"
+                ? await fetchServiceYaml(clusterId, namespace, podName)
+                : await fetchPodYaml(clusterId, namespace, podName);
       setYaml(text);
       setInitialYaml(text);
     } catch (e: unknown) {
@@ -129,6 +137,10 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         const data = await applyStatefulSetYaml(clusterId, namespace, podName, yaml);
         setInitialYaml(yaml);
         onSaved?.(data);
+      } else if (yamlKind === "ingress") {
+        const data = await applyIngressYaml(clusterId, namespace, podName, yaml);
+        setInitialYaml(yaml);
+        onSaved?.(data);
       } else {
         await applyPodYaml(clusterId, namespace, podName, yaml);
         setInitialYaml(yaml);
@@ -183,7 +195,15 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#94a3b8", fontSize: 12 }}>
           <span>
             Kind:{" "}
-            {yamlKind === "deployment" ? "Deployment" : yamlKind === "statefulset" ? "StatefulSet" : "Pod"}
+            {yamlKind === "deployment"
+              ? "Deployment"
+              : yamlKind === "statefulset"
+                ? "StatefulSet"
+                : yamlKind === "ingress"
+                  ? "Ingress"
+                  : yamlKind === "service"
+                    ? "Service"
+                    : "Pod"}
           </span>
           <span>Name: {podName}</span>
           <span>Namespace: {namespace}</span>

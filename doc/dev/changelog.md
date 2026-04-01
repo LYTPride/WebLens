@@ -4,6 +4,15 @@
 
 ## 2026-03（近期）
 
+### Ingress / Services 与跨资源联动 UI
+
+- **后端**：`server/internal/httpapi/ingress_ops.go`、`service_ops.go` 等，提供 Ingress / Service 结构化 describe 与列表相关能力（与 `resources.go` 协同）；详见各文件注释与 `web/src/api.ts` 类型。
+- **前端列表**：`web/src/components/ServicesListTable.tsx`；Ingress 表格与展开逻辑在 `App.tsx`，辅助 `web/src/utils/ingressTable.ts`、`ingressTroubleshoot.ts`、`serviceTable.ts`、`serviceTroubleshoot.ts`。
+- **Describe**：`web/src/components/describe/IngressDescribeContent.tsx`、`ServiceDescribeContent.tsx`。
+- **统一联动入口**：`ResourceJumpChip` + `.wl-resource-jump`（轻量胶囊，短标签，宽度随内容）。
+- **统一名称展示**：`ResourceNameWithCopy` + `.wl-resource-name-with-copy*`（可换行正文 + 复制，名称不可点跳转；与联动按钮职责分离）。
+- **用户文档**：`doc/guide/ingress-services.md`。
+
 ### 统一确认 / 输入弹窗（替代浏览器原生 dialog）
 
 - 新增 **`web/src/components/ConfirmDialog.tsx`**：深色主题、标题/说明/可滚动资源列表、取消与确定；支持 `danger` / `primary`、外部 `busy`、**Esc** 与遮罩关闭（忙碌时禁用）；确定在 `onConfirm` **成功返回后**再关闭，失败抛错则保留弹窗。
