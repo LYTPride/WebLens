@@ -38,6 +38,11 @@ import {
   deleteStatefulSet,
   deleteIngress,
   deleteService,
+  fetchPvcDescribe,
+  deletePvc,
+  type PvcDescribe,
+  fetchNodeDescribe,
+  type NodeDescribe,
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
 import { ResourceTable, type Column } from "../components/ResourceTable";
@@ -51,6 +56,8 @@ import {
   compareStatefulSetsForSort,
   compareIngressesForSort,
   compareServicesForSort,
+  comparePvcsForSort,
+  compareNodesForSort,
   isPodSortableColumnKey,
   isDeploymentSortableColumnKey,
   isStatefulSetSortableColumnKey,
@@ -67,6 +74,12 @@ import {
   type ServiceSortKey,
   type ServiceSortRow,
   type ServiceSortStats,
+  type PvcSortKey,
+  type PvcSortRow,
+  type PvcSortStats,
+  type NodeSortKey,
+  type NodeSortRow,
+  type NodeSortStats,
 } from "../utils/resourceListSort";
 import {
   deriveIngressListSummary,
@@ -87,6 +100,25 @@ import {
   type ServiceListRow,
 } from "../utils/serviceTable";
 import {
+  pvcMatchesNameFilter,
+  derivePvcStatusSummary,
+  podsUsingPvcClaim,
+  formatPvcVolumeName,
+  formatPvcCapacity,
+  formatPvcStorageClass,
+  type PvcListRow,
+} from "../utils/pvcTable";
+import {
+  countPodsOnNode,
+  deriveNodeStatusSummary,
+  formatNodeCpuMemoryCapacity,
+  formatNodeInternalIP,
+  formatNodeKubeletVersion,
+  formatNodeRoles,
+  nodeMatchesNameFilter,
+  type NodeListRow,
+} from "../utils/nodeTable";
+import {
   podsOwnedByStatefulSet,
   ordinalFromStsPodName,
   formatOrdinalSummary,
@@ -101,6 +133,7 @@ import {
 } from "../utils/statefulsetPods";
 import { getPodStatusInfo } from "../utils/podTableStatus";
 import { ClearableSearchInput } from "../components/ClearableSearchInput";
+import { PodHealthPill, PodListStatusPill } from "../components/PodStatusPills";
 import {
   WL_SEARCHABLE_DROPDOWN_INPUT_STYLE,
   WL_SEARCHABLE_DROPDOWN_PANEL_STYLE,
@@ -116,16 +149,35 @@ import { DeploymentDescribeContent } from "../components/describe/DeploymentDesc
 import { StatefulSetDescribeContent } from "../components/describe/StatefulSetDescribeContent";
 import { IngressDescribeContent } from "../components/describe/IngressDescribeContent";
 import { ServiceDescribeContent } from "../components/describe/ServiceDescribeContent";
+import { PvcDescribeContent } from "../components/describe/PvcDescribeContent";
+import { NodeDescribeContent } from "../components/describe/NodeDescribeContent";
 import { ServicesListTable } from "../components/ServicesListTable";
+import { PVC_COLUMN_KEYS, PVC_COLUMN_DEFAULTS, PVCListTable } from "../components/PVCListTable";
+import { NODE_COLUMN_KEYS, NODE_COLUMN_DEFAULTS, NodesListTable } from "../components/NodesListTable";
 import { ResourceJumpChip } from "../components/ResourceJumpChip";
 import { ResourceNameWithCopy } from "../components/ResourceNameWithCopy";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useResourceListColumnResize } from "../resourceList/useResourceListColumnResize";
 import { useSortedRowPositionChangeHighlight } from "../hooks/useSortedRowPositionChangeHighlight";
 import { useNowTick } from "../hooks/useNowTick";
-import { applyK8sNamespacedWatchEvent, applyPodWatchEvent } from "../resourceList/watchEventReducer";
-import { mergeNamespacedItemsWithListSnapshot, mergePodsWithListSnapshot } from "../resourceList/mergeListSnapshot";
+import {
+  applyK8sClusterScopedWatchEvent,
+  applyK8sNamespacedWatchEvent,
+  applyPodWatchEvent,
+} from "../resourceList/watchEventReducer";
+import {
+  mergeClusterScopedItemsWithListSnapshot,
+  mergeNamespacedItemsWithListSnapshot,
+  mergePodsWithListSnapshot,
+} from "../resourceList/mergeListSnapshot";
 import { formatAgeFromMetadata, readCreationTimestampFromMetadata } from "../utils/k8sCreationTimestamp";
+import { ResourceAccessDeniedState } from "../components/ResourceAccessDeniedState";
+import { isK8sAccessDeniedError, k8sAccessDeniedSummary } from "../utils/k8sAccessErrors";
+import {
+  clearResourceAccessDecision,
+  getResourceAccessDecision,
+  setResourceAccessDecision,
+} from "../utils/resourceAccessCache";
 import {
   CLOCK_SKEW_WARN_THRESHOLD_MS,
   getClockSkewMs,
@@ -136,6 +188,9 @@ import {
 import copyIcon from "../assets/icon-copy.png";
 
 const ALL_NAMESPACES = "";
+
+/** 与 resourceAccessCache / API ResourceKind 对齐，用于 Nodes 权限缓存键 */
+const NODES_RESOURCE_KEY = "nodes";
 
 /** 调试：localStorage `weblens_debug_pod_age=1` 时，每个 uid 在 Pods 表首次渲染打一次 */
 const loggedPodAgeRowByUid = new Set<string>();
@@ -370,6 +425,38 @@ const SERVICE_COLUMN_SORT: Partial<Record<(typeof SERVICE_COLUMN_KEYS)[number], 
   age: "age",
 };
 
+function pvcColumnMinWidth(key: string): number {
+  const m: Record<string, number> = {
+    name: 120,
+    namespace: 72,
+    status: 72,
+    volume: 100,
+    capacity: 64,
+    accessModes: 72,
+    storageClass: 88,
+    usedBy: 88,
+    opsHint: 72,
+    age: 56,
+    actions: 52,
+  };
+  return m[key] ?? MIN_COL_WIDTH;
+}
+
+function nodeColumnMinWidth(key: string): number {
+  const m: Record<string, number> = {
+    name: 120,
+    status: 88,
+    roles: 100,
+    version: 72,
+    internalIP: 100,
+    pods: 48,
+    cpuMemory: 96,
+    age: 56,
+    actions: 52,
+  };
+  return m[key] ?? MIN_COL_WIDTH;
+}
+
 function mergeDeploymentIntoList(items: K8sItem[], updated: unknown): K8sItem[] {
   const u = updated as K8sItem;
   if (!u?.metadata?.name) return items;
@@ -556,6 +643,7 @@ export const App: React.FC = () => {
   const [statefulsetItems, setStatefulsetItems] = useState<K8sItem[]>([]);
   const [ingressItems, setIngressItems] = useState<K8sItem[]>([]);
   const [serviceItems, setServiceItems] = useState<K8sItem[]>([]);
+  const [pvcItems, setPvcItems] = useState<K8sItem[]>([]);
   const [serviceEndpointItems, setServiceEndpointItems] = useState<K8sItem[]>([]);
   /** Ingress 排障：同作用域 Service 列表（仅 Ingress 视图拉取 + watch，与通用 resourceItems 隔离） */
   const [ingressAuxServices, setIngressAuxServices] = useState<K8sItem[]>([]);
@@ -566,6 +654,12 @@ export const App: React.FC = () => {
   const [statefulsetLoading, setStatefulsetLoading] = useState(false);
   const [ingressLoading, setIngressLoading] = useState(false);
   const [serviceLoading, setServiceLoading] = useState(false);
+  const [pvcLoading, setPvcLoading] = useState(false);
+  const [nodeLoading, setNodeLoading] = useState(false);
+  const [nodeItems, setNodeItems] = useState<K8sItem[]>([]);
+  /** Nodes：RBAC 拒绝时走受限态，不整页 setError */
+  const [nodesAccessDenied, setNodesAccessDenied] = useState(false);
+  const [nodesAccessTechnicalSummary, setNodesAccessTechnicalSummary] = useState<string | null>(null);
   const [serverClockSnapshot, setServerClockSnapshot] = useState<ServerClockSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   /** 正在应用新的集群/命名空间选择，用于全局 loading 提示 */
@@ -620,6 +714,8 @@ export const App: React.FC = () => {
   const [statefulsetsListNonce, setStatefulsetsListNonce] = useState(0);
   const [ingressesListNonce, setIngressesListNonce] = useState(0);
   const [servicesListNonce, setServicesListNonce] = useState(0);
+  const [pvcsListNonce, setPvcsListNonce] = useState(0);
+  const [nodesListNonce, setNodesListNonce] = useState(0);
   /** Deployment / StatefulSet Scale 弹窗 */
   const [deployScaleModal, setDeployScaleModal] = useState<{
     namespace: string;
@@ -656,7 +752,11 @@ export const App: React.FC = () => {
   const [ingressMenuOpenKey, setIngressMenuOpenKey] = useState<string | null>(null);
   const [expandedIngressKeys, setExpandedIngressKeys] = useState<Set<string>>(() => new Set());
   const [serviceRowBusyKey, setServiceRowBusyKey] = useState<string | null>(null);
+  const [pvcRowBusyKey, setPvcRowBusyKey] = useState<string | null>(null);
+  const [nodeMenuOpenKey, setNodeMenuOpenKey] = useState<string | null>(null);
+  const [nodeRowBusyKey, setNodeRowBusyKey] = useState<string | null>(null);
   const [serviceMenuOpenKey, setServiceMenuOpenKey] = useState<string | null>(null);
+  const [pvcMenuOpenKey, setPvcMenuOpenKey] = useState<string | null>(null);
   const [expandedServiceKeys, setExpandedServiceKeys] = useState<Set<string>>(() => new Set());
   const [expandedStatefulSetKeys, setExpandedStatefulSetKeys] = useState<Set<string>>(() => new Set());
   /** 列表区按 Name 关键字搜索（Pods / Deployments / Ingresses 等共用） */
@@ -667,6 +767,8 @@ export const App: React.FC = () => {
   const [statefulsetsListSort, setStatefulsetsListSort] = useState<ResourceListSortState<StatefulSetSortKey>>(null);
   const [ingressesListSort, setIngressesListSort] = useState<ResourceListSortState<IngressSortKey>>(null);
   const [servicesListSort, setServicesListSort] = useState<ResourceListSortState<ServiceSortKey>>(null);
+  const [pvcsListSort, setPvcsListSort] = useState<ResourceListSortState<PvcSortKey>>(null);
+  const [nodesListSort, setNodesListSort] = useState<ResourceListSortState<NodeSortKey>>(null);
   /** Pod / Deployments / StatefulSets / Ingresses 表列宽（统一由 useResourceListColumnResize 管理） */
   const {
     columnWidths: podColumnWidths,
@@ -713,6 +815,24 @@ export const App: React.FC = () => {
     defaults: SERVICE_COLUMN_DEFAULTS,
     minWidthForKey: serviceColumnMinWidth,
   });
+  const {
+    columnWidths: pvcColumnWidths,
+    beginResize: beginResizePvc,
+    totalDataWidth: pvcDataColumnsWidth,
+  } = useResourceListColumnResize({
+    columnKeys: PVC_COLUMN_KEYS,
+    defaults: PVC_COLUMN_DEFAULTS,
+    minWidthForKey: pvcColumnMinWidth,
+  });
+  const {
+    columnWidths: nodeColumnWidths,
+    beginResize: beginResizeNode,
+    totalDataWidth: nodeDataColumnsWidth,
+  } = useResourceListColumnResize({
+    columnKeys: NODE_COLUMN_KEYS,
+    defaults: NODE_COLUMN_DEFAULTS,
+    minWidthForKey: nodeColumnMinWidth,
+  });
   /** 用户手动输入并点击「应用」的命名空间，避免 namespaces 接口返回后覆盖导致列表消失 */
   const manualNamespaceRef = useRef<{ clusterId: string; namespace: string } | null>(null);
   /** 当前选中的 cluster/namespace，用于 loadPods 返回时丢弃过期响应 */
@@ -734,17 +854,23 @@ export const App: React.FC = () => {
   const lastStatefulsetsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   const lastIngressesListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   const lastServicesListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
+  const lastPvcsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
+  const lastNodesListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   /** 「刷新列表」点击后用于在 HTTP 完成时显示成功/失败 toast，避免与普通列表加载混淆 */
   const podsManualRefreshToastRef = useRef(false);
   const deploymentsManualRefreshToastRef = useRef(false);
   const statefulsetsManualRefreshToastRef = useRef(false);
   const ingressesManualRefreshToastRef = useRef(false);
   const servicesManualRefreshToastRef = useRef(false);
+  const pvcsManualRefreshToastRef = useRef(false);
+  const nodesManualRefreshToastRef = useRef(false);
   /** watch 断线重连 / 可见性恢复时 list 合并补齐的节流（毫秒时间戳） */
   const lastPodsWatchGapFillAtRef = useRef(0);
   const lastDeploymentsWatchGapFillAtRef = useRef(0);
   const lastStsWatchGapFillAtRef = useRef(0);
   const lastIngressWatchGapFillAtRef = useRef(0);
+  const lastPvcsWatchGapFillAtRef = useRef(0);
+  const lastNodesWatchGapFillAtRef = useRef(0);
   const lastServicesWatchGapFillAtRef = useRef(0);
   const prevPageVisibleForGapFillRef = useRef(
     typeof document === "undefined" ? true : document.visibilityState === "visible",
@@ -754,7 +880,7 @@ export const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   /** Describe 右侧弹层：Pod 或 Deployment */
   const [describeTarget, setDescribeTarget] = useState<{
-    kind: "pod" | "deployment" | "statefulset" | "ingress" | "service";
+    kind: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "node";
     clusterId: string;
     namespace: string;
     name: string;
@@ -764,6 +890,8 @@ export const App: React.FC = () => {
   const [describeStatefulSetData, setDescribeStatefulSetData] = useState<StatefulSetDescribe | null>(null);
   const [describeIngressData, setDescribeIngressData] = useState<IngressDescribe | null>(null);
   const [describeServiceData, setDescribeServiceData] = useState<ServiceDescribe | null>(null);
+  const [describePvcData, setDescribePvcData] = useState<PvcDescribe | null>(null);
+  const [describeNodeData, setDescribeNodeData] = useState<NodeDescribe | null>(null);
   const [describeLoading, setDescribeLoading] = useState(false);
   const [describeError, setDescribeError] = useState<string | null>(null);
   const [describeWidthRatio, setDescribeWidthRatio] = useState(0.5);
@@ -779,6 +907,16 @@ export const App: React.FC = () => {
     [effectiveClusterId, effectiveNamespace, applyRevision],
   );
 
+  const nodesListScopeKey = useMemo(
+    () => `${effectiveClusterId ?? ""}|${applyRevision}`,
+    [effectiveClusterId, applyRevision],
+  );
+
+  useEffect(() => {
+    setNodesAccessDenied(false);
+    setNodesAccessTechnicalSummary(null);
+  }, [effectiveClusterId]);
+
   const listAgeTickActive =
     !!effectiveClusterId &&
     (currentView === "pods" ||
@@ -786,6 +924,8 @@ export const App: React.FC = () => {
       currentView === "statefulsets" ||
       currentView === "ingresses" ||
       currentView === "services" ||
+      currentView === "persistentvolumeclaims" ||
+      currentView === "nodes" ||
       describeTarget !== null);
 
   const clientNowTick = useNowTick(1000, listAgeTickActive);
@@ -891,10 +1031,20 @@ export const App: React.FC = () => {
     setStatefulsetMenuOpenKey(null);
     setIngressMenuOpenKey(null);
     setServiceMenuOpenKey(null);
+    setPvcMenuOpenKey(null);
+    setNodeMenuOpenKey(null);
   }, [currentView]);
 
   useEffect(() => {
-    if (!podMenuOpenKey && !deploymentMenuOpenKey && !statefulsetMenuOpenKey && !ingressMenuOpenKey && !serviceMenuOpenKey)
+    if (
+      !podMenuOpenKey &&
+      !deploymentMenuOpenKey &&
+      !statefulsetMenuOpenKey &&
+      !ingressMenuOpenKey &&
+      !serviceMenuOpenKey &&
+      !pvcMenuOpenKey &&
+      !nodeMenuOpenKey
+    )
       return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -904,11 +1054,21 @@ export const App: React.FC = () => {
         setStatefulsetMenuOpenKey(null);
         setIngressMenuOpenKey(null);
         setServiceMenuOpenKey(null);
+        setPvcMenuOpenKey(null);
+        setNodeMenuOpenKey(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [podMenuOpenKey, deploymentMenuOpenKey, statefulsetMenuOpenKey, ingressMenuOpenKey, serviceMenuOpenKey]);
+  }, [
+    podMenuOpenKey,
+    deploymentMenuOpenKey,
+    statefulsetMenuOpenKey,
+    ingressMenuOpenKey,
+    serviceMenuOpenKey,
+    pvcMenuOpenKey,
+    nodeMenuOpenKey,
+  ]);
 
   useEffect(() => {
     activeClusterNsRef.current = { clusterId: effectiveClusterId, namespace: effectiveNamespace };
@@ -1026,7 +1186,7 @@ export const App: React.FC = () => {
           }
         })
         .finally(() => setDescribeLoading(false));
-    } else {
+    } else if (describeTarget.kind === "service") {
       setDescribeServiceData(null);
       fetchServiceDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
         .then((data) => {
@@ -1044,6 +1204,42 @@ export const App: React.FC = () => {
           }
         })
         .finally(() => setDescribeLoading(false));
+    } else if (describeTarget.kind === "node") {
+      setDescribeNodeData(null);
+      fetchNodeDescribe(describeTarget.clusterId, describeTarget.name)
+        .then((data) => {
+          setDescribeNodeData(data);
+          setDescribeError(null);
+        })
+        .catch((e: any) => {
+          const status = e?.response?.status;
+          const backendMsg = e?.response?.data?.error;
+          if (status === 404) {
+            setDescribeNodeData(null);
+            setDescribeError("Node 已不存在或已被删除");
+          } else {
+            setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
+          }
+        })
+        .finally(() => setDescribeLoading(false));
+    } else {
+      setDescribePvcData(null);
+      fetchPvcDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
+        .then((data) => {
+          setDescribePvcData(data);
+          setDescribeError(null);
+        })
+        .catch((e: any) => {
+          const status = e?.response?.status;
+          const backendMsg = e?.response?.data?.error;
+          if (status === 404) {
+            setDescribePvcData(null);
+            setDescribeError("PVC 已不存在或已被删除");
+          } else {
+            setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
+          }
+        })
+        .finally(() => setDescribeLoading(false));
     }
   }, [describeTarget]);
 
@@ -1055,6 +1251,8 @@ export const App: React.FC = () => {
       setDescribeStatefulSetData(null);
       setDescribeIngressData(null);
       setDescribeServiceData(null);
+      setDescribePvcData(null);
+      setDescribeNodeData(null);
       setDescribeError(null);
       setDescribeLoading(false);
       return;
@@ -1290,6 +1488,75 @@ export const App: React.FC = () => {
     setServiceMenuOpenKey(null);
   };
 
+  const openDescribeForPvc = (pvc: PvcListRow) => {
+    if (!effectiveClusterId) return;
+    setDescribeTarget({
+      kind: "pvc",
+      clusterId: effectiveClusterId,
+      namespace: pvc.metadata?.namespace ?? "",
+      name: pvc.metadata?.name ?? "",
+    });
+  };
+
+  const openEditPvcTab = (pvc: PvcListRow) => {
+    if (!effectiveClusterId) return;
+    const ns = pvc.metadata?.namespace ?? "";
+    const name = pvc.metadata?.name ?? "";
+    const id = `edit-pvc-${ns}-${name}`;
+    setPanelTabs((prev) => {
+      const exists = prev.some((t) => t.id === id);
+      if (exists) return prev;
+      const tab: PanelTab = {
+        id,
+        type: "edit",
+        clusterId: effectiveClusterId,
+        namespace: ns,
+        pod: name,
+        container: "",
+        title: `${name} (PVC)`,
+        containers: [],
+        yamlKind: "pvc",
+      };
+      return [...prev, tab];
+    });
+    setActivePanelTabId(id);
+    setPvcMenuOpenKey(null);
+  };
+
+  const openDescribeForNode = (n: NodeListRow) => {
+    if (!effectiveClusterId) return;
+    setDescribeTarget({
+      kind: "node",
+      clusterId: effectiveClusterId,
+      namespace: "",
+      name: n.metadata?.name ?? "",
+    });
+  };
+
+  const openEditNodeTab = (n: NodeListRow) => {
+    if (!effectiveClusterId) return;
+    const name = n.metadata?.name ?? "";
+    const id = `edit-node-${name}`;
+    setPanelTabs((prev) => {
+      const exists = prev.some((t) => t.id === id);
+      if (exists) return prev;
+      const tab: PanelTab = {
+        id,
+        type: "edit",
+        clusterId: effectiveClusterId,
+        namespace: "",
+        pod: name,
+        container: "",
+        title: `${name} (Node)`,
+        containers: [],
+        yamlKind: "node",
+      };
+      return [...prev, tab];
+    });
+    setActivePanelTabId(id);
+    setNodeMenuOpenKey(null);
+  };
+
   /** Ingress 排障联动：跳转 Services / Pods 列表并带关键字（当前集群+命名空间作用域不变） */
   const jumpIngressToServices = useCallback((serviceName: string) => {
     setDescribeTarget(null);
@@ -1503,7 +1770,9 @@ export const App: React.FC = () => {
       currentViewRef.current === "statefulsets" ||
       currentViewRef.current === "deployments" ||
       currentViewRef.current === "ingresses" ||
-      currentViewRef.current === "services";
+      currentViewRef.current === "services" ||
+      currentViewRef.current === "persistentvolumeclaims" ||
+      currentViewRef.current === "nodes";
     if (!viewOk) return;
     const t = Date.now();
     if (t - lastPodsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
@@ -1595,6 +1864,49 @@ export const App: React.FC = () => {
     }
   }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
 
+  const runPvcsWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible || currentViewRef.current !== "persistentvolumeclaims") return;
+    const t = Date.now();
+    if (t - lastPvcsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastPvcsWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchResourceList<K8sItem>(cid, "persistentvolumeclaims", ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      if (currentViewRef.current !== "persistentvolumeclaims") return;
+      setPvcItems((prev) => mergeNamespacedItemsWithListSnapshot(prev, items as K8sItem[], ns));
+    } catch {
+      /* silent */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
+  const runNodesWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    if (!cid || !pageVisible || currentViewRef.current !== "nodes") return;
+    if (getResourceAccessDecision(cid, NODES_RESOURCE_KEY) === "denied") return;
+    const t = Date.now();
+    if (t - lastNodesWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastNodesWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchResourceList<K8sItem>(cid, "nodes", undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid) return;
+      if (currentViewRef.current !== "nodes") return;
+      setNodeItems((prev) => mergeClusterScopedItemsWithListSnapshot(prev, items as K8sItem[]));
+    } catch (e) {
+      if (isK8sAccessDeniedError(e)) {
+        setResourceAccessDecision(cid, NODES_RESOURCE_KEY, "denied");
+        setNodesAccessDenied(true);
+        setNodesAccessTechnicalSummary(k8sAccessDeniedSummary(e));
+        setNodeItems([]);
+      }
+    }
+  }, [effectiveClusterId, pageVisible, syncServerClock]);
+
   useEffect(() => {
     const wasVisible = prevPageVisibleForGapFillRef.current;
     prevPageVisibleForGapFillRef.current = pageVisible;
@@ -1604,12 +1916,16 @@ export const App: React.FC = () => {
       currentView === "statefulsets" ||
       currentView === "deployments" ||
       currentView === "ingresses" ||
-      currentView === "services";
+      currentView === "services" ||
+      currentView === "persistentvolumeclaims" ||
+      currentView === "nodes";
     if (needsPodsData) void runPodsWatchGapFill();
     if (currentView === "deployments") void runDeploymentsWatchGapFill();
     if (currentView === "statefulsets") void runStatefulsetsWatchGapFill();
     if (currentView === "ingresses") void runIngressesWatchGapFill();
     if (currentView === "services") void runServicesWatchGapFill();
+    if (currentView === "persistentvolumeclaims") void runPvcsWatchGapFill();
+    if (currentView === "nodes") void runNodesWatchGapFill();
   }, [
     pageVisible,
     effectiveClusterId,
@@ -1619,6 +1935,8 @@ export const App: React.FC = () => {
     runStatefulsetsWatchGapFill,
     runIngressesWatchGapFill,
     runServicesWatchGapFill,
+    runPvcsWatchGapFill,
+    runNodesWatchGapFill,
   ]);
 
   useEffect(() => {
@@ -1732,12 +2050,14 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!effectiveClusterId) return;
     if (!pageVisible) return;
-    // Deployments / Ingresses 等页也保持 Pods watch：关联排障与副本状态
+    // Deployments / Ingresses / PVC 等页也保持 Pods watch：副本状态、Ingress 后端、PVC Used By 推导等同作用域依赖
     const needsPodsData =
       currentView === "pods" ||
       currentView === "statefulsets" ||
       currentView === "deployments" ||
-      currentView === "ingresses";
+      currentView === "ingresses" ||
+      currentView === "persistentvolumeclaims" ||
+      currentView === "nodes";
 
     if (!needsPodsData && podsWatchCancelRef.current) {
       podsWatchCancelRef.current();
@@ -2246,6 +2566,245 @@ export const App: React.FC = () => {
     syncServerClock,
   ]);
 
+  // PersistentVolumeClaims：独立列表 + Watch
+  useEffect(() => {
+    if (!effectiveClusterId) return;
+    if (!pageVisible) return;
+    if (currentView !== "persistentvolumeclaims") return;
+
+    if (resourceWatchCancelRef.current) {
+      resourceWatchCancelRef.current();
+      resourceWatchCancelRef.current = null;
+    }
+
+    const scopeKey = listScopeKey;
+    const last = lastPvcsListFetchRef.current;
+    const needHttp = !last || last.scope !== scopeKey || last.nonce !== pvcsListNonce;
+    const ns = effectiveNamespace || undefined;
+
+    if (!needHttp) {
+      setApplyingSelection(false);
+    }
+
+    if (needHttp) {
+      setPvcLoading(true);
+      setError(null);
+      fetchResourceList<K8sItem>(effectiveClusterId, "persistentvolumeclaims", ns)
+        .then(({ items, serverTimeMs }) => {
+          syncServerClock(serverTimeMs);
+          const cur = activeClusterNsRef.current;
+          if (currentViewRef.current !== "persistentvolumeclaims") {
+            if (pvcsManualRefreshToastRef.current) pvcsManualRefreshToastRef.current = false;
+            return;
+          }
+          if (cur.clusterId !== effectiveClusterId || (cur.namespace || "") !== (effectiveNamespace || "")) {
+            if (pvcsManualRefreshToastRef.current) pvcsManualRefreshToastRef.current = false;
+            return;
+          }
+          setPvcItems(items as K8sItem[]);
+          setError(null);
+          lastPvcsListFetchRef.current = { scope: scopeKey, nonce: pvcsListNonce };
+          if (pvcsManualRefreshToastRef.current) {
+            pvcsManualRefreshToastRef.current = false;
+            setToastMessage("列表已刷新");
+          }
+        })
+        .catch((err: any) => {
+          if (pvcsManualRefreshToastRef.current) {
+            pvcsManualRefreshToastRef.current = false;
+            setToastMessage("刷新失败，请稍后重试");
+          }
+          const status = err?.response?.status;
+          const backendMsg = err?.response?.data?.error;
+          if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
+          else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
+          else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+          else setError(err?.message || "加载失败，请稍后重试");
+        })
+        .finally(() => {
+          setPvcLoading(false);
+          setApplyingSelection(false);
+        });
+    }
+
+    const cancel = watchResourceList<K8sItem>(effectiveClusterId, "persistentvolumeclaims", ns, {
+      onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
+        setPvcItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
+      },
+      onError: (err) => {
+        // eslint-disable-next-line no-console
+        console.error("pvc watch error:", err);
+        fetchResourceList<K8sItem>(effectiveClusterId, "persistentvolumeclaims", ns)
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
+            if (currentViewRef.current !== "persistentvolumeclaims") return;
+            setPvcItems(items as K8sItem[]);
+          })
+          .catch(() => {});
+      },
+      onConnectionEstablished: () => {
+        void runPvcsWatchGapFill();
+      },
+    });
+    resourceWatchCancelRef.current = cancel;
+
+    return () => {
+      if (resourceWatchCancelRef.current) {
+        resourceWatchCancelRef.current();
+        resourceWatchCancelRef.current = null;
+      }
+    };
+  }, [
+    effectiveClusterId,
+    effectiveNamespace,
+    currentView,
+    pageVisible,
+    listScopeKey,
+    pvcsListNonce,
+    runPvcsWatchGapFill,
+    syncServerClock,
+  ]);
+
+  // Nodes：集群级列表 + Watch（与命名空间选择无关，缓存键仅用 cluster + applyRevision）
+  useEffect(() => {
+    if (!effectiveClusterId) return;
+    if (!pageVisible) return;
+    if (currentView !== "nodes") return;
+
+    const cid = effectiveClusterId;
+
+    if (resourceWatchCancelRef.current) {
+      resourceWatchCancelRef.current();
+      resourceWatchCancelRef.current = null;
+    }
+
+    if (getResourceAccessDecision(cid, NODES_RESOURCE_KEY) === "denied") {
+      setError(null);
+      setNodesAccessDenied(true);
+      setNodeItems([]);
+      setNodeLoading(false);
+      setApplyingSelection(false);
+      return;
+    }
+
+    const scopeKey = nodesListScopeKey;
+    const last = lastNodesListFetchRef.current;
+    const needHttp = !last || last.scope !== scopeKey || last.nonce !== nodesListNonce;
+
+    if (!needHttp) {
+      setApplyingSelection(false);
+    }
+
+    if (needHttp) {
+      setNodeLoading(true);
+      setError(null);
+      setNodesAccessDenied(false);
+      setNodesAccessTechnicalSummary(null);
+      fetchResourceList<K8sItem>(cid, "nodes", undefined)
+        .then(({ items, serverTimeMs }) => {
+          syncServerClock(serverTimeMs);
+          const cur = activeClusterNsRef.current;
+          if (currentViewRef.current !== "nodes") {
+            if (nodesManualRefreshToastRef.current) nodesManualRefreshToastRef.current = false;
+            return;
+          }
+          if (cur.clusterId !== cid) {
+            if (nodesManualRefreshToastRef.current) nodesManualRefreshToastRef.current = false;
+            return;
+          }
+          setResourceAccessDecision(cid, NODES_RESOURCE_KEY, "granted");
+          setNodesAccessDenied(false);
+          setNodesAccessTechnicalSummary(null);
+          setNodeItems(items as K8sItem[]);
+          setError(null);
+          lastNodesListFetchRef.current = { scope: scopeKey, nonce: nodesListNonce };
+          if (nodesManualRefreshToastRef.current) {
+            nodesManualRefreshToastRef.current = false;
+            setToastMessage("列表已刷新");
+          }
+        })
+        .catch((err: any) => {
+          if (isK8sAccessDeniedError(err)) {
+            setResourceAccessDecision(cid, NODES_RESOURCE_KEY, "denied");
+            setNodesAccessDenied(true);
+            setNodesAccessTechnicalSummary(k8sAccessDeniedSummary(err));
+            setNodeItems([]);
+            setError(null);
+            if (nodesManualRefreshToastRef.current) nodesManualRefreshToastRef.current = false;
+            resourceWatchCancelRef.current?.();
+            resourceWatchCancelRef.current = null;
+            return;
+          }
+          if (nodesManualRefreshToastRef.current) {
+            nodesManualRefreshToastRef.current = false;
+            setToastMessage("刷新失败，请稍后重试");
+          }
+          const status = err?.response?.status;
+          const backendMsg = err?.response?.data?.error;
+          if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
+          else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
+          else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+          else setError(err?.message || "加载失败，请稍后重试");
+        })
+        .finally(() => {
+          setNodeLoading(false);
+          setApplyingSelection(false);
+        });
+    }
+
+    const cancel = watchResourceList<K8sItem>(cid, "nodes", undefined, {
+      onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
+        setNodeItems((prev) => applyK8sClusterScopedWatchEvent(prev, ev));
+      },
+      onError: (err) => {
+        if (isK8sAccessDeniedError(err)) {
+          setResourceAccessDecision(cid, NODES_RESOURCE_KEY, "denied");
+          setNodesAccessDenied(true);
+          setNodesAccessTechnicalSummary((prev) => prev ?? k8sAccessDeniedSummary(err));
+          setNodeItems([]);
+          setError(null);
+          resourceWatchCancelRef.current?.();
+          resourceWatchCancelRef.current = null;
+          return;
+        }
+        // eslint-disable-next-line no-console
+        console.error("nodes watch error:", err);
+        fetchResourceList<K8sItem>(cid, "nodes", undefined)
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
+            if (currentViewRef.current !== "nodes") return;
+            setNodeItems(items as K8sItem[]);
+          })
+          .catch(() => {});
+      },
+      shouldReconnect: (err, httpStatus) => {
+        if (httpStatus === 401 || httpStatus === 403) return false;
+        return !isK8sAccessDeniedError(err);
+      },
+      onConnectionEstablished: () => {
+        void runNodesWatchGapFill();
+      },
+    });
+    resourceWatchCancelRef.current = cancel;
+
+    return () => {
+      if (resourceWatchCancelRef.current) {
+        resourceWatchCancelRef.current();
+        resourceWatchCancelRef.current = null;
+      }
+    };
+  }, [
+    effectiveClusterId,
+    currentView,
+    pageVisible,
+    nodesListScopeKey,
+    nodesListNonce,
+    runNodesWatchGapFill,
+    syncServerClock,
+  ]);
+
   // Ingress 排障辅助：同作用域 Services list + watch（独立 cancel ref，不打断 Ingress 主 watch）
   useEffect(() => {
     if (!effectiveClusterId || !pageVisible) {
@@ -2387,7 +2946,9 @@ export const App: React.FC = () => {
       currentView === "deployments" ||
       currentView === "statefulsets" ||
       currentView === "ingresses" ||
-      currentView === "services"
+      currentView === "services" ||
+      currentView === "persistentvolumeclaims" ||
+      currentView === "nodes"
     )
       return;
 
@@ -2436,6 +2997,7 @@ export const App: React.FC = () => {
     secrets: "Secrets",
     services: "Services",
     ingresses: "Ingresses",
+    persistentvolumeclaims: "Persistent Volume Claims",
     endpoints: "Endpoints",
     nodes: "Nodes",
     namespaces: "Namespaces",
@@ -2616,6 +3178,114 @@ export const App: React.FC = () => {
     serviceSortStatsByKey,
     servicesListSort?.key === "age" ? listAgeNow : 0,
   ]);
+
+  const filteredPvcs = useMemo(() => {
+    const k = nameFilter.trim();
+    if (!k) return pvcItems;
+    return pvcItems.filter((i) => pvcMatchesNameFilter(i as PvcListRow, k));
+  }, [pvcItems, nameFilter]);
+
+  const hasRiskyPvcs = useMemo(() => {
+    for (const raw of pvcItems) {
+      const s = derivePvcStatusSummary(raw as PvcListRow);
+      if (s.label !== "健康") return true;
+    }
+    return false;
+  }, [pvcItems]);
+
+  const pvcSortStatsByKey = useMemo(() => {
+    const m = new Map<string, PvcSortStats>();
+    for (const raw of filteredPvcs) {
+      const row = raw as PvcSortRow;
+      const ns = row.metadata.namespace ?? "";
+      const name = row.metadata.name;
+      const key = `${ns}/${name}`;
+      const st = derivePvcStatusSummary(raw as PvcListRow);
+      const used = podsUsingPvcClaim(pods, ns, name).length;
+      const pr = raw as PvcListRow;
+      m.set(key, {
+        statusRank: st.healthRank,
+        volume: formatPvcVolumeName(pr),
+        capacity: formatPvcCapacity(pr),
+        storageClass: formatPvcStorageClass(pr),
+        usedByCount: used,
+      });
+    }
+    return m;
+  }, [filteredPvcs, pods]);
+
+  const sortedPvcs = useMemo(() => {
+    const getStats = (row: PvcSortRow) => {
+      const k = `${row.metadata.namespace ?? ""}/${row.metadata.name}`;
+      return (
+        pvcSortStatsByKey.get(k) ?? {
+          statusRank: 0,
+          volume: "",
+          capacity: "",
+          storageClass: "",
+          usedByCount: 0,
+        }
+      );
+    };
+    const byAge = pvcsListSort?.key === "age";
+    return sortByState(
+      filteredPvcs as PvcSortRow[],
+      pvcsListSort,
+      byAge
+        ? (a, b, key) => comparePvcsForSort(a, b, key, getStats, listAgeNow)
+        : (a, b, key) => comparePvcsForSort(a, b, key, getStats),
+    );
+  }, [filteredPvcs, pvcsListSort, pvcSortStatsByKey, pvcsListSort?.key === "age" ? listAgeNow : 0]);
+
+  const filteredNodes = useMemo(() => {
+    const k = nameFilter.trim();
+    if (!k) return nodeItems;
+    return nodeItems.filter((i) => nodeMatchesNameFilter(i as NodeListRow, k));
+  }, [nodeItems, nameFilter]);
+
+  const nodeSortStatsByKey = useMemo(() => {
+    const m = new Map<string, NodeSortStats>();
+    for (const raw of filteredNodes) {
+      const row = raw as NodeSortRow;
+      const nname = row.metadata.name;
+      const st = deriveNodeStatusSummary(raw as NodeListRow);
+      m.set(nname, {
+        statusRank: st.sortRank,
+        roles: formatNodeRoles(raw as NodeListRow),
+        version: formatNodeKubeletVersion(raw as NodeListRow),
+        internalIP: formatNodeInternalIP(raw as NodeListRow),
+        podsCount: countPodsOnNode(pods, nname),
+        cpuMemory: formatNodeCpuMemoryCapacity(raw as NodeListRow),
+      });
+    }
+    return m;
+  }, [filteredNodes, pods]);
+
+  const sortedNodes = useMemo(() => {
+    const getStats = (row: NodeSortRow) =>
+      nodeSortStatsByKey.get(row.metadata.name) ?? {
+        statusRank: 0,
+        roles: "",
+        version: "",
+        internalIP: "",
+        podsCount: 0,
+        cpuMemory: "",
+      };
+    const byAge = nodesListSort?.key === "age";
+    return sortByState(
+      filteredNodes as NodeSortRow[],
+      nodesListSort,
+      byAge
+        ? (a, b, key) => compareNodesForSort(a, b, key, getStats, listAgeNow)
+        : (a, b, key) => compareNodesForSort(a, b, key, getStats),
+    );
+  }, [filteredNodes, nodesListSort, nodeSortStatsByKey, nodesListSort?.key === "age" ? listAgeNow : 0]);
+
+  const nodesPermissionDenied = useMemo(() => {
+    if (!effectiveClusterId || currentView !== "nodes") return false;
+    if (getResourceAccessDecision(effectiveClusterId, NODES_RESOURCE_KEY) === "denied") return true;
+    return nodesAccessDenied;
+  }, [effectiveClusterId, currentView, nodesAccessDenied]);
 
   const statefulsetStsStatsByKey = useMemo(() => {
     const m = new Map<string, { owned: Pod[]; stats: ReturnType<typeof buildStatefulSetSortStats> }>();
@@ -2801,6 +3471,8 @@ export const App: React.FC = () => {
   const ingressTableTotalWidth = useMemo(() => ingressDataColumnsWidth, [ingressDataColumnsWidth]);
 
   const serviceTableTotalWidth = useMemo(() => serviceDataColumnsWidth, [serviceDataColumnsWidth]);
+  const pvcTableTotalWidth = useMemo(() => pvcDataColumnsWidth, [pvcDataColumnsWidth]);
+  const nodeTableTotalWidth = useMemo(() => nodeDataColumnsWidth, [nodeDataColumnsWidth]);
 
   const genericColumns: Column<K8sItem>[] = [
     {
@@ -3725,7 +4397,10 @@ export const App: React.FC = () => {
           <div style={{ flexShrink: 0, marginBottom: 12 }}>
             <h2 style={{ fontSize: 16, margin: 0, marginBottom: 8 }}>集群与命名空间</h2>
             {loading && <div>加载中...</div>}
-            {error && <div style={{ color: "#f97373", marginBottom: 8 }}>错误：{error}</div>}
+            {error &&
+              !(currentView === "nodes" && nodesPermissionDenied) && (
+                <div style={{ color: "#f97373", marginBottom: 8 }}>错误：{error}</div>
+              )}
             {!loading && !error && clusters.length === 0 && (
               <div>未发现任何集群，请检查 kubeconfig 目录配置。</div>
             )}
@@ -3912,13 +4587,19 @@ export const App: React.FC = () => {
                               ? filteredIngresses.length
                               : currentView === "services"
                                 ? filteredServices.length
-                                : filteredResourceItems.length}
+                                : currentView === "persistentvolumeclaims"
+                                  ? filteredPvcs.length
+                                  : currentView === "nodes"
+                                    ? filteredNodes.length
+                                    : filteredResourceItems.length}
                     </h3>
                     {(currentView === "pods" ||
                       currentView === "deployments" ||
                       currentView === "statefulsets" ||
                       currentView === "ingresses" ||
-                      currentView === "services") && (
+                      currentView === "services" ||
+                      currentView === "persistentvolumeclaims" ||
+                      currentView === "nodes") && (
                       <button
                         type="button"
                         onClick={() => {
@@ -3941,10 +4622,23 @@ export const App: React.FC = () => {
                             ingressesManualRefreshToastRef.current = true;
                             setIngressesListSort(null);
                             setIngressesListNonce((n) => n + 1);
-                          } else {
+                          } else if (currentView === "services") {
                             servicesManualRefreshToastRef.current = true;
                             setServicesListSort(null);
                             setServicesListNonce((n) => n + 1);
+                          } else if (currentView === "persistentvolumeclaims") {
+                            pvcsManualRefreshToastRef.current = true;
+                            setPvcsListSort(null);
+                            setPvcsListNonce((n) => n + 1);
+                          } else if (currentView === "nodes") {
+                            if (effectiveClusterId) {
+                              clearResourceAccessDecision(effectiveClusterId, NODES_RESOURCE_KEY);
+                            }
+                            setNodesAccessDenied(false);
+                            setNodesAccessTechnicalSummary(null);
+                            nodesManualRefreshToastRef.current = true;
+                            setNodesListSort(null);
+                            setNodesListNonce((n) => n + 1);
                           }
                         }}
                         style={{
@@ -4115,7 +4809,9 @@ export const App: React.FC = () => {
                       (currentView === "pods" ||
                         currentView === "deployments" ||
                         currentView === "statefulsets" ||
-                        currentView === "ingresses") &&
+                        currentView === "ingresses" ||
+                        currentView === "services" ||
+                        currentView === "persistentvolumeclaims") &&
                       showServerClockSkewHint && (
                         <span
                           title={`本地与服务端时间偏差约 ${Math.abs(serverClockSkewMs)}ms`}
@@ -4191,6 +4887,25 @@ export const App: React.FC = () => {
                         当前范围内存在非健康 Ingress，可按「状态」列排序；展开行查看规则与后端，并可跳转 Service / Pods。
                       </span>
                     )}
+                    {!applyingSelection && currentView === "persistentvolumeclaims" && hasRiskyPvcs && (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          color: "#f87171",
+                          marginLeft: 12,
+                          fontWeight: 700,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
+                        }}
+                      >
+                        <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
+                          ⚠
+                        </span>
+                        当前范围内存在未就绪或异常的 PVC，可按「状态」排序后点击 Name 打开 Describe 核对绑定与关联 Pod。
+                      </span>
+                    )}
                     {!applyingSelection && currentView === "services" && hasRiskyServices && (
                       <span
                         style={{
@@ -4219,7 +4934,11 @@ export const App: React.FC = () => {
                         ? "按 Name / Host 关键字过滤"
                         : currentView === "services"
                           ? "按 Service 名称过滤"
-                          : "按 Name 关键字过滤"
+                          : currentView === "persistentvolumeclaims"
+                            ? "按 PVC 名称过滤"
+                            : currentView === "nodes"
+                              ? "按 Node 名称过滤"
+                              : "按 Name 关键字过滤"
                     }
                     style={{ minWidth: 160 }}
                     inputStyle={{
@@ -4358,22 +5077,6 @@ export const App: React.FC = () => {
                         const healthLabel = p.healthLabel || "健康";
                         const reasonsText = (p.healthReasons || []).join("；");
                         const podRowSelectKey = nsNameRowKey(p.metadata.namespace, p.metadata.name);
-                        let healthBg = "rgba(22,163,74,0.15)";
-                        let healthBorder = "rgba(22,163,74,0.6)";
-                        let healthColor = "#bbf7d0";
-                        if (healthLabel === "关注") {
-                          healthBg = "rgba(202,138,4,0.18)";
-                          healthBorder = "rgba(234,179,8,0.7)";
-                          healthColor = "#facc15";
-                        } else if (healthLabel === "警告") {
-                          healthBg = "rgba(249,115,22,0.2)";
-                          healthBorder = "rgba(249,115,22,0.75)";
-                          healthColor = "#fed7aa";
-                        } else if (healthLabel === "严重") {
-                          healthBg = "rgba(185,28,28,0.25)";
-                          healthBorder = "rgba(248,113,113,0.85)";
-                          healthColor = "#fecaca";
-                        }
                           return (
                           <tr
                             key={p.metadata.uid}
@@ -4438,26 +5141,11 @@ export const App: React.FC = () => {
                             <td style={baseCellNoWrap} title={node}>{node}</td>
                             <td style={baseCellNoWrap} title={age}>{age}</td>
                             <td style={baseCellNoWrap}>
-                              <span
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  padding: "2px 8px",
-                                  borderRadius: 999,
-                                  backgroundColor: healthBg,
-                                  border: `1px solid ${healthBorder}`,
-                                  color: healthColor,
-                                  fontSize: 11,
-                                  maxWidth: "100%",
-                                  boxSizing: "border-box",
-                                  cursor: reasonsText ? "default" : "inherit",
-                                }}
-                                title={reasonsText || undefined}
-                              >
-                                {healthLabel}
-                              </span>
+                              <PodHealthPill label={healthLabel} title={reasonsText || undefined} />
                             </td>
-                            <td style={baseCellNoWrap} title={statusText}>{statusText}</td>
+                            <td style={baseCellNoWrap}>
+                              <PodListStatusPill text={statusText} />
+                            </td>
                             <td style={baseCellNoWrap}>{restarts}</td>
                             <td style={baseCellNoWrap}>{containerCount}</td>
                             <td style={{ ...tdStyle, overflow: "visible" }}>
@@ -6292,6 +6980,84 @@ export const App: React.FC = () => {
                     deleteServiceApi={deleteService}
                   />
                 </>
+              ) : currentView === "persistentvolumeclaims" ? (
+                <>
+                  <PVCListTable
+                    sortedRows={sortedPvcs as PvcListRow[]}
+                    pvcLoading={pvcLoading}
+                    listSort={pvcsListSort}
+                    setListSort={setPvcsListSort}
+                    columnWidths={pvcColumnWidths}
+                    beginResize={beginResizePvc}
+                    totalWidth={pvcTableTotalWidth}
+                    pods={pods}
+                    listAgeNow={listAgeNow}
+                    effectiveClusterId={effectiveClusterId}
+                    menuOpenKey={pvcMenuOpenKey}
+                    setMenuOpenKey={setPvcMenuOpenKey}
+                    rowBusyKey={pvcRowBusyKey}
+                    setRowBusyKey={setPvcRowBusyKey}
+                    openDescribe={openDescribeForPvc}
+                    openEditTab={openEditPvcTab}
+                    copyName={copyName}
+                    setActionConfirm={setActionConfirm}
+                    onDeletedOne={(ns, name) => {
+                      setPvcItems((prev) =>
+                        prev.filter(
+                          (it) => !((it.metadata?.namespace ?? "") === ns && it.metadata?.name === name),
+                        ),
+                      );
+                    }}
+                    setToastMessage={setToastMessage}
+                    setError={setError}
+                    deletePvcApi={deletePvc}
+                  />
+                </>
+              ) : currentView === "nodes" ? (
+                <>
+                  {nodesPermissionDenied ? (
+                    <ResourceAccessDeniedState
+                      resourceLabel="Nodes"
+                      title="当前身份无权查看 Nodes"
+                      description={
+                        <>
+                          <p style={{ margin: "0 0 10px" }}>
+                            当前集群身份没有查看 Nodes（集群级资源）的权限。
+                          </p>
+                          <p style={{ margin: "0 0 10px" }}>
+                            如需使用此功能，请联系集群管理员为当前 kubeconfig
+                            授予相应的只读权限（例如对 <code style={{ color: "#cbd5e1" }}>nodes</code>{" "}
+                            资源的 list/get/watch）。
+                          </p>
+                          <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>
+                            Nodes 属于集群级资源，通常需要额外的 RBAC 配置。
+                          </p>
+                        </>
+                      }
+                      technicalSummary={nodesAccessTechnicalSummary ?? undefined}
+                    />
+                  ) : (
+                    <NodesListTable
+                      sortedRows={sortedNodes as NodeListRow[]}
+                      nodesLoading={nodeLoading}
+                      listSort={nodesListSort}
+                      setListSort={setNodesListSort}
+                      columnWidths={nodeColumnWidths}
+                      beginResize={beginResizeNode}
+                      totalWidth={nodeTableTotalWidth}
+                      pods={pods}
+                      listAgeNow={listAgeNow}
+                      effectiveClusterId={effectiveClusterId}
+                      menuOpenKey={nodeMenuOpenKey}
+                      setMenuOpenKey={setNodeMenuOpenKey}
+                      rowBusyKey={nodeRowBusyKey}
+                      setRowBusyKey={setNodeRowBusyKey}
+                      openDescribe={openDescribeForNode}
+                      openEditTab={openEditNodeTab}
+                      copyName={copyName}
+                    />
+                  )}
+                </>
               ) : (
                 <ResourceTable
                   title=""
@@ -6328,6 +7094,12 @@ export const App: React.FC = () => {
           }
           if (tab.yamlKind === "service" && result) {
             setServiceItems((prev) => mergeDeploymentIntoList(prev, result));
+          }
+          if (tab.yamlKind === "pvc" && result) {
+            setPvcItems((prev) => mergeDeploymentIntoList(prev, result));
+          }
+          if (tab.yamlKind === "node" && result) {
+            setNodeItems((prev) => mergeDeploymentIntoList(prev, result));
           }
         }}
       />
@@ -6412,8 +7184,15 @@ export const App: React.FC = () => {
                         ? "Ingress"
                         : describeTarget.kind === "service"
                           ? "Service"
-                          : "Pod"}
-                  : {describeTarget.namespace}/{describeTarget.name}
+                          : describeTarget.kind === "pvc"
+                            ? "PersistentVolumeClaim"
+                            : describeTarget.kind === "node"
+                              ? "Node"
+                              : "Pod"}
+                  :{" "}
+                  {describeTarget.kind === "node"
+                    ? describeTarget.name
+                    : `${describeTarget.namespace}/${describeTarget.name}`}
                 </span>
                 {describeError && (
                   <span style={{ fontSize: 12, color: "#f97373", marginTop: 2 }}>错误：{describeError}</span>
@@ -6422,7 +7201,13 @@ export const App: React.FC = () => {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button
                   type="button"
-                  onClick={() => copyName(`${describeTarget.namespace}/${describeTarget.name}`)}
+                  onClick={() =>
+                    copyName(
+                      describeTarget.kind === "node"
+                        ? describeTarget.name
+                        : `${describeTarget.namespace}/${describeTarget.name}`,
+                    )
+                  }
                   style={{
                     padding: "2px 6px",
                     borderRadius: 4,
@@ -6432,7 +7217,9 @@ export const App: React.FC = () => {
                     cursor: "pointer",
                     fontSize: 12,
                   }}
-                  title="复制 Namespace/资源名称"
+                  title={
+                    describeTarget.kind === "node" ? "复制节点名称" : "复制 Namespace/资源名称"
+                  }
                 >
                   复制
                 </button>
@@ -6607,6 +7394,30 @@ export const App: React.FC = () => {
                   onJumpPods={jumpServiceToPods}
                   onJumpIngress={jumpServiceToIngress}
                   onCopyName={copyName}
+                />
+              )}
+              {!describeLoading && describeTarget.kind === "pvc" && (
+                <PvcDescribeContent
+                  view={describePvcData?.view}
+                  events={describePvcData?.events ?? []}
+                  ageLabel={formatAgeFromMetadata(
+                    { creationTimestamp: describePvcData?.view?.creationTimestamp },
+                    listAgeNow,
+                  )}
+                  pods={pods}
+                  onCopyName={copyName}
+                  onJumpPods={jumpServiceToPods}
+                />
+              )}
+              {!describeLoading && describeTarget.kind === "node" && (
+                <NodeDescribeContent
+                  view={describeNodeData?.view}
+                  events={describeNodeData?.events ?? []}
+                  ageLabel={formatAgeFromMetadata(
+                    { creationTimestamp: describeNodeData?.view?.creationTimestamp },
+                    listAgeNow,
+                  )}
+                  pods={pods}
                 />
               )}
             </div>

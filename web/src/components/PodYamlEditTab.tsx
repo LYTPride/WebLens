@@ -10,6 +10,10 @@ import {
   fetchPodYaml,
   fetchServiceYaml,
   fetchStatefulSetYaml,
+  fetchPvcYaml,
+  applyPvcYaml,
+  fetchNodeYaml,
+  applyNodeYaml,
 } from "../api";
 import { ClearableSearchInput } from "./ClearableSearchInput";
 import { YamlMonacoEditor, type YamlMonacoEditorHandle } from "./YamlMonacoEditor";
@@ -19,7 +23,7 @@ interface PodYamlEditTabProps {
   namespace: string;
   podName: string;
   /** 默认 Pod；Deployment 时与 podName 传部署名称 */
-  yamlKind?: "pod" | "deployment" | "statefulset" | "ingress" | "service";
+  yamlKind?: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "node";
   onClose: () => void;
   /** Deployment 保存时传入 API 返回的 JSON 对象，便于列表局部更新 */
   onSaved?: (result?: unknown) => void;
@@ -58,7 +62,11 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               ? await fetchIngressYaml(clusterId, namespace, podName)
               : yamlKind === "service"
                 ? await fetchServiceYaml(clusterId, namespace, podName)
-                : await fetchPodYaml(clusterId, namespace, podName);
+                : yamlKind === "pvc"
+                  ? await fetchPvcYaml(clusterId, namespace, podName)
+                  : yamlKind === "node"
+                    ? await fetchNodeYaml(clusterId, podName)
+                    : await fetchPodYaml(clusterId, namespace, podName);
       setYaml(text);
       setInitialYaml(text);
     } catch (e: unknown) {
@@ -141,6 +149,18 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         const data = await applyIngressYaml(clusterId, namespace, podName, yaml);
         setInitialYaml(yaml);
         onSaved?.(data);
+      } else if (yamlKind === "service") {
+        const data = await applyServiceYaml(clusterId, namespace, podName, yaml);
+        setInitialYaml(yaml);
+        onSaved?.(data);
+      } else if (yamlKind === "pvc") {
+        const data = await applyPvcYaml(clusterId, namespace, podName, yaml);
+        setInitialYaml(yaml);
+        onSaved?.(data);
+      } else if (yamlKind === "node") {
+        const data = await applyNodeYaml(clusterId, podName, yaml);
+        setInitialYaml(yaml);
+        onSaved?.(data);
       } else {
         await applyPodYaml(clusterId, namespace, podName, yaml);
         setInitialYaml(yaml);
@@ -203,10 +223,14 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
                   ? "Ingress"
                   : yamlKind === "service"
                     ? "Service"
-                    : "Pod"}
+                    : yamlKind === "pvc"
+                      ? "PersistentVolumeClaim"
+                      : yamlKind === "node"
+                        ? "Node"
+                        : "Pod"}
           </span>
           <span>Name: {podName}</span>
-          <span>Namespace: {namespace}</span>
+          <span>Namespace: {yamlKind === "node" ? "—（集群级）" : namespace}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <ClearableSearchInput

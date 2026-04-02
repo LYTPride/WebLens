@@ -293,6 +293,66 @@ export interface ServiceDescribe {
   events: K8sEvent[];
 }
 
+/** PVC 结构化 Describe（与后端 PvcDescribeView 对齐） */
+export interface PvcDescribeView {
+  name: string;
+  namespace: string;
+  statusPhase: string;
+  volumeName: string;
+  storageClass: string;
+  creationTimestamp?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  requestedStorage: string;
+  capacity: string;
+  accessModes: string;
+  volumeMode: string;
+  isTerminating: boolean;
+}
+
+export interface PvcDescribe {
+  view: PvcDescribeView;
+  events: K8sEvent[];
+}
+
+/** Node Describe（与后端 NodeDescribeView 对齐） */
+export interface NodeConditionRowView {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface NodeDescribeView {
+  name: string;
+  statusDisplay: string;
+  roles: string;
+  kubeletVersion: string;
+  creationTimestamp?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  internalIP: string;
+  hostname: string;
+  otherAddresses?: string[];
+  cpuCapacity: string;
+  memoryCapacity: string;
+  ephemeralStorage: string;
+  maxPods: string;
+  allocatableCPU: string;
+  allocatableMemory: string;
+  unschedulable: boolean;
+  taints?: string[];
+  conditions?: NodeConditionRowView[];
+  osImage: string;
+  kernelVersion: string;
+  containerRuntime: string;
+}
+
+export interface NodeDescribe {
+  view: NodeDescribeView;
+  events: K8sEvent[];
+}
+
 export interface ClusterCombo {
   id: string;
   clusterId: string;
@@ -706,6 +766,11 @@ export function watchResourceList<T = any>(
     onEvent: (ev: ResourceWatchEvent<T>) => void;
     onError?: (err: Error) => void;
     onConnectionEstablished?: () => void;
+    /**
+     * 返回 false 时不自动重连（用于 401/403 等永久型失败，避免刷屏重试）。
+     * httpStatus 来自响应或 Error.message 中的 HTTP nnn（无则 undefined）。
+     */
+    shouldReconnect?: (err: Error, httpStatus: number | undefined) => boolean;
   },
 ): () => void {
   const base = typeof window !== "undefined" ? window.location.origin : "";
@@ -730,6 +795,7 @@ export function watchResourceList<T = any>(
 
   const connect = () => {
     if (cancelled) return;
+    let suppressReconnect = false;
     fetchAbort = new AbortController();
     fetch(url.toString(), { signal: fetchAbort.signal })
       .then(async (res) => {
@@ -754,10 +820,16 @@ export function watchResourceList<T = any>(
       .catch((err: Error) => {
         if (err?.name === "AbortError" || cancelled) return;
         opts.onError?.(err);
+        const httpMatch = /HTTP (\d{3})/.exec(err.message || "");
+        const httpStatus = httpMatch ? parseInt(httpMatch[1], 10) : undefined;
+        if (opts.shouldReconnect && opts.shouldReconnect(err, httpStatus) === false) {
+          suppressReconnect = true;
+        }
       })
       .finally(() => {
         if (cancelled) return;
         clearReconnect();
+        if (suppressReconnect) return;
         reconnectTimer = setTimeout(connect, 600);
       });
   };
@@ -1134,6 +1206,69 @@ export async function deleteService(
   );
 }
 
+export async function fetchPvcDescribe(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<PvcDescribe> {
+  const res = await api.get<PvcDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/persistentvolumeclaims/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/describe`,
+  );
+  return res.data;
+}
+
+export async function fetchPvcYaml(clusterId: string, namespace: string, name: string): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/persistentvolumeclaims/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+export async function applyPvcYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  yamlBody: string,
+): Promise<unknown> {
+  const res = await api.put(
+    `/api/clusters/${encodeURIComponent(clusterId)}/persistentvolumeclaims/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
+  return res.data;
+}
+
+export async function deletePvc(clusterId: string, namespace: string, name: string): Promise<void> {
+  await api.delete(
+    `/api/clusters/${encodeURIComponent(clusterId)}/persistentvolumeclaims/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+  );
+}
+
+export async function fetchNodeDescribe(clusterId: string, name: string): Promise<NodeDescribe> {
+  const res = await api.get<NodeDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/nodes/${encodeURIComponent(name)}/describe`,
+  );
+  return res.data;
+}
+
+export async function fetchNodeYaml(clusterId: string, name: string): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/nodes/${encodeURIComponent(name)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+export async function applyNodeYaml(clusterId: string, name: string, yamlBody: string): Promise<unknown> {
+  const res = await api.put(
+    `/api/clusters/${encodeURIComponent(clusterId)}/nodes/${encodeURIComponent(name)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
+  return res.data;
+}
+
 /** 通用：按资源路径拉取 items（用于 Deployments / StatefulSets / ...） */
 export async function fetchResourceList<T = unknown>(
   clusterId: string,
@@ -1159,6 +1294,7 @@ export type ResourceKind =
   | "secrets"
   | "services"
   | "ingresses"
+  | "persistentvolumeclaims"
   /** 仅内部用于 Services 页关联 watch，不出现在侧栏 */
   | "endpoints"
   | "nodes"

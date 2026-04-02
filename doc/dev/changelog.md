@@ -4,6 +4,19 @@
 
 ## 2026-03（近期）
 
+### Nodes 与资源级「无权限」优雅降级（可复用）
+
+- **背景**：部分 kubeconfig / ServiceAccount 无集群级 `nodes` 的 list/watch 权限时，原先整页 `setError` 或原始报错体验较差。
+- **产品行为**：侧栏 **保留 Nodes**；有权限时列表与 Watch 不变；无权限时主区域展示 **`ResourceAccessDeniedState`**（深色卡片、人话说明、可选折叠「技术摘要」），**不**把大段原始错误作为主内容。
+- **前端实现要点**：
+  - 通用组件：`web/src/components/ResourceAccessDeniedState.tsx`
+  - 错误归类：`web/src/utils/k8sAccessErrors.ts`（`isK8sAccessDeniedError`、`k8sAccessDeniedSummary` 等）
+  - 按集群 + 资源键的轻量缓存：`web/src/utils/resourceAccessCache.ts`（Nodes 使用 `resourceKey: "nodes"`），避免同集群反复打接口与刷错
+  - **Watch**：`web/src/api.ts` 中 `watchResourceList` 增加可选 **`shouldReconnect`**；401/403 等访问拒绝时 **不重连**，避免刷屏
+  - 编排与 Nodes 分支：`web/src/pages/App.tsx`（list 成功写 `granted`、拒绝写 `denied`；「刷新列表」对 Nodes 调用 `clearResourceAccessDecision` 后重试）
+- **后续资源复用**：为新资源选定 `resourceKey`，在 list/watch 失败分支调用同一套 `isK8sAccessDeniedError` + 缓存 + `ResourceAccessDeniedState`，并为 watch 传入 `shouldReconnect` 策略即可。
+- **用户文档**：`doc/guide/resource-lists.md`「Nodes 与访问权限」。
+
 ### Ingress / Services 与跨资源联动 UI
 
 - **后端**：`server/internal/httpapi/ingress_ops.go`、`service_ops.go` 等，提供 Ingress / Service 结构化 describe 与列表相关能力（与 `resources.go` 协同）；详见各文件注释与 `web/src/api.ts` 类型。
