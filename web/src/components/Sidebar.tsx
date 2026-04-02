@@ -30,6 +30,10 @@ const MENU: { title: string; items: { id: ResourceKind; label: string }[] }[] = 
     ],
   },
   {
+    title: "存储",
+    items: [{ id: "persistentvolumeclaims", label: "Persistent Volume Claims" }],
+  },
+  {
     title: "集群",
     items: [
       { id: "nodes", label: "Nodes" },

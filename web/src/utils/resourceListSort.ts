@@ -59,6 +59,142 @@ export function isServiceSortableColumnKey(key: string): key is ServiceSortKey {
   return (SERVICE_SORT_KEYS as readonly string[]).includes(key);
 }
 
+/** PVC 表可排序列 */
+export const PVC_SORT_KEYS = [
+  "name",
+  "namespace",
+  "status",
+  "volume",
+  "capacity",
+  "storageClass",
+  "usedBy",
+  "age",
+] as const;
+export type PvcSortKey = (typeof PVC_SORT_KEYS)[number];
+
+export function isPvcSortableColumnKey(key: string): key is PvcSortKey {
+  return (PVC_SORT_KEYS as readonly string[]).includes(key);
+}
+
+export type PvcSortRow = {
+  metadata: { name: string; namespace?: string; creationTimestamp?: string };
+};
+
+export type PvcSortStats = {
+  statusRank: number;
+  volume: string;
+  capacity: string;
+  storageClass: string;
+  usedByCount: number;
+};
+
+export function comparePvcsForSort(
+  a: PvcSortRow,
+  b: PvcSortRow,
+  key: PvcSortKey,
+  getStats: (row: PvcSortRow) => PvcSortStats,
+  nowMs: number = Date.now(),
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  switch (key) {
+    case "name":
+      return a.metadata.name.localeCompare(b.metadata.name, undefined, { sensitivity: "base", numeric: true });
+    case "namespace":
+      return (a.metadata.namespace || "").localeCompare(b.metadata.namespace || "", undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+    case "status":
+      return sa.statusRank - sb.statusRank;
+    case "volume":
+      return sa.volume.localeCompare(sb.volume, undefined, { sensitivity: "base", numeric: true });
+    case "capacity":
+      return sa.capacity.localeCompare(sb.capacity, undefined, { sensitivity: "base", numeric: true });
+    case "storageClass":
+      return sa.storageClass.localeCompare(sb.storageClass, undefined, { sensitivity: "base", numeric: true });
+    case "usedBy":
+      return sa.usedByCount - sb.usedByCount;
+    case "age": {
+      const tsa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const tsb = creationTimestampToAgeSeconds(b.metadata, nowMs);
+      if (tsa === null && tsb === null) return 0;
+      if (tsa === null) return 1;
+      if (tsb === null) return -1;
+      return tsa - tsb;
+    }
+    default:
+      return 0;
+  }
+}
+
+/** Nodes 表可排序列 */
+export const NODE_SORT_KEYS = [
+  "name",
+  "status",
+  "roles",
+  "version",
+  "internalIP",
+  "pods",
+  "cpuMemory",
+  "age",
+] as const;
+export type NodeSortKey = (typeof NODE_SORT_KEYS)[number];
+
+export function isNodeSortableColumnKey(key: string): key is NodeSortKey {
+  return (NODE_SORT_KEYS as readonly string[]).includes(key);
+}
+
+export type NodeSortRow = {
+  metadata: { name: string; creationTimestamp?: string };
+};
+
+export type NodeSortStats = {
+  statusRank: number;
+  roles: string;
+  version: string;
+  internalIP: string;
+  podsCount: number;
+  cpuMemory: string;
+};
+
+export function compareNodesForSort(
+  a: NodeSortRow,
+  b: NodeSortRow,
+  key: NodeSortKey,
+  getStats: (row: NodeSortRow) => NodeSortStats,
+  nowMs: number = Date.now(),
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  switch (key) {
+    case "name":
+      return a.metadata.name.localeCompare(b.metadata.name, undefined, { sensitivity: "base", numeric: true });
+    case "status":
+      return sa.statusRank - sb.statusRank;
+    case "roles":
+      return sa.roles.localeCompare(sb.roles, undefined, { sensitivity: "base", numeric: true });
+    case "version":
+      return sa.version.localeCompare(sb.version, undefined, { sensitivity: "base", numeric: true });
+    case "internalIP":
+      return sa.internalIP.localeCompare(sb.internalIP, undefined, { sensitivity: "base", numeric: true });
+    case "pods":
+      return sa.podsCount - sb.podsCount;
+    case "cpuMemory":
+      return sa.cpuMemory.localeCompare(sb.cpuMemory, undefined, { sensitivity: "base", numeric: true });
+    case "age": {
+      const tsa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const tsb = creationTimestampToAgeSeconds(b.metadata, nowMs);
+      if (tsa === null && tsb === null) return 0;
+      if (tsa === null) return 1;
+      if (tsb === null) return -1;
+      return tsa - tsb;
+    }
+    default:
+      return 0;
+  }
+}
+
 export type ServiceSortRow = {
   metadata: { name: string; namespace?: string; creationTimestamp?: string };
   spec?: { type?: string };
