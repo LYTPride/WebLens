@@ -16,7 +16,7 @@ export interface PanelTab {
   /** 该 Pod 的容器列表（用于 Logs 容器下拉） */
   containers: string[];
   /** edit 标签：YAML 资源类型，默认 pod */
-  yamlKind?: "pod" | "deployment" | "statefulset";
+  yamlKind?: "pod" | "deployment" | "statefulset" | "ingress" | "service";
 }
 
 interface BottomPanelProps {
@@ -260,7 +260,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   : t.type === "logs"
                     ? `Logs: ${t.title}`
                     : t.type === "edit"
-                      ? `${t.yamlKind === "deployment" ? "Deployment" : t.yamlKind === "statefulset" ? "StatefulSet" : "Pod"}: ${t.pod}`
+                      ? `${t.yamlKind === "deployment" ? "Deployment" : t.yamlKind === "statefulset" ? "StatefulSet" : t.yamlKind === "ingress" ? "Ingress" : t.yamlKind === "service" ? "Service" : "Pod"}: ${t.pod}`
                       : t.title}
               </span>
               <button

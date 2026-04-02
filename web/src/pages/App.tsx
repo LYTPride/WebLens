@@ -28,10 +28,16 @@ import {
   restartDeployment,
   deleteDeployment,
   fetchStatefulSetDescribe,
+  fetchIngressDescribe,
+  fetchServiceDescribe,
   type StatefulSetDescribe,
+  type IngressDescribe,
+  type ServiceDescribe,
   scaleStatefulSet,
   restartStatefulSet,
   deleteStatefulSet,
+  deleteIngress,
+  deleteService,
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
 import { ResourceTable, type Column } from "../components/ResourceTable";
@@ -43,16 +49,43 @@ import {
   comparePodsForSort,
   compareDeploymentsForSort,
   compareStatefulSetsForSort,
+  compareIngressesForSort,
+  compareServicesForSort,
   isPodSortableColumnKey,
   isDeploymentSortableColumnKey,
   isStatefulSetSortableColumnKey,
+  isIngressSortableColumnKey,
+  isServiceSortableColumnKey,
   buildStatefulSetSortStats,
   type ResourceListSortState,
   type PodSortKey,
   type DeploymentSortKey,
   type StatefulSetSortKey,
   type StatefulSetSortRow,
+  type IngressSortKey,
+  type IngressSortStats,
+  type ServiceSortKey,
+  type ServiceSortRow,
+  type ServiceSortStats,
 } from "../utils/resourceListSort";
+import {
+  deriveIngressListSummary,
+  ingressMatchesNameOrHostFilter,
+} from "../utils/ingressTable";
+import {
+  buildIngressTroubleshoot,
+  buildIngressTroubleshootFromDescribeView,
+} from "../utils/ingressTroubleshoot";
+import { buildServiceListDiagnostics, formatEndpointColumnSummary } from "../utils/serviceTroubleshoot";
+import {
+  deriveServiceEndpointExpandRows,
+  deriveServicePortExpandRows,
+  formatServiceClusterIP,
+  formatServicePortsSummary,
+  formatServiceSelectorSummary,
+  serviceMatchesNameFilter,
+  type ServiceListRow,
+} from "../utils/serviceTable";
 import {
   podsOwnedByStatefulSet,
   ordinalFromStsPodName,
@@ -81,8 +114,13 @@ import { useFocusInputWhenOpen } from "../hooks/useFocusInputWhenOpen";
 import { DescribeEventsSection } from "../components/describe/DescribeEventsSection";
 import { DeploymentDescribeContent } from "../components/describe/DeploymentDescribeContent";
 import { StatefulSetDescribeContent } from "../components/describe/StatefulSetDescribeContent";
+import { IngressDescribeContent } from "../components/describe/IngressDescribeContent";
+import { ServiceDescribeContent } from "../components/describe/ServiceDescribeContent";
+import { ServicesListTable } from "../components/ServicesListTable";
+import { ResourceJumpChip } from "../components/ResourceJumpChip";
+import { ResourceNameWithCopy } from "../components/ResourceNameWithCopy";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { useColumnResize } from "../hooks/useColumnResize";
+import { useResourceListColumnResize } from "../resourceList/useResourceListColumnResize";
 import { useSortedRowPositionChangeHighlight } from "../hooks/useSortedRowPositionChangeHighlight";
 import { useNowTick } from "../hooks/useNowTick";
 import { applyK8sNamespacedWatchEvent, applyPodWatchEvent } from "../resourceList/watchEventReducer";
@@ -208,6 +246,130 @@ function stsColumnMinWidth(key: string): number {
   return m[key] ?? MIN_COL_WIDTH;
 }
 
+const INGRESS_COLUMN_KEYS = [
+  "name",
+  "namespace",
+  "hosts",
+  "paths",
+  "backends",
+  "health",
+  "summary",
+  "age",
+  "actions",
+] as const;
+
+const INGRESS_COLUMN_DEFAULTS: Record<(typeof INGRESS_COLUMN_KEYS)[number], number> = {
+  name: 200,
+  namespace: 100,
+  hosts: 152,
+  paths: 56,
+  backends: 72,
+  health: 88,
+  summary: 200,
+  age: 80,
+  actions: 84,
+};
+
+function ingressColumnMinWidth(key: string): number {
+  const m: Record<string, number> = {
+    name: 120,
+    namespace: 72,
+    hosts: 96,
+    paths: 48,
+    backends: 56,
+    health: 72,
+    summary: 120,
+    age: 56,
+    actions: 52,
+  };
+  return m[key] ?? MIN_COL_WIDTH;
+}
+
+const INGRESS_COLUMN_LABELS: Record<(typeof INGRESS_COLUMN_KEYS)[number], string> = {
+  name: "Name",
+  namespace: "Namespace",
+  hosts: "Hosts",
+  paths: "Rules",
+  backends: "Backends",
+  health: "状态",
+  summary: "异常摘要",
+  age: "存活时间",
+  actions: "操作",
+};
+
+const INGRESS_COLUMN_SORT: Partial<Record<(typeof INGRESS_COLUMN_KEYS)[number], IngressSortKey>> = {
+  name: "name",
+  hosts: "hosts",
+  paths: "paths",
+  backends: "backends",
+  health: "health",
+  age: "age",
+};
+
+const SERVICE_COLUMN_KEYS = [
+  "name",
+  "namespace",
+  "type",
+  "clusterIP",
+  "ports",
+  "selector",
+  "endpoints",
+  "health",
+  "age",
+  "actions",
+] as const;
+
+const SERVICE_COLUMN_DEFAULTS: Record<(typeof SERVICE_COLUMN_KEYS)[number], number> = {
+  name: 200,
+  namespace: 100,
+  type: 100,
+  clusterIP: 120,
+  ports: 100,
+  selector: 160,
+  endpoints: 120,
+  health: 88,
+  age: 80,
+  actions: 84,
+};
+
+function serviceColumnMinWidth(key: string): number {
+  const m: Record<string, number> = {
+    name: 120,
+    namespace: 72,
+    type: 72,
+    clusterIP: 88,
+    ports: 72,
+    selector: 100,
+    endpoints: 88,
+    health: 72,
+    age: 56,
+    actions: 52,
+  };
+  return m[key] ?? MIN_COL_WIDTH;
+}
+
+const SERVICE_COLUMN_LABELS: Record<(typeof SERVICE_COLUMN_KEYS)[number], string> = {
+  name: "Name",
+  namespace: "Namespace",
+  type: "Type",
+  clusterIP: "Cluster IP",
+  ports: "Ports",
+  selector: "Selector",
+  endpoints: "Endpoints / 状态",
+  health: "状态",
+  age: "存活时间",
+  actions: "操作",
+};
+
+const SERVICE_COLUMN_SORT: Partial<Record<(typeof SERVICE_COLUMN_KEYS)[number], ServiceSortKey>> = {
+  name: "name",
+  namespace: "namespace",
+  type: "type",
+  endpoints: "endpoints",
+  health: "health",
+  age: "age",
+};
+
 function mergeDeploymentIntoList(items: K8sItem[], updated: unknown): K8sItem[] {
   const u = updated as K8sItem;
   if (!u?.metadata?.name) return items;
@@ -282,12 +444,23 @@ type StatefulSetRow = K8sItem & {
   };
 };
 
+/** Ingress 列表行（spec 形状由 networking.k8s.io/v1 决定，此处保持宽松） */
+type IngressRow = K8sItem & {
+  metadata: K8sItem["metadata"] & { creationTimestamp?: string };
+  spec?: Record<string, unknown>;
+};
+
 /** 排序位移追踪 / 高亮用行 id（与表格行 key 策略一致） */
 function podTableSortRowId(p: Pod): string {
   return p.metadata.uid;
 }
 
 function deploymentTableSortRowId(row: K8sItem): string {
+  const m = row.metadata;
+  return (m.uid as string) || `${m.namespace ?? ""}/${m.name}`;
+}
+
+function serviceTableSortRowId(row: K8sItem): string {
   const m = row.metadata;
   return (m.uid as string) || `${m.namespace ?? ""}/${m.name}`;
 }
@@ -381,9 +554,18 @@ export const App: React.FC = () => {
   /** Deployments 专用列表（与其它通用 resourceItems 隔离，便于 Pods ⇄ Deployments 切换时缓存） */
   const [deploymentItems, setDeploymentItems] = useState<K8sItem[]>([]);
   const [statefulsetItems, setStatefulsetItems] = useState<K8sItem[]>([]);
+  const [ingressItems, setIngressItems] = useState<K8sItem[]>([]);
+  const [serviceItems, setServiceItems] = useState<K8sItem[]>([]);
+  const [serviceEndpointItems, setServiceEndpointItems] = useState<K8sItem[]>([]);
+  /** Ingress 排障：同作用域 Service 列表（仅 Ingress 视图拉取 + watch，与通用 resourceItems 隔离） */
+  const [ingressAuxServices, setIngressAuxServices] = useState<K8sItem[]>([]);
+  const ingressAuxWatchCancelRef = useRef<(() => void) | null>(null);
+  const endpointsWatchCancelRef = useRef<(() => void) | null>(null);
   const [resourceLoading, setResourceLoading] = useState(false);
   const [deploymentLoading, setDeploymentLoading] = useState(false);
   const [statefulsetLoading, setStatefulsetLoading] = useState(false);
+  const [ingressLoading, setIngressLoading] = useState(false);
+  const [serviceLoading, setServiceLoading] = useState(false);
   const [serverClockSnapshot, setServerClockSnapshot] = useState<ServerClockSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   /** 正在应用新的集群/命名空间选择，用于全局 loading 提示 */
@@ -436,6 +618,8 @@ export const App: React.FC = () => {
   const [podsListNonce, setPodsListNonce] = useState(0);
   const [deploymentsListNonce, setDeploymentsListNonce] = useState(0);
   const [statefulsetsListNonce, setStatefulsetsListNonce] = useState(0);
+  const [ingressesListNonce, setIngressesListNonce] = useState(0);
+  const [servicesListNonce, setServicesListNonce] = useState(0);
   /** Deployment / StatefulSet Scale 弹窗 */
   const [deployScaleModal, setDeployScaleModal] = useState<{
     namespace: string;
@@ -468,6 +652,12 @@ export const App: React.FC = () => {
   /** Deployment 行上异步操作（restart/delete） */
   const [deploymentRowBusyKey, setDeploymentRowBusyKey] = useState<string | null>(null);
   const [statefulsetRowBusyKey, setStatefulsetRowBusyKey] = useState<string | null>(null);
+  const [ingressRowBusyKey, setIngressRowBusyKey] = useState<string | null>(null);
+  const [ingressMenuOpenKey, setIngressMenuOpenKey] = useState<string | null>(null);
+  const [expandedIngressKeys, setExpandedIngressKeys] = useState<Set<string>>(() => new Set());
+  const [serviceRowBusyKey, setServiceRowBusyKey] = useState<string | null>(null);
+  const [serviceMenuOpenKey, setServiceMenuOpenKey] = useState<string | null>(null);
+  const [expandedServiceKeys, setExpandedServiceKeys] = useState<Set<string>>(() => new Set());
   const [expandedStatefulSetKeys, setExpandedStatefulSetKeys] = useState<Set<string>>(() => new Set());
   /** 列表区按 Name 关键字搜索（Pods / Deployments / Ingresses 等共用） */
   const [nameFilter, setNameFilter] = useState("");
@@ -475,31 +665,54 @@ export const App: React.FC = () => {
   const [podsListSort, setPodsListSort] = useState<ResourceListSortState<PodSortKey>>(null);
   const [deploymentsListSort, setDeploymentsListSort] = useState<ResourceListSortState<DeploymentSortKey>>(null);
   const [statefulsetsListSort, setStatefulsetsListSort] = useState<ResourceListSortState<StatefulSetSortKey>>(null);
-  /** Pod 表列宽（可拖拽调整） */
-  const [podColumnWidths, setPodColumnWidths] = useState<Record<string, number>>(() => ({ ...POD_COLUMN_DEFAULTS }));
-  /** Deployments 表列宽 */
-  const [deployColumnWidths, setDeployColumnWidths] = useState<Record<string, number>>(() => ({
-    ...DEPLOY_COLUMN_DEFAULTS,
-  }));
-  const [stsColumnWidths, setStsColumnWidths] = useState<Record<string, number>>(() => ({ ...STS_COLUMN_DEFAULTS }));
-  const { beginResize: beginResizePod } = useColumnResize(
-    podColumnWidths,
-    setPodColumnWidths,
-    POD_COLUMN_DEFAULTS as Record<string, number>,
-    () => MIN_COL_WIDTH,
-  );
-  const { beginResize: beginResizeDeploy } = useColumnResize(
-    deployColumnWidths,
-    setDeployColumnWidths,
-    DEPLOY_COLUMN_DEFAULTS as Record<string, number>,
-    deployColumnMinWidth,
-  );
-  const { beginResize: beginResizeSts } = useColumnResize(
-    stsColumnWidths,
-    setStsColumnWidths,
-    STS_COLUMN_DEFAULTS as Record<string, number>,
-    stsColumnMinWidth,
-  );
+  const [ingressesListSort, setIngressesListSort] = useState<ResourceListSortState<IngressSortKey>>(null);
+  const [servicesListSort, setServicesListSort] = useState<ResourceListSortState<ServiceSortKey>>(null);
+  /** Pod / Deployments / StatefulSets / Ingresses 表列宽（统一由 useResourceListColumnResize 管理） */
+  const {
+    columnWidths: podColumnWidths,
+    beginResize: beginResizePod,
+    totalDataWidth: podDataColumnsWidth,
+  } = useResourceListColumnResize({
+    columnKeys: POD_COLUMN_KEYS,
+    defaults: POD_COLUMN_DEFAULTS,
+    minWidthForKey: () => MIN_COL_WIDTH,
+  });
+  const {
+    columnWidths: deployColumnWidths,
+    beginResize: beginResizeDeploy,
+    totalDataWidth: deployDataColumnsWidth,
+  } = useResourceListColumnResize({
+    columnKeys: DEPLOY_COLUMN_KEYS,
+    defaults: DEPLOY_COLUMN_DEFAULTS,
+    minWidthForKey: deployColumnMinWidth,
+  });
+  const {
+    columnWidths: stsColumnWidths,
+    beginResize: beginResizeSts,
+    totalDataWidth: stsDataColumnsWidth,
+  } = useResourceListColumnResize({
+    columnKeys: STS_COLUMN_KEYS,
+    defaults: STS_COLUMN_DEFAULTS,
+    minWidthForKey: stsColumnMinWidth,
+  });
+  const {
+    columnWidths: ingressColumnWidths,
+    beginResize: beginResizeIngress,
+    totalDataWidth: ingressDataColumnsWidth,
+  } = useResourceListColumnResize({
+    columnKeys: INGRESS_COLUMN_KEYS,
+    defaults: INGRESS_COLUMN_DEFAULTS,
+    minWidthForKey: ingressColumnMinWidth,
+  });
+  const {
+    columnWidths: serviceColumnWidths,
+    beginResize: beginResizeService,
+    totalDataWidth: serviceDataColumnsWidth,
+  } = useResourceListColumnResize({
+    columnKeys: SERVICE_COLUMN_KEYS,
+    defaults: SERVICE_COLUMN_DEFAULTS,
+    minWidthForKey: serviceColumnMinWidth,
+  });
   /** 用户手动输入并点击「应用」的命名空间，避免 namespaces 接口返回后覆盖导致列表消失 */
   const manualNamespaceRef = useRef<{ clusterId: string; namespace: string } | null>(null);
   /** 当前选中的 cluster/namespace，用于 loadPods 返回时丢弃过期响应 */
@@ -519,14 +732,20 @@ export const App: React.FC = () => {
   const lastPodsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   const lastDeploymentsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   const lastStatefulsetsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
+  const lastIngressesListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
+  const lastServicesListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   /** 「刷新列表」点击后用于在 HTTP 完成时显示成功/失败 toast，避免与普通列表加载混淆 */
   const podsManualRefreshToastRef = useRef(false);
   const deploymentsManualRefreshToastRef = useRef(false);
   const statefulsetsManualRefreshToastRef = useRef(false);
+  const ingressesManualRefreshToastRef = useRef(false);
+  const servicesManualRefreshToastRef = useRef(false);
   /** watch 断线重连 / 可见性恢复时 list 合并补齐的节流（毫秒时间戳） */
   const lastPodsWatchGapFillAtRef = useRef(0);
   const lastDeploymentsWatchGapFillAtRef = useRef(0);
   const lastStsWatchGapFillAtRef = useRef(0);
+  const lastIngressWatchGapFillAtRef = useRef(0);
+  const lastServicesWatchGapFillAtRef = useRef(0);
   const prevPageVisibleForGapFillRef = useRef(
     typeof document === "undefined" ? true : document.visibilityState === "visible",
   );
@@ -535,7 +754,7 @@ export const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   /** Describe 右侧弹层：Pod 或 Deployment */
   const [describeTarget, setDescribeTarget] = useState<{
-    kind: "pod" | "deployment" | "statefulset";
+    kind: "pod" | "deployment" | "statefulset" | "ingress" | "service";
     clusterId: string;
     namespace: string;
     name: string;
@@ -543,6 +762,8 @@ export const App: React.FC = () => {
   const [describePodData, setDescribePodData] = useState<PodDescribe | null>(null);
   const [describeDeploymentData, setDescribeDeploymentData] = useState<DeploymentDescribe | null>(null);
   const [describeStatefulSetData, setDescribeStatefulSetData] = useState<StatefulSetDescribe | null>(null);
+  const [describeIngressData, setDescribeIngressData] = useState<IngressDescribe | null>(null);
+  const [describeServiceData, setDescribeServiceData] = useState<ServiceDescribe | null>(null);
   const [describeLoading, setDescribeLoading] = useState(false);
   const [describeError, setDescribeError] = useState<string | null>(null);
   const [describeWidthRatio, setDescribeWidthRatio] = useState(0.5);
@@ -563,6 +784,8 @@ export const App: React.FC = () => {
     (currentView === "pods" ||
       currentView === "deployments" ||
       currentView === "statefulsets" ||
+      currentView === "ingresses" ||
+      currentView === "services" ||
       describeTarget !== null);
 
   const clientNowTick = useNowTick(1000, listAgeTickActive);
@@ -647,26 +870,45 @@ export const App: React.FC = () => {
     currentViewRef.current = currentView;
   }, [currentView]);
 
+  /** Ingress 辅助 Service list 异步回调用，避免 describe 关闭后仍用陈旧闭包 */
+  const ingressAuxNeededRef = useRef(false);
+  useEffect(() => {
+    ingressAuxNeededRef.current =
+      currentView === "ingresses" || describeTarget?.kind === "ingress";
+  }, [currentView, describeTarget?.kind]);
+
+  /** Services 页 Endpoints watch 用 */
+  const serviceEndpointsNeededRef = useRef(false);
+  useEffect(() => {
+    serviceEndpointsNeededRef.current =
+      currentView === "services" || describeTarget?.kind === "service";
+  }, [currentView, describeTarget?.kind]);
+
   useEffect(() => {
     setPodMenuOpenKey(null);
     setPodMenuSubmenu(null);
     setDeploymentMenuOpenKey(null);
     setStatefulsetMenuOpenKey(null);
+    setIngressMenuOpenKey(null);
+    setServiceMenuOpenKey(null);
   }, [currentView]);
 
   useEffect(() => {
-    if (!podMenuOpenKey && !deploymentMenuOpenKey && !statefulsetMenuOpenKey) return;
+    if (!podMenuOpenKey && !deploymentMenuOpenKey && !statefulsetMenuOpenKey && !ingressMenuOpenKey && !serviceMenuOpenKey)
+      return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setPodMenuOpenKey(null);
         setPodMenuSubmenu(null);
         setDeploymentMenuOpenKey(null);
         setStatefulsetMenuOpenKey(null);
+        setIngressMenuOpenKey(null);
+        setServiceMenuOpenKey(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [podMenuOpenKey, deploymentMenuOpenKey, statefulsetMenuOpenKey]);
+  }, [podMenuOpenKey, deploymentMenuOpenKey, statefulsetMenuOpenKey, ingressMenuOpenKey, serviceMenuOpenKey]);
 
   useEffect(() => {
     activeClusterNsRef.current = { clusterId: effectiveClusterId, namespace: effectiveNamespace };
@@ -748,7 +990,7 @@ export const App: React.FC = () => {
           }
         })
         .finally(() => setDescribeLoading(false));
-    } else {
+    } else if (describeTarget.kind === "statefulset") {
       setDescribeStatefulSetData(null);
       fetchStatefulSetDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
         .then((data) => {
@@ -766,6 +1008,42 @@ export const App: React.FC = () => {
           }
         })
         .finally(() => setDescribeLoading(false));
+    } else if (describeTarget.kind === "ingress") {
+      setDescribeIngressData(null);
+      fetchIngressDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
+        .then((data) => {
+          setDescribeIngressData(data);
+          setDescribeError(null);
+        })
+        .catch((e: any) => {
+          const status = e?.response?.status;
+          const backendMsg = e?.response?.data?.error;
+          if (status === 404) {
+            setDescribeIngressData(null);
+            setDescribeError("Ingress 已不存在或已被删除");
+          } else {
+            setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
+          }
+        })
+        .finally(() => setDescribeLoading(false));
+    } else {
+      setDescribeServiceData(null);
+      fetchServiceDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
+        .then((data) => {
+          setDescribeServiceData(data);
+          setDescribeError(null);
+        })
+        .catch((e: any) => {
+          const status = e?.response?.status;
+          const backendMsg = e?.response?.data?.error;
+          if (status === 404) {
+            setDescribeServiceData(null);
+            setDescribeError("Service 已不存在或已被删除");
+          } else {
+            setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
+          }
+        })
+        .finally(() => setDescribeLoading(false));
     }
   }, [describeTarget]);
 
@@ -775,6 +1053,8 @@ export const App: React.FC = () => {
       setDescribePodData(null);
       setDescribeDeploymentData(null);
       setDescribeStatefulSetData(null);
+      setDescribeIngressData(null);
+      setDescribeServiceData(null);
       setDescribeError(null);
       setDescribeLoading(false);
       return;
@@ -939,6 +1219,105 @@ export const App: React.FC = () => {
     setActivePanelTabId(id);
     setStatefulsetMenuOpenKey(null);
   };
+
+  const openDescribeForIngress = (ing: IngressRow) => {
+    if (!effectiveClusterId) return;
+    setDescribeTarget({
+      kind: "ingress",
+      clusterId: effectiveClusterId,
+      namespace: ing.metadata.namespace ?? "",
+      name: ing.metadata.name,
+    });
+  };
+
+  const openEditIngressTab = (ing: IngressRow) => {
+    if (!effectiveClusterId) return;
+    const ns = ing.metadata.namespace ?? "";
+    const name = ing.metadata.name;
+    const id = `edit-ing-${ns}-${name}`;
+    setPanelTabs((prev) => {
+      const exists = prev.some((t) => t.id === id);
+      if (exists) return prev;
+      const tab: PanelTab = {
+        id,
+        type: "edit",
+        clusterId: effectiveClusterId,
+        namespace: ns,
+        pod: name,
+        container: "",
+        title: `${name} (Ingress)`,
+        containers: [],
+        yamlKind: "ingress",
+      };
+      return [...prev, tab];
+    });
+    setActivePanelTabId(id);
+    setIngressMenuOpenKey(null);
+  };
+
+  const openDescribeForService = (svc: ServiceListRow) => {
+    if (!effectiveClusterId) return;
+    setDescribeTarget({
+      kind: "service",
+      clusterId: effectiveClusterId,
+      namespace: svc.metadata?.namespace ?? "",
+      name: svc.metadata?.name ?? "",
+    });
+  };
+
+  const openEditServiceTab = (svc: ServiceListRow) => {
+    if (!effectiveClusterId) return;
+    const ns = svc.metadata?.namespace ?? "";
+    const name = svc.metadata?.name ?? "";
+    const id = `edit-svc-${ns}-${name}`;
+    setPanelTabs((prev) => {
+      const exists = prev.some((t) => t.id === id);
+      if (exists) return prev;
+      const tab: PanelTab = {
+        id,
+        type: "edit",
+        clusterId: effectiveClusterId,
+        namespace: ns,
+        pod: name,
+        container: "",
+        title: `${name} (Service)`,
+        containers: [],
+        yamlKind: "service",
+      };
+      return [...prev, tab];
+    });
+    setActivePanelTabId(id);
+    setServiceMenuOpenKey(null);
+  };
+
+  /** Ingress 排障联动：跳转 Services / Pods 列表并带关键字（当前集群+命名空间作用域不变） */
+  const jumpIngressToServices = useCallback((serviceName: string) => {
+    setDescribeTarget(null);
+    setIngressMenuOpenKey(null);
+    setCurrentView("services");
+    queueMicrotask(() => setNameFilter(serviceName));
+  }, []);
+
+  const jumpIngressToPods = useCallback((hint: string) => {
+    setDescribeTarget(null);
+    setIngressMenuOpenKey(null);
+    setCurrentView("pods");
+    queueMicrotask(() => setNameFilter(hint));
+  }, []);
+
+  const jumpServiceToPods = useCallback((hint: string) => {
+    setDescribeTarget(null);
+    setServiceMenuOpenKey(null);
+    setCurrentView("pods");
+    queueMicrotask(() => setNameFilter(hint));
+  }, []);
+
+  const jumpServiceToIngress = useCallback((ingressName: string) => {
+    setDescribeTarget(null);
+    setServiceMenuOpenKey(null);
+    setCurrentView("ingresses");
+    queueMicrotask(() => setNameFilter(ingressName));
+  }, []);
 
   const loadClusters = async () => {
     const items = await fetchClusters();
@@ -1122,7 +1501,9 @@ export const App: React.FC = () => {
     const viewOk =
       currentViewRef.current === "pods" ||
       currentViewRef.current === "statefulsets" ||
-      currentViewRef.current === "deployments";
+      currentViewRef.current === "deployments" ||
+      currentViewRef.current === "ingresses" ||
+      currentViewRef.current === "services";
     if (!viewOk) return;
     const t = Date.now();
     if (t - lastPodsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
@@ -1176,15 +1557,59 @@ export const App: React.FC = () => {
     }
   }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
 
+  const runIngressesWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible || currentViewRef.current !== "ingresses") return;
+    const t = Date.now();
+    if (t - lastIngressWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastIngressWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchResourceList<K8sItem>(cid, "ingresses", ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      if (currentViewRef.current !== "ingresses") return;
+      setIngressItems((prev) => mergeNamespacedItemsWithListSnapshot(prev, items as K8sItem[], ns));
+    } catch {
+      /* silent */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
+  const runServicesWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible || currentViewRef.current !== "services") return;
+    const t = Date.now();
+    if (t - lastServicesWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastServicesWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchResourceList<K8sItem>(cid, "services", ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      if (currentViewRef.current !== "services") return;
+      setServiceItems((prev) => mergeNamespacedItemsWithListSnapshot(prev, items as K8sItem[], ns));
+    } catch {
+      /* silent */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
   useEffect(() => {
     const wasVisible = prevPageVisibleForGapFillRef.current;
     prevPageVisibleForGapFillRef.current = pageVisible;
     if (!effectiveClusterId || !pageVisible || wasVisible) return;
     const needsPodsData =
-      currentView === "pods" || currentView === "statefulsets" || currentView === "deployments";
+      currentView === "pods" ||
+      currentView === "statefulsets" ||
+      currentView === "deployments" ||
+      currentView === "ingresses" ||
+      currentView === "services";
     if (needsPodsData) void runPodsWatchGapFill();
     if (currentView === "deployments") void runDeploymentsWatchGapFill();
     if (currentView === "statefulsets") void runStatefulsetsWatchGapFill();
+    if (currentView === "ingresses") void runIngressesWatchGapFill();
+    if (currentView === "services") void runServicesWatchGapFill();
   }, [
     pageVisible,
     effectiveClusterId,
@@ -1192,6 +1617,8 @@ export const App: React.FC = () => {
     runPodsWatchGapFill,
     runDeploymentsWatchGapFill,
     runStatefulsetsWatchGapFill,
+    runIngressesWatchGapFill,
+    runServicesWatchGapFill,
   ]);
 
   useEffect(() => {
@@ -1258,6 +1685,8 @@ export const App: React.FC = () => {
       setPods([]);
       setResourceItems([]);
       setDeploymentItems([]);
+      setIngressItems([]);
+      setIngressAuxServices([]);
       return;
     }
     if (manualNamespaceRef.current && manualNamespaceRef.current.clusterId !== activeClusterId) {
@@ -1303,9 +1732,12 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!effectiveClusterId) return;
     if (!pageVisible) return;
-    // Deployments 页也保持 Pods watch：避免在 Deployments 上操作 rollout 时 Pods 内存列表冻结，切回 Pods 滞后
+    // Deployments / Ingresses 等页也保持 Pods watch：关联排障与副本状态
     const needsPodsData =
-      currentView === "pods" || currentView === "statefulsets" || currentView === "deployments";
+      currentView === "pods" ||
+      currentView === "statefulsets" ||
+      currentView === "deployments" ||
+      currentView === "ingresses";
 
     if (!needsPodsData && podsWatchCancelRef.current) {
       podsWatchCancelRef.current();
@@ -1614,11 +2046,350 @@ export const App: React.FC = () => {
     syncServerClock,
   ]);
 
+  // Ingresses：独立列表 + Watch（与 Deployments / StatefulSets 一致的作用域缓存策略）
+  useEffect(() => {
+    if (!effectiveClusterId) return;
+    if (!pageVisible) return;
+    if (currentView !== "ingresses") return;
+
+    if (resourceWatchCancelRef.current) {
+      resourceWatchCancelRef.current();
+      resourceWatchCancelRef.current = null;
+    }
+
+    const scopeKey = listScopeKey;
+    const last = lastIngressesListFetchRef.current;
+    const needIngressHttp = !last || last.scope !== scopeKey || last.nonce !== ingressesListNonce;
+    const ns = effectiveNamespace || undefined;
+
+    if (!needIngressHttp) {
+      setApplyingSelection(false);
+    }
+
+    if (needIngressHttp) {
+      setIngressLoading(true);
+      setError(null);
+      fetchResourceList<K8sItem>(effectiveClusterId, "ingresses", ns)
+        .then(({ items, serverTimeMs }) => {
+          syncServerClock(serverTimeMs);
+          const cur = activeClusterNsRef.current;
+          if (currentViewRef.current !== "ingresses") {
+            if (ingressesManualRefreshToastRef.current) ingressesManualRefreshToastRef.current = false;
+            return;
+          }
+          if (cur.clusterId !== effectiveClusterId || (cur.namespace || "") !== (effectiveNamespace || "")) {
+            if (ingressesManualRefreshToastRef.current) ingressesManualRefreshToastRef.current = false;
+            return;
+          }
+          setIngressItems(items as K8sItem[]);
+          setError(null);
+          lastIngressesListFetchRef.current = { scope: scopeKey, nonce: ingressesListNonce };
+          if (ingressesManualRefreshToastRef.current) {
+            ingressesManualRefreshToastRef.current = false;
+            setToastMessage("列表已刷新");
+          }
+        })
+        .catch((err: any) => {
+          if (ingressesManualRefreshToastRef.current) {
+            ingressesManualRefreshToastRef.current = false;
+            setToastMessage("刷新失败，请稍后重试");
+          }
+          const status = err?.response?.status;
+          const backendMsg = err?.response?.data?.error;
+          if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
+          else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
+          else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+          else setError(err?.message || "加载失败，请稍后重试");
+        })
+        .finally(() => {
+          setIngressLoading(false);
+          setApplyingSelection(false);
+        });
+    }
+
+    const cancel = watchResourceList<K8sItem>(effectiveClusterId, "ingresses", ns, {
+      onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
+        setIngressItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
+      },
+      onError: (err) => {
+        // eslint-disable-next-line no-console
+        console.error("ingresses watch error:", err);
+        fetchResourceList<K8sItem>(effectiveClusterId, "ingresses", ns)
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
+            if (currentViewRef.current !== "ingresses") return;
+            setIngressItems(items as K8sItem[]);
+          })
+          .catch(() => {});
+      },
+      onConnectionEstablished: () => {
+        void runIngressesWatchGapFill();
+      },
+    });
+    resourceWatchCancelRef.current = cancel;
+
+    return () => {
+      if (resourceWatchCancelRef.current) {
+        resourceWatchCancelRef.current();
+        resourceWatchCancelRef.current = null;
+      }
+    };
+  }, [
+    effectiveClusterId,
+    effectiveNamespace,
+    currentView,
+    pageVisible,
+    listScopeKey,
+    ingressesListNonce,
+    runIngressesWatchGapFill,
+    syncServerClock,
+  ]);
+
+  // Services：独立列表 + Watch（与 Ingress 一致的作用域缓存）
+  useEffect(() => {
+    if (!effectiveClusterId) return;
+    if (!pageVisible) return;
+    if (currentView !== "services") return;
+
+    if (resourceWatchCancelRef.current) {
+      resourceWatchCancelRef.current();
+      resourceWatchCancelRef.current = null;
+    }
+
+    const scopeKey = listScopeKey;
+    const last = lastServicesListFetchRef.current;
+    const needHttp = !last || last.scope !== scopeKey || last.nonce !== servicesListNonce;
+    const ns = effectiveNamespace || undefined;
+
+    if (!needHttp) {
+      setApplyingSelection(false);
+    }
+
+    if (needHttp) {
+      setServiceLoading(true);
+      setError(null);
+      fetchResourceList<K8sItem>(effectiveClusterId, "services", ns)
+        .then(({ items, serverTimeMs }) => {
+          syncServerClock(serverTimeMs);
+          const cur = activeClusterNsRef.current;
+          if (currentViewRef.current !== "services") {
+            if (servicesManualRefreshToastRef.current) servicesManualRefreshToastRef.current = false;
+            return;
+          }
+          if (cur.clusterId !== effectiveClusterId || (cur.namespace || "") !== (effectiveNamespace || "")) {
+            if (servicesManualRefreshToastRef.current) servicesManualRefreshToastRef.current = false;
+            return;
+          }
+          setServiceItems(items as K8sItem[]);
+          setError(null);
+          lastServicesListFetchRef.current = { scope: scopeKey, nonce: servicesListNonce };
+          if (servicesManualRefreshToastRef.current) {
+            servicesManualRefreshToastRef.current = false;
+            setToastMessage("列表已刷新");
+          }
+        })
+        .catch((err: any) => {
+          if (servicesManualRefreshToastRef.current) {
+            servicesManualRefreshToastRef.current = false;
+            setToastMessage("刷新失败，请稍后重试");
+          }
+          const status = err?.response?.status;
+          const backendMsg = err?.response?.data?.error;
+          if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
+          else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
+          else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+          else setError(err?.message || "加载失败，请稍后重试");
+        })
+        .finally(() => {
+          setServiceLoading(false);
+          setApplyingSelection(false);
+        });
+    }
+
+    const cancel = watchResourceList<K8sItem>(effectiveClusterId, "services", ns, {
+      onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
+        setServiceItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
+      },
+      onError: (err) => {
+        // eslint-disable-next-line no-console
+        console.error("services watch error:", err);
+        fetchResourceList<K8sItem>(effectiveClusterId, "services", ns)
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
+            if (currentViewRef.current !== "services") return;
+            setServiceItems(items as K8sItem[]);
+          })
+          .catch(() => {});
+      },
+      onConnectionEstablished: () => {
+        void runServicesWatchGapFill();
+      },
+    });
+    resourceWatchCancelRef.current = cancel;
+
+    return () => {
+      if (resourceWatchCancelRef.current) {
+        resourceWatchCancelRef.current();
+        resourceWatchCancelRef.current = null;
+      }
+    };
+  }, [
+    effectiveClusterId,
+    effectiveNamespace,
+    currentView,
+    pageVisible,
+    listScopeKey,
+    servicesListNonce,
+    runServicesWatchGapFill,
+    syncServerClock,
+  ]);
+
+  // Ingress 排障辅助：同作用域 Services list + watch（独立 cancel ref，不打断 Ingress 主 watch）
+  useEffect(() => {
+    if (!effectiveClusterId || !pageVisible) {
+      if (ingressAuxWatchCancelRef.current) {
+        ingressAuxWatchCancelRef.current();
+        ingressAuxWatchCancelRef.current = null;
+      }
+      return;
+    }
+    const keepAux =
+      currentView === "ingresses" || describeTarget?.kind === "ingress";
+    if (!keepAux) {
+      if (ingressAuxWatchCancelRef.current) {
+        ingressAuxWatchCancelRef.current();
+        ingressAuxWatchCancelRef.current = null;
+      }
+      setIngressAuxServices([]);
+      return;
+    }
+
+    if (ingressAuxWatchCancelRef.current) {
+      ingressAuxWatchCancelRef.current();
+      ingressAuxWatchCancelRef.current = null;
+    }
+
+    const ns = effectiveNamespace || undefined;
+    fetchResourceList<K8sItem>(effectiveClusterId, "services", ns)
+      .then(({ items, serverTimeMs }) => {
+        syncServerClock(serverTimeMs);
+        if (!ingressAuxNeededRef.current) return;
+        setIngressAuxServices(items as K8sItem[]);
+      })
+      .catch(() => {});
+
+    const cancel = watchResourceList<K8sItem>(effectiveClusterId, "services", ns, {
+      onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
+        setIngressAuxServices((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
+      },
+      onError: () => {
+        fetchResourceList<K8sItem>(effectiveClusterId, "services", ns)
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
+            if (!ingressAuxNeededRef.current) return;
+            setIngressAuxServices(items as K8sItem[]);
+          })
+          .catch(() => {});
+      },
+    });
+    ingressAuxWatchCancelRef.current = cancel;
+
+    return () => {
+      if (ingressAuxWatchCancelRef.current) {
+        ingressAuxWatchCancelRef.current();
+        ingressAuxWatchCancelRef.current = null;
+      }
+    };
+  }, [
+    effectiveClusterId,
+    effectiveNamespace,
+    currentView,
+    pageVisible,
+    listScopeKey,
+    syncServerClock,
+    describeTarget?.kind,
+  ]);
+
+  // Services 排障：Endpoints list + watch（独立 cancel ref）
+  useEffect(() => {
+    if (!effectiveClusterId || !pageVisible) {
+      if (endpointsWatchCancelRef.current) {
+        endpointsWatchCancelRef.current();
+        endpointsWatchCancelRef.current = null;
+      }
+      return;
+    }
+    if (!serviceEndpointsNeededRef.current) {
+      if (endpointsWatchCancelRef.current) {
+        endpointsWatchCancelRef.current();
+        endpointsWatchCancelRef.current = null;
+      }
+      setServiceEndpointItems([]);
+      return;
+    }
+
+    if (endpointsWatchCancelRef.current) {
+      endpointsWatchCancelRef.current();
+      endpointsWatchCancelRef.current = null;
+    }
+
+    const ns = effectiveNamespace || undefined;
+    fetchResourceList<K8sItem>(effectiveClusterId, "endpoints", ns)
+      .then(({ items, serverTimeMs }) => {
+        syncServerClock(serverTimeMs);
+        if (!serviceEndpointsNeededRef.current) return;
+        setServiceEndpointItems(items as K8sItem[]);
+      })
+      .catch(() => {});
+
+    const cancel = watchResourceList<K8sItem>(effectiveClusterId, "endpoints", ns, {
+      onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
+        setServiceEndpointItems((prev) => applyK8sNamespacedWatchEvent(prev, ev, effectiveNamespace));
+      },
+      onError: () => {
+        fetchResourceList<K8sItem>(effectiveClusterId, "endpoints", ns)
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
+            if (!serviceEndpointsNeededRef.current) return;
+            setServiceEndpointItems(items as K8sItem[]);
+          })
+          .catch(() => {});
+      },
+    });
+    endpointsWatchCancelRef.current = cancel;
+
+    return () => {
+      if (endpointsWatchCancelRef.current) {
+        endpointsWatchCancelRef.current();
+        endpointsWatchCancelRef.current = null;
+      }
+    };
+  }, [
+    effectiveClusterId,
+    effectiveNamespace,
+    currentView,
+    pageVisible,
+    listScopeKey,
+    syncServerClock,
+    describeTarget?.kind,
+  ]);
+
   // 其它非 Pods、非 Deployments 资源：沿用原 Watch + HTTP 列表逻辑（每次进入视图仍拉取，保持改动最小）
   useEffect(() => {
     if (!effectiveClusterId) return;
     if (!pageVisible) return;
-    if (currentView === "pods" || currentView === "deployments" || currentView === "statefulsets") return;
+    if (
+      currentView === "pods" ||
+      currentView === "deployments" ||
+      currentView === "statefulsets" ||
+      currentView === "ingresses" ||
+      currentView === "services"
+    )
+      return;
 
     if (resourceWatchCancelRef.current) {
       resourceWatchCancelRef.current();
@@ -1665,6 +2436,7 @@ export const App: React.FC = () => {
     secrets: "Secrets",
     services: "Services",
     ingresses: "Ingresses",
+    endpoints: "Endpoints",
     nodes: "Nodes",
     namespaces: "Namespaces",
   };
@@ -1710,6 +2482,140 @@ export const App: React.FC = () => {
     if (!k) return statefulsetItems;
     return statefulsetItems.filter((i) => (i.metadata?.name ?? "").toLowerCase().includes(k));
   }, [statefulsetItems, nameFilter]);
+
+  const filteredIngresses = useMemo(() => {
+    const k = nameFilter.trim();
+    if (!k) return ingressItems;
+    return ingressItems.filter((i) => ingressMatchesNameOrHostFilter(i, k));
+  }, [ingressItems, nameFilter]);
+
+  /** Ingress 排障模型（按全量 ingressItems 计算，供排序/主表/顶部提示复用） */
+  const ingressTroubleshootByKey = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof buildIngressTroubleshoot>>();
+    for (const raw of ingressItems) {
+      const row = raw as IngressRow;
+      const key = `${row.metadata.namespace ?? ""}/${row.metadata.name}`;
+      m.set(key, buildIngressTroubleshoot(row, ingressAuxServices, pods));
+    }
+    return m;
+  }, [ingressItems, ingressAuxServices, pods]);
+
+  const hasNonHealthyIngresses = useMemo(
+    () => [...ingressTroubleshootByKey.values()].some((d) => d.label !== "健康"),
+    [ingressTroubleshootByKey],
+  );
+
+  const ingressSortStatsByKey = useMemo(() => {
+    const m = new Map<string, IngressSortStats>();
+    for (const raw of filteredIngresses) {
+      const row = raw as IngressRow;
+      const key = `${row.metadata.namespace ?? ""}/${row.metadata.name}`;
+      const s = deriveIngressListSummary(row);
+      const diag = ingressTroubleshootByKey.get(key);
+      m.set(key, {
+        hostCount: s.hostCount,
+        pathCount: s.pathCount,
+        backendCount: diag?.backendServiceCount ?? 0,
+        healthRank: diag?.healthRank ?? 0,
+      });
+    }
+    return m;
+  }, [filteredIngresses, ingressTroubleshootByKey]);
+
+  const sortedIngresses = useMemo(() => {
+    const getStats = (row: IngressRow) => {
+      const k = `${row.metadata.namespace ?? ""}/${row.metadata.name}`;
+      return (
+        ingressSortStatsByKey.get(k) ?? {
+          hostCount: 0,
+          pathCount: 0,
+          backendCount: 0,
+          healthRank: 0,
+        }
+      );
+    };
+    const byAge = ingressesListSort?.key === "age";
+    return sortByState(
+      filteredIngresses as IngressRow[],
+      ingressesListSort,
+      byAge
+        ? (a, b, key) => compareIngressesForSort(a, b, key, getStats, listAgeNow)
+        : (a, b, key) => compareIngressesForSort(a, b, key, getStats),
+    );
+  }, [
+    filteredIngresses,
+    ingressesListSort,
+    ingressSortStatsByKey,
+    ingressesListSort?.key === "age" ? listAgeNow : 0,
+  ]);
+
+  const serviceEndpointsByKey = useMemo(() => {
+    const m = new Map<string, K8sItem>();
+    for (const ep of serviceEndpointItems) {
+      const n = ep.metadata?.name;
+      const ns = ep.metadata?.namespace ?? "";
+      if (n) m.set(`${ns}/${n}`, ep);
+    }
+    return m;
+  }, [serviceEndpointItems]);
+
+  const filteredServices = useMemo(() => {
+    const k = nameFilter.trim();
+    if (!k) return serviceItems;
+    return serviceItems.filter((i) => serviceMatchesNameFilter(i, k));
+  }, [serviceItems, nameFilter]);
+
+  const hasRiskyServices = useMemo(() => {
+    for (const raw of serviceItems) {
+      const key = `${raw.metadata.namespace ?? ""}/${raw.metadata.name}`;
+      const ep = serviceEndpointsByKey.get(key);
+      const d = buildServiceListDiagnostics(raw, ep, pods);
+      if (d.label === "严重" || d.label === "警告") return true;
+    }
+    return false;
+  }, [serviceItems, serviceEndpointsByKey, pods]);
+
+  const serviceSortStatsByKey = useMemo(() => {
+    const m = new Map<string, ServiceSortStats>();
+    for (const raw of filteredServices) {
+      const row = raw as ServiceSortRow;
+      const key = `${row.metadata?.namespace ?? ""}/${row.metadata?.name}`;
+      const ep = serviceEndpointsByKey.get(key);
+      const d = buildServiceListDiagnostics(raw, ep, pods);
+      m.set(key, {
+        type: row.spec?.type ?? "",
+        endpointTotal: d.readyEp + d.notReadyEp,
+        healthRank: d.healthRank,
+      });
+    }
+    return m;
+  }, [filteredServices, serviceEndpointsByKey, pods]);
+
+  const sortedServices = useMemo(() => {
+    const getStats = (row: ServiceSortRow) => {
+      const k = `${row.metadata.namespace ?? ""}/${row.metadata.name}`;
+      return (
+        serviceSortStatsByKey.get(k) ?? {
+          type: "",
+          endpointTotal: 0,
+          healthRank: 0,
+        }
+      );
+    };
+    const byAge = servicesListSort?.key === "age";
+    return sortByState(
+      filteredServices as ServiceSortRow[],
+      servicesListSort,
+      byAge
+        ? (a, b, key) => compareServicesForSort(a, b, key, getStats, listAgeNow)
+        : (a, b, key) => compareServicesForSort(a, b, key, getStats),
+    );
+  }, [
+    filteredServices,
+    servicesListSort,
+    serviceSortStatsByKey,
+    servicesListSort?.key === "age" ? listAgeNow : 0,
+  ]);
 
   const statefulsetStsStatsByKey = useMemo(() => {
     const m = new Map<string, { owned: Pod[]; stats: ReturnType<typeof buildStatefulSetSortStats> }>();
@@ -1759,6 +2665,11 @@ export const App: React.FC = () => {
     if (!describeTarget || describeTarget.kind !== "statefulset") return [] as Pod[];
     return podsOwnedByStatefulSet(pods, describeTarget.name, describeTarget.namespace);
   }, [describeTarget, pods]);
+
+  const ingressDescribeTroubleshoot = useMemo(() => {
+    if (!describeIngressData?.view) return null;
+    return buildIngressTroubleshootFromDescribeView(describeIngressData.view, ingressAuxServices, pods);
+  }, [describeIngressData?.view, ingressAuxServices, pods]);
 
   const sortedPods = useMemo(() => {
     const byAge = podsListSort?.key === "age";
@@ -1846,17 +2757,13 @@ export const App: React.FC = () => {
   });
 
   const podTableTotalWidth = useMemo(
-    () =>
-      LIST_SELECT_COL_WIDTH +
-      POD_COLUMN_KEYS.reduce((s, k) => s + (podColumnWidths[k] ?? POD_COLUMN_DEFAULTS[k]), 0),
-    [podColumnWidths],
+    () => LIST_SELECT_COL_WIDTH + podDataColumnsWidth,
+    [podDataColumnsWidth],
   );
 
   const deployTableTotalWidth = useMemo(
-    () =>
-      LIST_SELECT_COL_WIDTH +
-      DEPLOY_COLUMN_KEYS.reduce((s, k) => s + (deployColumnWidths[k] ?? DEPLOY_COLUMN_DEFAULTS[k]), 0),
-    [deployColumnWidths],
+    () => LIST_SELECT_COL_WIDTH + deployDataColumnsWidth,
+    [deployDataColumnsWidth],
   );
 
   useEffect(() => {
@@ -1889,10 +2796,11 @@ export const App: React.FC = () => {
     el.indeterminate = nSel > 0 && nSel < vis.length;
   }, [sortedDeployments, selectedDeploymentKeys]);
 
-  const stsTableTotalWidth = useMemo(
-    () => STS_COLUMN_KEYS.reduce((s, k) => s + (stsColumnWidths[k] ?? STS_COLUMN_DEFAULTS[k]), 0),
-    [stsColumnWidths],
-  );
+  const stsTableTotalWidth = useMemo(() => stsDataColumnsWidth, [stsDataColumnsWidth]);
+
+  const ingressTableTotalWidth = useMemo(() => ingressDataColumnsWidth, [ingressDataColumnsWidth]);
+
+  const serviceTableTotalWidth = useMemo(() => serviceDataColumnsWidth, [serviceDataColumnsWidth]);
 
   const genericColumns: Column<K8sItem>[] = [
     {
@@ -3000,11 +3908,17 @@ export const App: React.FC = () => {
                           ? filteredDeployments.length
                           : currentView === "statefulsets"
                             ? filteredStatefulSets.length
-                            : filteredResourceItems.length}
+                            : currentView === "ingresses"
+                              ? filteredIngresses.length
+                              : currentView === "services"
+                                ? filteredServices.length
+                                : filteredResourceItems.length}
                     </h3>
                     {(currentView === "pods" ||
                       currentView === "deployments" ||
-                      currentView === "statefulsets") && (
+                      currentView === "statefulsets" ||
+                      currentView === "ingresses" ||
+                      currentView === "services") && (
                       <button
                         type="button"
                         onClick={() => {
@@ -3019,10 +3933,18 @@ export const App: React.FC = () => {
                             setDeploymentsListSort(null);
                             setSelectedDeploymentKeys(new Set());
                             setDeploymentsListNonce((n) => n + 1);
-                          } else {
+                          } else if (currentView === "statefulsets") {
                             statefulsetsManualRefreshToastRef.current = true;
                             setStatefulsetsListSort(null);
                             setStatefulsetsListNonce((n) => n + 1);
+                          } else if (currentView === "ingresses") {
+                            ingressesManualRefreshToastRef.current = true;
+                            setIngressesListSort(null);
+                            setIngressesListNonce((n) => n + 1);
+                          } else {
+                            servicesManualRefreshToastRef.current = true;
+                            setServicesListSort(null);
+                            setServicesListNonce((n) => n + 1);
                           }
                         }}
                         style={{
@@ -3190,7 +4112,10 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection &&
-                      (currentView === "pods" || currentView === "deployments" || currentView === "statefulsets") &&
+                      (currentView === "pods" ||
+                        currentView === "deployments" ||
+                        currentView === "statefulsets" ||
+                        currentView === "ingresses") &&
                       showServerClockSkewHint && (
                         <span
                           title={`本地与服务端时间偏差约 ${Math.abs(serverClockSkewMs)}ms`}
@@ -3247,11 +4172,55 @@ export const App: React.FC = () => {
                         当前范围内存在异常 StatefulSet，请重点关注实例健康状态与存储情况。
                       </span>
                     )}
+                    {!applyingSelection && currentView === "ingresses" && hasNonHealthyIngresses && (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          color: "#f87171",
+                          marginLeft: 12,
+                          fontWeight: 700,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
+                        }}
+                      >
+                        <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
+                          ⚠
+                        </span>
+                        当前范围内存在非健康 Ingress，可按「状态」列排序；展开行查看规则与后端，并可跳转 Service / Pods。
+                      </span>
+                    )}
+                    {!applyingSelection && currentView === "services" && hasRiskyServices && (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          color: "#f87171",
+                          marginLeft: 12,
+                          fontWeight: 700,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
+                        }}
+                      >
+                        <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
+                          ⚠
+                        </span>
+                        当前范围内存在警告或严重级 Service，请查看 Endpoints/状态列并展开核对端口与后端。
+                      </span>
+                    )}
                   </div>
                   <ClearableSearchInput
                     value={nameFilter}
                     onChange={setNameFilter}
-                    placeholder="按 Name 关键字过滤"
+                    placeholder={
+                      currentView === "ingresses"
+                        ? "按 Name / Host 关键字过滤"
+                        : currentView === "services"
+                          ? "按 Service 名称过滤"
+                          : "按 Name 关键字过滤"
+                    }
                     style={{ minWidth: 160 }}
                     inputStyle={{
                       padding: "4px 8px",
@@ -4781,6 +5750,548 @@ export const App: React.FC = () => {
                     </tbody>
                   </table>
                 </>
+              ) : currentView === "ingresses" ? (
+                <>
+                  <table
+                    style={{
+                      width: ingressTableTotalWidth,
+                      minWidth: "100%",
+                      borderCollapse: "collapse",
+                      backgroundColor: "#020617",
+                      tableLayout: "fixed",
+                    }}
+                  >
+                    <colgroup>
+                      {INGRESS_COLUMN_KEYS.map((k) => (
+                        <col
+                          key={k}
+                          style={{
+                            width: ingressColumnWidths[k] ?? INGRESS_COLUMN_DEFAULTS[k],
+                          }}
+                        />
+                      ))}
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        {INGRESS_COLUMN_KEYS.map((k) => {
+                          const sk = INGRESS_COLUMN_SORT[k];
+                          return (
+                            <ResizableTh
+                              key={k}
+                              label={INGRESS_COLUMN_LABELS[k]}
+                              sortTrailing={
+                                sk != null && isIngressSortableColumnKey(sk) ? (
+                                  <ResourceSortArrows
+                                    activeDirection={
+                                      ingressesListSort?.key === sk ? ingressesListSort.direction : null
+                                    }
+                                    onPickAsc={() => setIngressesListSort({ key: sk, direction: "asc" })}
+                                    onPickDesc={() => setIngressesListSort({ key: sk, direction: "desc" })}
+                                  />
+                                ) : undefined
+                              }
+                              width={ingressColumnWidths[k] ?? INGRESS_COLUMN_DEFAULTS[k]}
+                              thBase={thStyle}
+                              onResizeStart={beginResizeIngress(k)}
+                            />
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody className="wl-table-body">
+                      {ingressLoading && ingressItems.length === 0 && (
+                        <tr className="wl-table-row">
+                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                            加载中…
+                          </td>
+                        </tr>
+                      )}
+                      {!ingressLoading && sortedIngresses.length === 0 && (
+                        <tr className="wl-table-row">
+                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                            暂无 Ingress
+                          </td>
+                        </tr>
+                      )}
+                      {sortedIngresses.map((raw) => {
+                        const ing = raw as IngressRow;
+                        const menuKey = `${ing.metadata.namespace ?? ""}/${ing.metadata.name}`;
+                        const expanded = expandedIngressKeys.has(menuKey);
+                        const isMenuOpen = ingressMenuOpenKey === menuKey;
+                        const rowBusy = ingressRowBusyKey === menuKey;
+                        const summ = deriveIngressListSummary(ing);
+                        const diag =
+                          ingressTroubleshootByKey.get(menuKey) ??
+                          buildIngressTroubleshoot(ing, ingressAuxServices, pods);
+                        const expandRows = diag.ruleRows;
+                        const baseCell: React.CSSProperties = {
+                          ...tdStyle,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          maxWidth: 0,
+                        };
+                        const age = formatAgeFromMetadata(ing.metadata, listAgeNow);
+                        const ns = ing.metadata.namespace ?? "";
+                        const iname = ing.metadata.name;
+                        return (
+                          <Fragment key={(ing.metadata.uid as string) || menuKey}>
+                            <tr
+                              className="wl-table-row"
+                              onClick={() => {
+                                setExpandedIngressKeys((prev) => {
+                                  const n = new Set(prev);
+                                  if (n.has(menuKey)) n.delete(menuKey);
+                                  else n.add(menuKey);
+                                  return n;
+                                });
+                              }}
+                              style={{ cursor: "pointer" }}
+                            >
+                              <td style={baseCell} title={iname}>
+                                <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setExpandedIngressKeys((prev) => {
+                                        const n = new Set(prev);
+                                        if (n.has(menuKey)) n.delete(menuKey);
+                                        else n.add(menuKey);
+                                        return n;
+                                      });
+                                    }}
+                                    style={{
+                                      marginRight: 4,
+                                      padding: "0 4px",
+                                      border: "none",
+                                      background: "none",
+                                      color: "#94a3b8",
+                                      cursor: "pointer",
+                                      flexShrink: 0,
+                                      fontSize: 12,
+                                    }}
+                                    title={expanded ? "收起规则" : "展开规则"}
+                                    aria-expanded={expanded}
+                                  >
+                                    {expanded ? "▾" : "▸"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openDescribeForIngress(ing);
+                                    }}
+                                    style={{
+                                      padding: 0,
+                                      margin: 0,
+                                      border: "none",
+                                      background: "none",
+                                      color: "inherit",
+                                      cursor: "pointer",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                      minWidth: 0,
+                                    }}
+                                  >
+                                    {iname}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      copyName(iname);
+                                    }}
+                                    style={copyNameButtonStyle}
+                                    title="复制名称"
+                                  >
+                                    <img
+                                      src={copyIcon}
+                                      alt="复制"
+                                      style={{ height: 14, width: "auto", display: "block" }}
+                                    />
+                                  </button>
+                                </span>
+                              </td>
+                              <td style={baseCell} title={ns}>
+                                {ns || "—"}
+                              </td>
+                              <td style={baseCell} title={summ.hostsLabel}>
+                                {summ.hostsLabel}
+                              </td>
+                              <td style={baseCell} title={String(summ.pathCount)}>
+                                {summ.pathCount}
+                              </td>
+                              <td style={baseCell} title={`${diag.backendServiceCount} 个 backend Service`}>
+                                {diag.backendServiceCount}
+                              </td>
+                              <td style={baseCell} onClick={(e) => e.stopPropagation()}>
+                                {(() => {
+                                  const hl = diag.label;
+                                  let ingHealthBg = "rgba(22,163,74,0.15)";
+                                  let ingHealthBorder = "rgba(22,163,74,0.6)";
+                                  let ingHealthColor = "#bbf7d0";
+                                  if (hl === "关注") {
+                                    ingHealthBg = "rgba(202,138,4,0.18)";
+                                    ingHealthBorder = "rgba(234,179,8,0.7)";
+                                    ingHealthColor = "#facc15";
+                                  } else if (hl === "警告") {
+                                    ingHealthBg = "rgba(249,115,22,0.2)";
+                                    ingHealthBorder = "rgba(249,115,22,0.75)";
+                                    ingHealthColor = "#fed7aa";
+                                  } else if (hl === "严重") {
+                                    ingHealthBg = "rgba(185,28,28,0.25)";
+                                    ingHealthBorder = "rgba(248,113,113,0.85)";
+                                    ingHealthColor = "#fecaca";
+                                  }
+                                  return (
+                                    <span
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        padding: "2px 8px",
+                                        borderRadius: 999,
+                                        backgroundColor: ingHealthBg,
+                                        border: `1px solid ${ingHealthBorder}`,
+                                        color: ingHealthColor,
+                                        fontSize: 11,
+                                        maxWidth: "100%",
+                                        boxSizing: "border-box",
+                                      }}
+                                      title={diag.summary}
+                                    >
+                                      {hl}
+                                    </span>
+                                  );
+                                })()}
+                              </td>
+                              <td
+                                style={{
+                                  ...baseCell,
+                                  whiteSpace: "normal",
+                                  maxWidth: 0,
+                                  lineHeight: 1.35,
+                                  fontSize: 12,
+                                  color: diag.label === "健康" ? "#64748b" : "#e2e8f0",
+                                }}
+                                title={diag.summary}
+                              >
+                                {diag.label === "健康" ? "正常" : diag.summary}
+                              </td>
+                              <td style={baseCell} title={age}>
+                                {age}
+                              </td>
+                              <td style={{ ...tdStyle, overflow: "visible" }} onClick={(e) => e.stopPropagation()}>
+                                <div style={{ position: "relative" }}>
+                                  <button
+                                    type="button"
+                                    className="wl-table-menu-trigger"
+                                    disabled={rowBusy || !effectiveClusterId}
+                                    onClick={() => setIngressMenuOpenKey((k) => (k === menuKey ? null : menuKey))}
+                                    style={{
+                                      width: 28,
+                                      height: 28,
+                                      borderRadius: "50%",
+                                      cursor: rowBusy ? "not-allowed" : "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontSize: 16,
+                                      lineHeight: 1,
+                                      opacity: rowBusy ? 0.5 : 1,
+                                    }}
+                                    title="操作"
+                                  >
+                                    ⋮
+                                  </button>
+                                  {isMenuOpen && (
+                                    <>
+                                      <div
+                                        style={{ position: "fixed", inset: 0, zIndex: 40 }}
+                                        onClick={() => setIngressMenuOpenKey(null)}
+                                        aria-hidden
+                                      />
+                                      <div
+                                        className="wl-table-dropdown-menu"
+                                        style={{
+                                          position: "absolute",
+                                          right: 0,
+                                          top: "100%",
+                                          marginTop: 4,
+                                          minWidth: 160,
+                                          zIndex: 41,
+                                          padding: "4px 0",
+                                        }}
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <button
+                                          type="button"
+                                          className="wl-menu-item"
+                                          style={menuItemStyleForDropdown}
+                                          disabled={rowBusy}
+                                          onClick={() => openEditIngressTab(ing)}
+                                        >
+                                          <span style={{ marginRight: 8 }}>✎</span> Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="wl-menu-item wl-menu-item-danger"
+                                          style={menuItemStyleForDropdown}
+                                          disabled={rowBusy || !effectiveClusterId}
+                                          onClick={() => {
+                                            setIngressMenuOpenKey(null);
+                                            if (!effectiveClusterId) return;
+                                            setActionConfirm({
+                                              title: "确认删除 1 个 Ingress？",
+                                              description: "删除后不可恢复。",
+                                              items: [`${ns}/${iname}`],
+                                              variant: "danger",
+                                              onConfirm: async () => {
+                                                setIngressRowBusyKey(menuKey);
+                                                try {
+                                                  await deleteIngress(effectiveClusterId, ns, iname);
+                                                  setIngressItems((prev) =>
+                                                    prev.filter(
+                                                      (it) =>
+                                                        !(
+                                                          it.metadata?.name === iname &&
+                                                          (it.metadata?.namespace ?? "") === ns
+                                                        ),
+                                                    ),
+                                                  );
+                                                  setToastMessage("已删除 Ingress");
+                                                  setError(null);
+                                                } catch (err: any) {
+                                                  setToastMessage(
+                                                    err?.response?.data?.error ?? err?.message ?? "删除失败",
+                                                  );
+                                                  throw err;
+                                                } finally {
+                                                  setIngressRowBusyKey(null);
+                                                }
+                                              },
+                                            });
+                                          }}
+                                        >
+                                          <span style={{ marginRight: 8 }}>🗑</span> Delete
+                                        </button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                            {expanded && (
+                              <tr className="wl-table-row">
+                                <td
+                                  colSpan={9}
+                                  style={{
+                                    ...tdStyle,
+                                    padding: "8px 12px 12px",
+                                    backgroundColor: "#0f172a",
+                                    cursor: "default",
+                                    borderBottom: "1px solid #111827",
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      color: "#94a3b8",
+                                      marginBottom: 8,
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    规则排障（异常优先；TLS Secret 存在性未校验）
+                                  </div>
+                                  {expandRows.length === 0 ? (
+                                    <div style={{ fontSize: 12, color: "#64748b" }}>无规则行（无 path 且无 default backend）</div>
+                                  ) : (
+                                  <table
+                                    style={{
+                                      width: "100%",
+                                      borderCollapse: "collapse",
+                                      backgroundColor: "#020617",
+                                      tableLayout: "fixed",
+                                    }}
+                                  >
+                                    <thead>
+                                      <tr>
+                                        {[
+                                          "Host",
+                                          "Path",
+                                          "Path Type",
+                                          "Backend Service",
+                                          "Port",
+                                          "TLS",
+                                          "状态",
+                                          "异常说明",
+                                          "联动",
+                                        ].map((h) => (
+                                          <th
+                                            key={h}
+                                            style={{
+                                              textAlign: "left",
+                                              padding: "6px 8px",
+                                              borderBottom: "1px solid #1f2937",
+                                              fontSize: 11,
+                                              color: "#94a3b8",
+                                            }}
+                                          >
+                                            {h}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {expandRows.map((r, ri) => {
+                                        const rowShell: React.CSSProperties =
+                                          r.severityRank >= 3
+                                            ? { backgroundColor: "rgba(185,28,28,0.08)" }
+                                            : r.severityRank >= 2
+                                              ? { backgroundColor: "rgba(249,115,22,0.06)" }
+                                              : {};
+                                        const canLinkSvc =
+                                          r.serviceName &&
+                                          r.serviceName !== "—" &&
+                                          r.status !== "Service 不存在";
+                                        return (
+                                          <tr key={ri} className="wl-table-row" style={rowShell}>
+                                            <td
+                                              style={{
+                                                ...tdStyle,
+                                                fontSize: 12,
+                                                wordBreak: "break-word",
+                                                whiteSpace: "normal",
+                                              }}
+                                            >
+                                              {r.host}
+                                            </td>
+                                            <td
+                                              style={{
+                                                ...tdStyle,
+                                                fontSize: 12,
+                                                wordBreak: "break-all",
+                                                whiteSpace: "normal",
+                                              }}
+                                            >
+                                              {r.path}
+                                            </td>
+                                            <td style={{ ...tdStyle, fontSize: 12 }}>{r.pathType}</td>
+                                            <td
+                                              style={{
+                                                ...tdStyle,
+                                                fontSize: 12,
+                                                wordBreak: "break-word",
+                                                whiteSpace: "normal",
+                                              }}
+                                            >
+                                              {r.serviceName && r.serviceName !== "—" ? (
+                                                <ResourceNameWithCopy
+                                                  name={r.serviceName}
+                                                  onCopy={copyName}
+                                                  fontSize={12}
+                                                />
+                                              ) : (
+                                                r.serviceName ?? "—"
+                                              )}
+                                            </td>
+                                            <td style={{ ...tdStyle, fontSize: 12 }}>{r.portDisplay}</td>
+                                            <td style={{ ...tdStyle, fontSize: 12 }}>{r.tlsHint}</td>
+                                            <td style={{ ...tdStyle, fontSize: 12, fontWeight: 600 }}>
+                                              {r.status}
+                                            </td>
+                                            <td
+                                              style={{
+                                                ...tdStyle,
+                                                fontSize: 11,
+                                                color: "#94a3b8",
+                                                whiteSpace: "normal",
+                                                wordBreak: "break-word",
+                                              }}
+                                            >
+                                              {r.detail}
+                                            </td>
+                                            <td style={{ ...tdStyle, fontSize: 11 }}>
+                                              {canLinkSvc ? (
+                                                <div
+                                                  style={{
+                                                    display: "flex",
+                                                    flexDirection: "column",
+                                                    gap: 4,
+                                                    alignItems: "flex-start",
+                                                  }}
+                                                >
+                                                  <ResourceJumpChip
+                                                    label="Services"
+                                                    compact
+                                                    onClick={() => jumpIngressToServices(r.serviceName)}
+                                                    title="打开 Services 列表并过滤此名称"
+                                                  />
+                                                  <ResourceJumpChip
+                                                    label="Pods"
+                                                    compact
+                                                    onClick={() => jumpIngressToPods(r.serviceName)}
+                                                    title="打开 Pods 列表并过滤此名称"
+                                                  />
+                                                </div>
+                                              ) : (
+                                                "—"
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              ) : currentView === "services" ? (
+                <>
+                  <ServicesListTable
+                    sortedRows={sortedServices}
+                    serviceLoading={serviceLoading}
+                    listSort={servicesListSort}
+                    setListSort={setServicesListSort}
+                    columnWidths={serviceColumnWidths}
+                    beginResize={beginResizeService}
+                    totalWidth={serviceTableTotalWidth}
+                    expandedKeys={expandedServiceKeys}
+                    setExpandedKeys={setExpandedServiceKeys}
+                    endpointsByKey={serviceEndpointsByKey}
+                    pods={pods}
+                    listAgeNow={listAgeNow}
+                    effectiveClusterId={effectiveClusterId}
+                    menuOpenKey={serviceMenuOpenKey}
+                    setMenuOpenKey={setServiceMenuOpenKey}
+                    rowBusyKey={serviceRowBusyKey}
+                    setRowBusyKey={setServiceRowBusyKey}
+                    openDescribe={openDescribeForService}
+                    openEditTab={openEditServiceTab}
+                    jumpToPods={jumpServiceToPods}
+                    copyName={copyName}
+                    setActionConfirm={setActionConfirm}
+                    onDeletedOne={(ns, name) => {
+                      setServiceItems((prev) =>
+                        prev.filter(
+                          (it) => !((it.metadata?.namespace ?? "") === ns && it.metadata?.name === name),
+                        ),
+                      );
+                    }}
+                    setToastMessage={setToastMessage}
+                    setError={setError}
+                    deleteServiceApi={deleteService}
+                  />
+                </>
               ) : (
                 <ResourceTable
                   title=""
@@ -4811,6 +6322,12 @@ export const App: React.FC = () => {
           }
           if (tab.yamlKind === "statefulset" && result) {
             setStatefulsetItems((prev) => mergeDeploymentIntoList(prev, result));
+          }
+          if (tab.yamlKind === "ingress" && result) {
+            setIngressItems((prev) => mergeDeploymentIntoList(prev, result));
+          }
+          if (tab.yamlKind === "service" && result) {
+            setServiceItems((prev) => mergeDeploymentIntoList(prev, result));
           }
         }}
       />
@@ -4891,7 +6408,11 @@ export const App: React.FC = () => {
                     ? "Deployment"
                     : describeTarget.kind === "statefulset"
                       ? "StatefulSet"
-                      : "Pod"}
+                      : describeTarget.kind === "ingress"
+                        ? "Ingress"
+                        : describeTarget.kind === "service"
+                          ? "Service"
+                          : "Pod"}
                   : {describeTarget.namespace}/{describeTarget.name}
                 </span>
                 {describeError && (
@@ -5059,6 +6580,33 @@ export const App: React.FC = () => {
                   )}
                   childPods={describeStsChildPods}
                   stsName={describeTarget.name}
+                />
+              )}
+              {!describeLoading && describeTarget.kind === "ingress" && (
+                <IngressDescribeContent
+                  view={describeIngressData?.view}
+                  events={describeIngressData?.events ?? []}
+                  ageLabel={formatAgeFromMetadata(
+                    { creationTimestamp: describeIngressData?.view?.creationTimestamp },
+                    listAgeNow,
+                  )}
+                  troubleshoot={ingressDescribeTroubleshoot}
+                  onJumpServices={jumpIngressToServices}
+                  onJumpPods={jumpIngressToPods}
+                  onCopyName={copyName}
+                />
+              )}
+              {!describeLoading && describeTarget.kind === "service" && (
+                <ServiceDescribeContent
+                  view={describeServiceData?.view}
+                  events={describeServiceData?.events ?? []}
+                  ageLabel={formatAgeFromMetadata(
+                    { creationTimestamp: describeServiceData?.view?.creationTimestamp },
+                    listAgeNow,
+                  )}
+                  onJumpPods={jumpServiceToPods}
+                  onJumpIngress={jumpServiceToIngress}
+                  onCopyName={copyName}
                 />
               )}
             </div>

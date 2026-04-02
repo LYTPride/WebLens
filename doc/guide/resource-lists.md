@@ -1,6 +1,6 @@
 # 资源列表：筛选、排序与实时更新
 
-本文说明 WebLens 中 **Pods**、**Deployments**、**StatefulSets** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。
+本文说明 WebLens 中 **Pods**、**Deployments**、**StatefulSets** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。**Ingress**、**Services** 列表同样支持 Name 筛选、表头调宽与排序等（以当前版本为准）；展开区与 Describe 中的名称与联动交互见 [Ingress 与 Services](./ingress-services.md)。
 
 ## 列表标题格式
 
