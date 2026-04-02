@@ -14,7 +14,7 @@
 
 - [Pods 使用手册](./guide/pods.md)
 - [Deployments 使用手册](./guide/deployments.md)
-- [资源列表：筛选、排序与实时更新](./guide/resource-lists.md)（含 **Nodes 与 RBAC 受限态**、刷新重探测说明）
+- [资源列表：筛选、排序与实时更新](./guide/resource-lists.md)（含 **PVC**、**Nodes 与 RBAC 受限态**、刷新重探测说明）
 - [Ingress 与 Services（列表、Describe、跨资源联动）](./guide/ingress-services.md)
 - [Shell 使用手册](./guide/shell.md)
 - [文件管理面板使用手册](./guide/file-manager.md)

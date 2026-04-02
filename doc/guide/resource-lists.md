@@ -1,6 +1,6 @@
 # 资源列表：筛选、排序与实时更新
 
-本文说明 WebLens 中 **Pods**、**Deployments**、**StatefulSets** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。**Ingress**、**Services** 列表同样支持 Name 筛选、表头调宽与排序等（以当前版本为准）；展开区与 Describe 中的名称与联动交互见 [Ingress 与 Services](./ingress-services.md)。
+本文说明 WebLens 中 **Pods**、**Deployments**、**StatefulSets**、**PersistentVolumeClaims（PVC）** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。**Ingress**、**Services** 列表同样支持 Name 筛选、表头调宽与排序等（以当前版本为准）；展开区与 Describe 中的名称与联动交互见 [Ingress 与 Services](./ingress-services.md)。
 
 ## 列表标题格式
 
@@ -23,6 +23,12 @@
 - 列表在首次加载或「刷新列表」后，会由 **Watch** 持续推送增量更新（新增/修改/删除），无需依赖高频轮询即可接近准实时。
 - 若你已开启排序，界面会 **按当前排序规则持续重排**，以便反映最新状态。
 - 在 **Deployments** 等页面时，后台仍会保持与当前作用域相关的 **Pods** 数据更新（便于 rollout 后切回 Pods 不滞后）；具体策略见开发文档 [资源列表数据流](../dev/resource-list-dataflow.md)。
+
+## PersistentVolumeClaims（PVC）
+
+- **PVC** 为 **命名空间作用域** 资源：列表受当前已应用的 **集群 + 命名空间** 约束（与 Pods、Deployments 等一致），采用与其他资源相同的 **HTTP list + watch** 模式。
+- 支持 **Describe** 侧栏、**YAML 编辑**（底部面板标签页）与 **删除**（需集群 RBAC 允许）；具体列字段与状态摘要以界面为准。
+- 若当前身份对 PVC 无 list/watch 等权限，行为与常规资源页一致（错误提示以实际 API 返回为准）；后续也可按 **Nodes** 同款 **`ResourceAccessDeniedState` + `resourceAccessCache`** 扩展受限态（见 [Nodes 与访问权限](#nodes-与访问权限rbac)）。
 
 ## Age（存活时间）列
 

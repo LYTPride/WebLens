@@ -4,6 +4,12 @@
 
 ## 2026-03（近期）
 
+### PersistentVolumeClaims（PVC）列表与运维
+
+- **后端**：`server/internal/httpapi/pvc_ops.go`（describe、yaml、delete 等）与 `resources.go` 中 list/watch 路由；详见源码与 `web/src/api.ts` 中 `fetchPvcDescribe`、`deletePvc` 等。
+- **前端**：`web/src/components/PVCListTable.tsx`、`web/src/utils/pvcTable.ts`、`web/src/components/describe/PvcDescribeContent.tsx`；编排与 watch 缺口补齐在 `web/src/pages/App.tsx`（`persistentvolumeclaims` 视图）。
+- **用户文档**：`doc/guide/resource-lists.md`「PersistentVolumeClaims（PVC）」。
+
 ### Nodes 与资源级「无权限」优雅降级（可复用）
 
 - **背景**：部分 kubeconfig / ServiceAccount 无集群级 `nodes` 的 list/watch 权限时，原先整页 `setError` 或原始报错体验较差。
