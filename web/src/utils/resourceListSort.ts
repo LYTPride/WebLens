@@ -43,6 +43,116 @@ export function isStatefulSetSortableColumnKey(key: string): key is StatefulSetS
   return (STATEFULSET_SORT_KEYS as readonly string[]).includes(key);
 }
 
+/** Ingress 表可排序列 */
+export const INGRESS_SORT_KEYS = ["name", "hosts", "paths", "backends", "health", "age"] as const;
+export type IngressSortKey = (typeof INGRESS_SORT_KEYS)[number];
+
+export function isIngressSortableColumnKey(key: string): key is IngressSortKey {
+  return (INGRESS_SORT_KEYS as readonly string[]).includes(key);
+}
+
+/** Services 表可排序列 */
+export const SERVICE_SORT_KEYS = ["name", "namespace", "type", "endpoints", "health", "age"] as const;
+export type ServiceSortKey = (typeof SERVICE_SORT_KEYS)[number];
+
+export function isServiceSortableColumnKey(key: string): key is ServiceSortKey {
+  return (SERVICE_SORT_KEYS as readonly string[]).includes(key);
+}
+
+export type ServiceSortRow = {
+  metadata: { name: string; namespace?: string; creationTimestamp?: string };
+  spec?: { type?: string };
+};
+
+export type ServiceSortStats = {
+  type: string;
+  endpointTotal: number;
+  /** 严重=3 警告=2 特殊=1 健康=0，供列表排序 */
+  healthRank: number;
+};
+
+export function compareServicesForSort(
+  a: ServiceSortRow,
+  b: ServiceSortRow,
+  key: ServiceSortKey,
+  getStats: (row: ServiceSortRow) => ServiceSortStats,
+  nowMs: number = Date.now(),
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  switch (key) {
+    case "name":
+      return a.metadata.name.localeCompare(b.metadata.name, undefined, { sensitivity: "base", numeric: true });
+    case "namespace":
+      return (a.metadata.namespace || "").localeCompare(b.metadata.namespace || "", undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+    case "type":
+      return sa.type.localeCompare(sb.type, undefined, { sensitivity: "base", numeric: true });
+    case "endpoints":
+      return sa.endpointTotal - sb.endpointTotal;
+    case "health":
+      return sa.healthRank - sb.healthRank;
+    case "age": {
+      const tsa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const tsb = creationTimestampToAgeSeconds(b.metadata, nowMs);
+      if (tsa === null && tsb === null) return 0;
+      if (tsa === null) return 1;
+      if (tsb === null) return -1;
+      return tsa - tsb;
+    }
+    default:
+      return 0;
+  }
+}
+
+export type IngressSortRow = {
+  metadata: { name: string; namespace?: string; creationTimestamp?: string };
+};
+
+export type IngressSortStats = {
+  hostCount: number;
+  pathCount: number;
+  backendCount: number;
+  /** 0=健康 … 3=严重，与 ingressTroubleshoot healthRank 一致 */
+  healthRank: number;
+};
+
+/** 由调用方对每行提供 stats（从 raw Ingress + 排障模型派生） */
+export function compareIngressesForSort(
+  a: IngressSortRow,
+  b: IngressSortRow,
+  key: IngressSortKey,
+  getStats: (row: IngressSortRow) => IngressSortStats,
+  nowMs: number = Date.now(),
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  switch (key) {
+    case "name":
+      return a.metadata.name.localeCompare(b.metadata.name, undefined, { sensitivity: "base", numeric: true });
+    case "hosts":
+      return sa.hostCount - sb.hostCount;
+    case "paths":
+      return sa.pathCount - sb.pathCount;
+    case "backends":
+      return sa.backendCount - sb.backendCount;
+    case "health":
+      return sa.healthRank - sb.healthRank;
+    case "age": {
+      const tsa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const tsb = creationTimestampToAgeSeconds(b.metadata, nowMs);
+      if (tsa === null && tsb === null) return 0;
+      if (tsa === null) return 1;
+      if (tsb === null) return -1;
+      return tsa - tsb;
+    }
+    default:
+      return 0;
+  }
+}
+
 export type StatefulSetSortRow = {
   metadata: { name: string; namespace?: string; creationTimestamp?: string };
   spec?: { replicas?: number };

@@ -12,7 +12,8 @@ export interface ResizableThProps {
 }
 
 /**
- * 可拖拽右边界的表头单元格，供 Pods / Deployments 等表格复用。
+ * 可拖拽右边界的表头单元格。
+ * 与 `useResourceListColumnResize` + `useColumnResize` 配合，供各资源列表表复用。
  */
 export const ResizableTh: React.FC<ResizableThProps> = ({
   label,
