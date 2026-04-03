@@ -473,6 +473,166 @@ export function compareDeploymentsForSort(
   }
 }
 
+// —— Events（异常优先默认排序 + 可点击表头单列排序）——
+
+/** 与 apiserver Core Event JSON 对齐的最小行形状 */
+export type EventSortRow = {
+  type?: string;
+  reason?: string;
+  message?: string;
+  count?: number;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
+  /** events.k8s.io EventTime（RFC3339） */
+  eventTime?: string;
+  series?: { count?: number; lastObservedTime?: string };
+  involvedObject?: { kind?: string; name?: string; namespace?: string; uid?: string };
+  metadata?: { name?: string; namespace?: string; creationTimestamp?: string; uid?: string };
+  source?: { component?: string; host?: string };
+};
+
+export const EVENT_SORT_KEYS = [
+  "type",
+  "reason",
+  "message",
+  "involved",
+  "namespace",
+  "count",
+  "lastSeen",
+  "age",
+] as const;
+export type EventSortKey = (typeof EVENT_SORT_KEYS)[number];
+
+export function isEventSortableColumnKey(key: string): key is EventSortKey {
+  return (EVENT_SORT_KEYS as readonly string[]).includes(key);
+}
+
+export type EventSortStats = {
+  /** Warning=0 Normal=1 其它=2，升序时 Warning 在前 */
+  typeRank: number;
+  reason: string;
+  message: string;
+  involvedKey: string;
+  namespace: string;
+  count: number;
+  lastSeenMs: number | null;
+};
+
+function eventLastSeenMs(row: EventSortRow): number | null {
+  const ls = row.series?.lastObservedTime;
+  if (ls) {
+    const t = Date.parse(ls);
+    if (!Number.isNaN(t)) return t;
+  }
+  if (row.lastTimestamp) {
+    const t = Date.parse(row.lastTimestamp);
+    if (!Number.isNaN(t)) return t;
+  }
+  if (row.eventTime) {
+    const t = Date.parse(row.eventTime);
+    if (!Number.isNaN(t)) return t;
+  }
+  return null;
+}
+
+function eventTypeRank(row: EventSortRow): number {
+  const t = (row.type || "").toLowerCase();
+  if (t === "warning") return 0;
+  if (t === "normal") return 1;
+  return 2;
+}
+
+function eventCountValue(row: EventSortRow): number {
+  if (typeof row.series?.count === "number" && row.series.count > 0) return row.series.count;
+  if (typeof row.count === "number" && row.count > 0) return row.count;
+  return 1;
+}
+
+export function buildEventSortStats(row: EventSortRow, _nowMs: number = Date.now()): EventSortStats {
+  const involved = row.involvedObject;
+  const involvedKey = `${(involved?.kind || "").toLowerCase()}/${involved?.name || ""}`;
+  return {
+    typeRank: eventTypeRank(row),
+    reason: row.reason || "",
+    message: row.message || "",
+    involvedKey,
+    namespace: row.metadata?.namespace || involved?.namespace || "",
+    count: eventCountValue(row),
+    lastSeenMs: eventLastSeenMs(row),
+  };
+}
+
+/**
+ * 默认排障视图：Warning 优先，其次最近发生（lastSeen 降序语义：更大时间戳更靠前）。
+ * 用于 eventsListSort === null 时。
+ */
+export function compareEventsDefaultTriage(
+  a: EventSortRow,
+  b: EventSortRow,
+  getStats: (row: EventSortRow) => EventSortStats,
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  if (sa.typeRank !== sb.typeRank) return sa.typeRank - sb.typeRank;
+  const la = sa.lastSeenMs;
+  const lb = sb.lastSeenMs;
+  if (la !== null && lb !== null && la !== lb) return lb - la;
+  if (la !== null && lb === null) return -1;
+  if (la === null && lb !== null) return 1;
+  return sa.reason.localeCompare(sb.reason, undefined, { sensitivity: "base", numeric: true });
+}
+
+export function compareEventsForSort(
+  a: EventSortRow,
+  b: EventSortRow,
+  key: EventSortKey,
+  getStats: (row: EventSortRow) => EventSortStats,
+  nowMs: number = Date.now(),
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  switch (key) {
+    case "type":
+      if (sa.typeRank !== sb.typeRank) return sa.typeRank - sb.typeRank;
+      {
+        const la = sa.lastSeenMs;
+        const lb = sb.lastSeenMs;
+        if (la !== null && lb !== null && la !== lb) return lb - la;
+        if (la !== null && lb === null) return -1;
+        if (la === null && lb !== null) return 1;
+      }
+      return sa.reason.localeCompare(sb.reason, undefined, { sensitivity: "base", numeric: true });
+    case "reason":
+      return sa.reason.localeCompare(sb.reason, undefined, { sensitivity: "base", numeric: true });
+    case "message":
+      return sa.message.localeCompare(sb.message, undefined, { sensitivity: "base", numeric: true });
+    case "involved":
+      return sa.involvedKey.localeCompare(sb.involvedKey, undefined, { sensitivity: "base", numeric: true });
+    case "namespace":
+      return sa.namespace.localeCompare(sb.namespace, undefined, { sensitivity: "base", numeric: true });
+    case "count":
+      return sa.count - sb.count;
+    case "lastSeen": {
+      const la = sa.lastSeenMs;
+      const lb = sb.lastSeenMs;
+      if (la === null && lb === null) return 0;
+      if (la === null) return 1;
+      if (lb === null) return -1;
+      return la - lb;
+    }
+    case "age": {
+      const tsa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const tsb = creationTimestampToAgeSeconds(b.metadata, nowMs);
+      if (tsa === null && tsb === null) return 0;
+      if (tsa === null) return 1;
+      if (tsb === null) return -1;
+      return tsa - tsb;
+    }
+    default:
+      return 0;
+  }
+}
+
 /**
  * 在已有筛选结果上应用单列排序；无排序状态时保持原数组顺序（引用不变）。
  */

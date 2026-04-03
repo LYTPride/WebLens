@@ -268,7 +268,12 @@ export function IngressDescribeContent({
                       <td style={miniTd}>{r.pathType}</td>
                       <td style={miniTd}>
                         {r.serviceName && r.serviceName !== "—" ? (
-                          <ResourceNameWithCopy name={r.serviceName} onCopy={onCopyName} fontSize={12} />
+                          <ResourceNameWithCopy
+                            name={r.serviceName}
+                            onCopy={onCopyName}
+                            fontSize={12}
+                            copyButtonTitle="复制 Service 名称"
+                          />
                         ) : (
                           r.serviceName ?? "—"
                         )}
@@ -332,7 +337,12 @@ export function IngressDescribeContent({
                     <td style={miniTd}>{r?.pathType != null && r.pathType !== "" ? String(r.pathType) : "—"}</td>
                     <td style={miniTd}>
                       {r?.serviceName != null && r.serviceName !== "" ? (
-                        <ResourceNameWithCopy name={String(r.serviceName)} onCopy={onCopyName} fontSize={12} />
+                        <ResourceNameWithCopy
+                          name={String(r.serviceName)}
+                          onCopy={onCopyName}
+                          fontSize={12}
+                          copyButtonTitle="复制 Service 名称"
+                        />
                       ) : (
                         "—"
                       )}
@@ -390,7 +400,12 @@ export function IngressDescribeContent({
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 8 }}>
               <span style={{ flexShrink: 0, color: "#94a3b8" }}>Service：</span>
               {view.defaultBackend.serviceName ? (
-                <ResourceNameWithCopy name={view.defaultBackend.serviceName} onCopy={onCopyName} fontSize={12} />
+                <ResourceNameWithCopy
+                  name={view.defaultBackend.serviceName}
+                  onCopy={onCopyName}
+                  fontSize={12}
+                  copyButtonTitle="复制 Service 名称"
+                />
               ) : (
                 "—"
               )}

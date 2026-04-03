@@ -1,11 +1,11 @@
 # 资源列表：筛选、排序与实时更新
 
-本文说明 WebLens 中 **Pods**、**Deployments**、**StatefulSets**、**PersistentVolumeClaims（PVC）** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。**Ingress**、**Services** 列表同样支持 Name 筛选、表头调宽与排序等（以当前版本为准）；展开区与 Describe 中的名称与联动交互见 [Ingress 与 Services](./ingress-services.md)。
+本文说明 WebLens 中 **Pods**、**Deployments**、**StatefulSets**、**PersistentVolumeClaims（PVC）**、**Events** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。**Ingress**、**Services** 列表同样支持 Name 筛选、表头调宽与排序等（以当前版本为准）；展开区与 Describe 中的名称与联动交互见 [Ingress 与 Services](./ingress-services.md)。**Events** 的默认排序策略与 Involved Object 跳转约定见 [Events 使用手册](./events.md)。
 
 ## 列表标题格式
 
-- 各资源页主标题为 **「资源类型 · 命名空间 / 当前条数」**，例如：`Pods · train-uat / 107`；**Nodes / Namespaces** 等无命名空间范围时仅显示类型与条数。
-- **集群、组合别名、kubeconfig 显示名** 等完整上下文在上方 **「集群与命名空间 · 当前：…」** 小字中展示，**不再**重复写在标题括号内，以免长集群 ID 挤占横向空间、把右侧提示与 Name 过滤框顶换行。
+- 各资源页主标题为 **「资源类型 · 命名空间 / 当前条数」**，例如：`Pods · train-uat / 107`；**Nodes** 等无命名空间范围时仅显示类型与条数（命名空间列表由顶部「集群与命名空间」作用域提供，不再单独占一页）。
+- **集群、作用域别名、kubeconfig 显示名** 等完整上下文在上方 **「集群与命名空间 · 当前：…」** 小字中展示，**不再**重复写在标题括号内，以免长集群 ID 挤占横向空间、把右侧提示与 Name 过滤框顶换行。
 
 ## 关键字筛选
 
@@ -14,7 +14,7 @@
 ## 排序
 
 - 部分表头右侧有 **▲ / ▼**，分别表示按该列 **升序 / 降序**；同一时间只有 **一列** 排序生效。
-- 未点击排序时，列表顺序与数据到达顺序一致（不经额外排序）。
+- 未点击排序时：多数资源列表顺序与 **数据到达顺序** 一致（不经额外排序）；**Events** 例外，使用 **异常优先默认顺序**，见上文 [Events（事件）](#events事件) 与 [Events 使用手册](./events.md)。
 - **切换左侧资源页**（如 Pods ⇄ Deployments）时，**各自记住** 上次的排序方式。
 - 点击 **「刷新列表」** 会 **清空当前页的排序**，并重新拉取该页数据。
 
@@ -23,6 +23,11 @@
 - 列表在首次加载或「刷新列表」后，会由 **Watch** 持续推送增量更新（新增/修改/删除），无需依赖高频轮询即可接近准实时。
 - 若你已开启排序，界面会 **按当前排序规则持续重排**，以便反映最新状态。
 - 在 **Deployments** 等页面时，后台仍会保持与当前作用域相关的 **Pods** 数据更新（便于 rollout 后切回 Pods 不滞后）；具体策略见开发文档 [资源列表数据流](../dev/resource-list-dataflow.md)。
+
+## Events（事件）
+
+- **Events** 为 **命名空间作用域** 资源：**HTTP list + watch**、Name（Involved）筛选、表头调宽与列排序、**serverTimeMs** 与 **Age** 列行为与其他列表一致。
+- **未开启列排序** 时，表格使用 **异常优先的默认顺序**（Warning、count、lastSeen 等综合排序），便于排障；点击表头列后则按该列升/降序，与「刷新列表清空排序」规则一致。详情见 [Events 使用手册](./events.md)。
 
 ## PersistentVolumeClaims（PVC）
 
@@ -53,3 +58,4 @@
 
 - [Pods 使用手册](./pods.md)
 - [Deployments 使用手册](./deployments.md)
+- [Events 使用手册](./events.md)
