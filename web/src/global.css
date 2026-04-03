@@ -1,0 +1,417 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  /* 仅保留各业务区内部的横向滚动（如表格）；禁止视口级横向滚动，避免与底部标签条 scrollbar 叠成双条并误拖整页 */
+  overflow-x: hidden;
+}
+
+body {
+  background-color: #020617;
+  color: #e5e7eb;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+@keyframes wl-toast-fadeout {
+  0% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  80% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-4px);
+  }
+}
+
+/* Dark, slim scrollbars to match overall UI */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 #020617;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #020617;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #4b5563;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #6b7280;
+}
+
+/* 底栏标签横向滚动：略矮横条 + 内联 padding-bottom，减少悬停/拖动 thumb 盖住标题 */
+.wl-bottom-panel-tabs-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+/* 三点菜单：一级与二级菜单行高亮（背景仅由 class 控制，避免被内联覆盖） */
+.wl-menu-item {
+  background-color: transparent;
+  color: #e2e8f0;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+/* 当前展开子菜单的一级项（Shell/Logs）弱高亮 */
+.wl-menu-item.is-active {
+  background-color: #0f172a;
+}
+
+/* 鼠标悬停：深色主题下的高亮 */
+.wl-menu-item:hover {
+  background-color: #334155;
+  color: #e2e8f0;
+}
+
+/* Delete 项默认红色，悬停时与其它项一致 */
+.wl-menu-item.wl-menu-item-danger {
+  color: #f97373;
+}
+.wl-menu-item.wl-menu-item-danger:hover {
+  color: #e2e8f0;
+}
+
+/* 资源列表 sticky 表头（Pods / Deployments / StatefulSet 等复用 .wl-table-sticky-head） */
+th.wl-table-sticky-head:hover {
+  background-color: #1e293b !important;
+}
+
+th.wl-table-sticky-head input[type="checkbox"] {
+  cursor: pointer;
+  vertical-align: middle;
+  accent-color: #0d9488;
+}
+
+/* 列表行悬停（Pods / Deployments 共用） */
+.wl-table-body tr.wl-table-row {
+  transition: background-color 0.12s ease;
+}
+.wl-table-body tr.wl-table-row:hover {
+  background-color: #0f172a;
+}
+
+/* 排序启用且 watch 导致该行在排序结果中 index 变化时的短暂提示（与 hover 错开，hover 优先） */
+@keyframes wl-row-sort-move-pulse {
+  0% {
+    box-shadow: inset 0 0 0 0 rgba(56, 189, 248, 0);
+    background-color: transparent;
+  }
+  20% {
+    box-shadow: inset 3px 0 0 0 rgba(56, 189, 248, 0.55);
+    background-color: rgba(56, 189, 248, 0.09);
+  }
+  100% {
+    box-shadow: inset 3px 0 0 0 rgba(56, 189, 248, 0);
+    background-color: rgba(56, 189, 248, 0);
+  }
+}
+
+.wl-table-body tr.wl-table-row.wl-row-sort-position-changed {
+  animation: wl-row-sort-move-pulse 1.5s ease-out forwards;
+}
+
+.wl-table-body tr.wl-table-row.wl-row-sort-position-changed:hover {
+  animation: none;
+  box-shadow: none;
+  background-color: #0f172a;
+}
+
+/* Shell 右侧文件管理：首次自动展开时标题区轻量引导（约 1.5s 淡入淡出，不闪烁） */
+@keyframes wl-file-panel-header-intro {
+  0% {
+    background-color: rgba(56, 189, 248, 0.06);
+    box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.28);
+  }
+  25% {
+    background-color: rgba(56, 189, 248, 0.11);
+    box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.38);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+
+.wl-file-panel-header-intro {
+  animation: wl-file-panel-header-intro 1.5s ease-out forwards;
+  border-radius: 6px;
+}
+
+/* 三点按钮：Pods / Deployments 统一（保留旧 class 别名） */
+.wl-pod-menu-trigger,
+.wl-table-menu-trigger {
+  background-color: #1e293b;
+  color: #9ca3af;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  border: 1px solid #1f2937;
+}
+.wl-pod-menu-trigger:hover,
+.wl-table-menu-trigger:hover {
+  background-color: #334155;
+  color: #e2e8f0;
+  border-color: #475569;
+}
+.wl-pod-menu-trigger:active,
+.wl-table-menu-trigger:active {
+  background-color: #1e293b;
+}
+.wl-table-menu-trigger:focus-visible,
+.wl-pod-menu-trigger:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+.wl-table-menu-trigger:disabled,
+.wl-pod-menu-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 表格行内下拉菜单容器（与现有内联阴影一致，便于后续统一改主题） */
+.wl-table-dropdown-menu {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* 跨资源联动入口（Ingress / Services / 后续资源页复用）：轻量胶囊，非主按钮、非默认超链接 */
+.wl-resource-jump {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: max-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 3px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: #7dd3fc;
+  background-color: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.wl-resource-jump:hover {
+  background-color: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #bae6fd;
+}
+
+.wl-resource-jump:active {
+  background-color: rgba(56, 189, 248, 0.24);
+  border-color: rgba(56, 189, 248, 0.65);
+}
+
+.wl-resource-jump:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+.wl-resource-jump:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wl-resource-jump--compact {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wl-resource-jump__text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  text-align: inherit;
+}
+
+/* 资源名称：可换行正文 + 复制 + 可选联动（非按钮、非省略胶囊） */
+.wl-resource-name-with-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.wl-resource-name-with-copy__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+/* 预留固定槽位，避免 hover 显示复制 icon 时排版抖动 */
+.wl-resource-name-with-copy__tools {
+  display: inline-flex;
+  flex: 0 0 22px;
+  width: 22px;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.wl-resource-name-with-copy__copy {
+  margin: 0;
+  padding: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  border-radius: 4px;
+  color: inherit;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.wl-resource-name-with-copy:hover .wl-resource-name-with-copy__copy,
+.wl-resource-name-with-copy:focus-within .wl-resource-name-with-copy__copy {
+  opacity: 1;
+}
+
+.wl-resource-name-with-copy__copy:hover {
+  background-color: rgba(148, 163, 184, 0.12);
+}
+
+.wl-resource-name-with-copy__copy:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+/**
+ * 列表 / 展开行：资源名单元格内「名称 + 复制 icon」
+ * 默认隐藏 icon，悬停名称区域（整格）或聚焦时显示；右侧预留 22px 避免抖动
+ */
+.wl-table-hover-copy {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+  box-sizing: border-box;
+}
+
+.wl-table-hover-copy__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.wl-table-hover-copy__btn {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  line-height: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.wl-table-hover-copy:hover .wl-table-hover-copy__btn,
+.wl-table-hover-copy:focus-within .wl-table-hover-copy__btn {
+  opacity: 1;
+}
+
+.wl-table-hover-copy__btn:hover {
+  background-color: rgba(148, 163, 184, 0.12);
+}
+
+.wl-table-hover-copy__btn:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+/* ClearableSearchInput 清空按钮 */
+.wl-clearable-search-clear {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.wl-clearable-search-clear:hover {
+  color: #e2e8f0;
+  background-color: rgba(148, 163, 184, 0.12);
+}
+.wl-clearable-search-clear:active {
+  background-color: rgba(148, 163, 184, 0.2);
+}
+
+/*
+ * Monaco：sticky scroll 与 wordWrap 并存时，仅加固冻结行内容区（不影响正文 .view-lines）。
+ * 与 monaco 自带 stickyScroll.css 的 nowrap 叠加，避免异常子节点撑开可视高度。
+ */
+.monaco-editor .sticky-widget .sticky-line-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.monaco-editor .sticky-widget .sticky-line-number {
+  overflow: hidden;
+}
+
