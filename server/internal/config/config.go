@@ -12,7 +12,8 @@ import (
 
 const (
 	defaultHTTPAddr       = "0.0.0.0:8080"
-	defaultKubeconfigDir  = "./kubeconfigs"
+	// 未设置 WEBLENS_KUBECONFIG_DIR 且无 UI 覆盖时，不向 UI 暴露默认相对路径，避免与「仅绝对路径」提示矛盾
+	defaultKubeconfigDir = ""
 	defaultWebDistDir     = "./web/dist"
 	kubeconfigDirOverride = "config/kubeconfig-dir.override"
 )

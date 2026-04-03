@@ -16,6 +16,7 @@ import {
 } from "./FileTransferTasksPanel";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InputDialog } from "./InputDialog";
+import { trackUsage } from "../utils/usageAnalytics";
 
 type Props = {
   clusterId: string;
@@ -347,6 +348,13 @@ export const FileManagerPanel: React.FC<Props> = ({
         }),
       );
       onToast?.("下载完成");
+      trackUsage({
+        event: "download_file",
+        resource: "pod",
+        cluster_id: clusterId,
+        namespace,
+        target: `${namespace}/${pod}/${container}`,
+      });
       scheduleRemoveTransferTask(id);
     } catch (e: any) {
       const msg = e?.message ?? "下载失败";
@@ -451,6 +459,14 @@ export const FileManagerPanel: React.FC<Props> = ({
         ),
       );
       onToast?.("上传成功");
+      trackUsage({
+        event: "upload_file",
+        resource: "pod",
+        cluster_id: clusterId,
+        namespace,
+        target: `${namespace}/${pod}/${container}`,
+        extra: { file: file.name },
+      });
       refresh();
       scheduleRemoveTransferTask(id);
     } catch (e: any) {

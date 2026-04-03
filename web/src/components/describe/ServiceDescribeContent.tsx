@@ -230,7 +230,12 @@ export function ServiceDescribeContent({
                     <td style={miniTd}>{r.ready ? "是" : "否"}</td>
                     <td style={miniTd}>
                       {r.podName ? (
-                        <ResourceNameWithCopy name={r.podName} onCopy={onCopyName} fontSize={12} />
+                        <ResourceNameWithCopy
+                          name={r.podName}
+                          onCopy={onCopyName}
+                          fontSize={12}
+                          copyButtonTitle="复制 Pod 名称"
+                        />
                       ) : (
                         "—"
                       )}
@@ -280,7 +285,12 @@ export function ServiceDescribeContent({
                 {view.relatedPods.map((p) => (
                   <tr key={p.name}>
                     <td style={miniTd}>
-                      <ResourceNameWithCopy name={p.name} onCopy={onCopyName} fontSize={12} />
+                      <ResourceNameWithCopy
+                        name={p.name}
+                        onCopy={onCopyName}
+                        fontSize={12}
+                        copyButtonTitle="复制 Pod 名称"
+                      />
                     </td>
                     <td style={miniTd}>{p.phase}</td>
                     <td style={miniTd}>{p.healthLabel}</td>
@@ -313,7 +323,12 @@ export function ServiceDescribeContent({
             {view.referencedByIngresses.map((ing, i) => (
               <li key={`${ing.ingressName}-${i}`} style={{ marginBottom: 6 }}>
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: "6px 8px" }}>
-                  <ResourceNameWithCopy name={ing.ingressName} onCopy={onCopyName} fontSize={12} />
+                  <ResourceNameWithCopy
+                    name={ing.ingressName}
+                    onCopy={onCopyName}
+                    fontSize={12}
+                    copyButtonTitle="复制 Ingress 名称"
+                  />
                   {onJumpIngress ? (
                     <ResourceJumpChip
                       label="Ingress"

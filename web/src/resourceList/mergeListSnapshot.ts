@@ -26,3 +26,8 @@ export function mergeNamespacedItemsWithListSnapshot<T extends { metadata?: { na
   const other = prev.filter((i) => (i.metadata?.namespace || "") !== effectiveNamespace);
   return [...other, ...listItems];
 }
+
+/** 集群级单列表（如 Nodes）：当前集群视图下 list 快照即全量真值 */
+export function mergeClusterScopedItemsWithListSnapshot<T>(_prev: T[], listItems: T[]): T[] {
+  return listItems.slice();
+}

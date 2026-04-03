@@ -167,7 +167,7 @@ func registerClusterComboRoutes(r *gin.Engine, reg *cluster.Registry) {
 			}
 		}
 		if !updated {
-			c.JSON(http.StatusNotFound, gin.H{"error": "组合不存在"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "作用域不存在"})
 			return
 		}
 		if err := saveClusterCombos(items); err != nil {
@@ -195,7 +195,7 @@ func registerClusterComboRoutes(r *gin.Engine, reg *cluster.Registry) {
 			next = append(next, it)
 		}
 		if !deleted {
-			c.JSON(http.StatusNotFound, gin.H{"error": "组合不存在"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "作用域不存在"})
 			return
 		}
 		if err := saveClusterCombos(next); err != nil {
@@ -215,7 +215,7 @@ func registerClusterComboRoutes(r *gin.Engine, reg *cluster.Registry) {
 		}
 		combo, ok := findClusterCombo(items, id)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "组合不存在"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "作用域不存在"})
 			return
 		}
 		client, ok := reg.Client(combo.ClusterID)

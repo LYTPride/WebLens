@@ -59,6 +59,142 @@ export function isServiceSortableColumnKey(key: string): key is ServiceSortKey {
   return (SERVICE_SORT_KEYS as readonly string[]).includes(key);
 }
 
+/** PVC 表可排序列 */
+export const PVC_SORT_KEYS = [
+  "name",
+  "namespace",
+  "status",
+  "volume",
+  "capacity",
+  "storageClass",
+  "usedBy",
+  "age",
+] as const;
+export type PvcSortKey = (typeof PVC_SORT_KEYS)[number];
+
+export function isPvcSortableColumnKey(key: string): key is PvcSortKey {
+  return (PVC_SORT_KEYS as readonly string[]).includes(key);
+}
+
+export type PvcSortRow = {
+  metadata: { name: string; namespace?: string; creationTimestamp?: string };
+};
+
+export type PvcSortStats = {
+  statusRank: number;
+  volume: string;
+  capacity: string;
+  storageClass: string;
+  usedByCount: number;
+};
+
+export function comparePvcsForSort(
+  a: PvcSortRow,
+  b: PvcSortRow,
+  key: PvcSortKey,
+  getStats: (row: PvcSortRow) => PvcSortStats,
+  nowMs: number = Date.now(),
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  switch (key) {
+    case "name":
+      return a.metadata.name.localeCompare(b.metadata.name, undefined, { sensitivity: "base", numeric: true });
+    case "namespace":
+      return (a.metadata.namespace || "").localeCompare(b.metadata.namespace || "", undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+    case "status":
+      return sa.statusRank - sb.statusRank;
+    case "volume":
+      return sa.volume.localeCompare(sb.volume, undefined, { sensitivity: "base", numeric: true });
+    case "capacity":
+      return sa.capacity.localeCompare(sb.capacity, undefined, { sensitivity: "base", numeric: true });
+    case "storageClass":
+      return sa.storageClass.localeCompare(sb.storageClass, undefined, { sensitivity: "base", numeric: true });
+    case "usedBy":
+      return sa.usedByCount - sb.usedByCount;
+    case "age": {
+      const tsa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const tsb = creationTimestampToAgeSeconds(b.metadata, nowMs);
+      if (tsa === null && tsb === null) return 0;
+      if (tsa === null) return 1;
+      if (tsb === null) return -1;
+      return tsa - tsb;
+    }
+    default:
+      return 0;
+  }
+}
+
+/** Nodes 表可排序列 */
+export const NODE_SORT_KEYS = [
+  "name",
+  "status",
+  "roles",
+  "version",
+  "internalIP",
+  "pods",
+  "cpuMemory",
+  "age",
+] as const;
+export type NodeSortKey = (typeof NODE_SORT_KEYS)[number];
+
+export function isNodeSortableColumnKey(key: string): key is NodeSortKey {
+  return (NODE_SORT_KEYS as readonly string[]).includes(key);
+}
+
+export type NodeSortRow = {
+  metadata: { name: string; creationTimestamp?: string };
+};
+
+export type NodeSortStats = {
+  statusRank: number;
+  roles: string;
+  version: string;
+  internalIP: string;
+  podsCount: number;
+  cpuMemory: string;
+};
+
+export function compareNodesForSort(
+  a: NodeSortRow,
+  b: NodeSortRow,
+  key: NodeSortKey,
+  getStats: (row: NodeSortRow) => NodeSortStats,
+  nowMs: number = Date.now(),
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  switch (key) {
+    case "name":
+      return a.metadata.name.localeCompare(b.metadata.name, undefined, { sensitivity: "base", numeric: true });
+    case "status":
+      return sa.statusRank - sb.statusRank;
+    case "roles":
+      return sa.roles.localeCompare(sb.roles, undefined, { sensitivity: "base", numeric: true });
+    case "version":
+      return sa.version.localeCompare(sb.version, undefined, { sensitivity: "base", numeric: true });
+    case "internalIP":
+      return sa.internalIP.localeCompare(sb.internalIP, undefined, { sensitivity: "base", numeric: true });
+    case "pods":
+      return sa.podsCount - sb.podsCount;
+    case "cpuMemory":
+      return sa.cpuMemory.localeCompare(sb.cpuMemory, undefined, { sensitivity: "base", numeric: true });
+    case "age": {
+      const tsa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const tsb = creationTimestampToAgeSeconds(b.metadata, nowMs);
+      if (tsa === null && tsb === null) return 0;
+      if (tsa === null) return 1;
+      if (tsb === null) return -1;
+      return tsa - tsb;
+    }
+    default:
+      return 0;
+  }
+}
+
 export type ServiceSortRow = {
   metadata: { name: string; namespace?: string; creationTimestamp?: string };
   spec?: { type?: string };
@@ -331,6 +467,166 @@ export function compareDeploymentsForSort(
       if (sa === null) return 1;
       if (sb === null) return -1;
       return sa - sb;
+    }
+    default:
+      return 0;
+  }
+}
+
+// —— Events（异常优先默认排序 + 可点击表头单列排序）——
+
+/** 与 apiserver Core Event JSON 对齐的最小行形状 */
+export type EventSortRow = {
+  type?: string;
+  reason?: string;
+  message?: string;
+  count?: number;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
+  /** events.k8s.io EventTime（RFC3339） */
+  eventTime?: string;
+  series?: { count?: number; lastObservedTime?: string };
+  involvedObject?: { kind?: string; name?: string; namespace?: string; uid?: string };
+  metadata?: { name?: string; namespace?: string; creationTimestamp?: string; uid?: string };
+  source?: { component?: string; host?: string };
+};
+
+export const EVENT_SORT_KEYS = [
+  "type",
+  "reason",
+  "message",
+  "involved",
+  "namespace",
+  "count",
+  "lastSeen",
+  "age",
+] as const;
+export type EventSortKey = (typeof EVENT_SORT_KEYS)[number];
+
+export function isEventSortableColumnKey(key: string): key is EventSortKey {
+  return (EVENT_SORT_KEYS as readonly string[]).includes(key);
+}
+
+export type EventSortStats = {
+  /** Warning=0 Normal=1 其它=2，升序时 Warning 在前 */
+  typeRank: number;
+  reason: string;
+  message: string;
+  involvedKey: string;
+  namespace: string;
+  count: number;
+  lastSeenMs: number | null;
+};
+
+function eventLastSeenMs(row: EventSortRow): number | null {
+  const ls = row.series?.lastObservedTime;
+  if (ls) {
+    const t = Date.parse(ls);
+    if (!Number.isNaN(t)) return t;
+  }
+  if (row.lastTimestamp) {
+    const t = Date.parse(row.lastTimestamp);
+    if (!Number.isNaN(t)) return t;
+  }
+  if (row.eventTime) {
+    const t = Date.parse(row.eventTime);
+    if (!Number.isNaN(t)) return t;
+  }
+  return null;
+}
+
+function eventTypeRank(row: EventSortRow): number {
+  const t = (row.type || "").toLowerCase();
+  if (t === "warning") return 0;
+  if (t === "normal") return 1;
+  return 2;
+}
+
+function eventCountValue(row: EventSortRow): number {
+  if (typeof row.series?.count === "number" && row.series.count > 0) return row.series.count;
+  if (typeof row.count === "number" && row.count > 0) return row.count;
+  return 1;
+}
+
+export function buildEventSortStats(row: EventSortRow, _nowMs: number = Date.now()): EventSortStats {
+  const involved = row.involvedObject;
+  const involvedKey = `${(involved?.kind || "").toLowerCase()}/${involved?.name || ""}`;
+  return {
+    typeRank: eventTypeRank(row),
+    reason: row.reason || "",
+    message: row.message || "",
+    involvedKey,
+    namespace: row.metadata?.namespace || involved?.namespace || "",
+    count: eventCountValue(row),
+    lastSeenMs: eventLastSeenMs(row),
+  };
+}
+
+/**
+ * 默认排障视图：Warning 优先，其次最近发生（lastSeen 降序语义：更大时间戳更靠前）。
+ * 用于 eventsListSort === null 时。
+ */
+export function compareEventsDefaultTriage(
+  a: EventSortRow,
+  b: EventSortRow,
+  getStats: (row: EventSortRow) => EventSortStats,
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  if (sa.typeRank !== sb.typeRank) return sa.typeRank - sb.typeRank;
+  const la = sa.lastSeenMs;
+  const lb = sb.lastSeenMs;
+  if (la !== null && lb !== null && la !== lb) return lb - la;
+  if (la !== null && lb === null) return -1;
+  if (la === null && lb !== null) return 1;
+  return sa.reason.localeCompare(sb.reason, undefined, { sensitivity: "base", numeric: true });
+}
+
+export function compareEventsForSort(
+  a: EventSortRow,
+  b: EventSortRow,
+  key: EventSortKey,
+  getStats: (row: EventSortRow) => EventSortStats,
+  nowMs: number = Date.now(),
+): number {
+  const sa = getStats(a);
+  const sb = getStats(b);
+  switch (key) {
+    case "type":
+      if (sa.typeRank !== sb.typeRank) return sa.typeRank - sb.typeRank;
+      {
+        const la = sa.lastSeenMs;
+        const lb = sb.lastSeenMs;
+        if (la !== null && lb !== null && la !== lb) return lb - la;
+        if (la !== null && lb === null) return -1;
+        if (la === null && lb !== null) return 1;
+      }
+      return sa.reason.localeCompare(sb.reason, undefined, { sensitivity: "base", numeric: true });
+    case "reason":
+      return sa.reason.localeCompare(sb.reason, undefined, { sensitivity: "base", numeric: true });
+    case "message":
+      return sa.message.localeCompare(sb.message, undefined, { sensitivity: "base", numeric: true });
+    case "involved":
+      return sa.involvedKey.localeCompare(sb.involvedKey, undefined, { sensitivity: "base", numeric: true });
+    case "namespace":
+      return sa.namespace.localeCompare(sb.namespace, undefined, { sensitivity: "base", numeric: true });
+    case "count":
+      return sa.count - sb.count;
+    case "lastSeen": {
+      const la = sa.lastSeenMs;
+      const lb = sb.lastSeenMs;
+      if (la === null && lb === null) return 0;
+      if (la === null) return 1;
+      if (lb === null) return -1;
+      return la - lb;
+    }
+    case "age": {
+      const tsa = creationTimestampToAgeSeconds(a.metadata, nowMs);
+      const tsb = creationTimestampToAgeSeconds(b.metadata, nowMs);
+      if (tsa === null && tsb === null) return 0;
+      if (tsa === null) return 1;
+      if (tsb === null) return -1;
+      return tsa - tsb;
     }
     default:
       return 0;

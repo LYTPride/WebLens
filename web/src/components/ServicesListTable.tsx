@@ -83,16 +83,6 @@ const tdStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
-const copyNameButtonStyle: React.CSSProperties = {
-  marginLeft: 6,
-  padding: 0,
-  border: "none",
-  background: "none",
-  cursor: "pointer",
-  flexShrink: 0,
-  lineHeight: 0,
-};
-
 const menuItemStyleForDropdown: React.CSSProperties = {
   display: "block",
   width: "100%",
@@ -261,64 +251,69 @@ export function ServicesListTable({
                 style={{ cursor: "pointer" }}
               >
                 <td style={baseCell} title={sname}>
-                  <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
+                  <span className="wl-table-hover-copy">
+                    <span className="wl-table-hover-copy__main">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedKeys((prev) => {
+                            const n = new Set(prev);
+                            if (n.has(menuKey)) n.delete(menuKey);
+                            else n.add(menuKey);
+                            return n;
+                          });
+                        }}
+                        style={{
+                          marginRight: 4,
+                          padding: "0 4px",
+                          border: "none",
+                          background: "none",
+                          color: "#94a3b8",
+                          cursor: "pointer",
+                          flexShrink: 0,
+                          fontSize: 12,
+                        }}
+                        title={expanded ? "收起详情" : "展开详情"}
+                        aria-expanded={expanded}
+                      >
+                        {expanded ? "▾" : "▸"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDescribe(svc);
+                        }}
+                        style={{
+                          padding: 0,
+                          margin: 0,
+                          border: "none",
+                          background: "none",
+                          color: "inherit",
+                          cursor: "pointer",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          minWidth: 0,
+                          flex: "1 1 auto",
+                          textAlign: "left",
+                        }}
+                      >
+                        {sname}
+                      </button>
+                    </span>
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setExpandedKeys((prev) => {
-                          const n = new Set(prev);
-                          if (n.has(menuKey)) n.delete(menuKey);
-                          else n.add(menuKey);
-                          return n;
-                        });
-                      }}
-                      style={{
-                        marginRight: 4,
-                        padding: "0 4px",
-                        border: "none",
-                        background: "none",
-                        color: "#94a3b8",
-                        cursor: "pointer",
-                        flexShrink: 0,
-                        fontSize: 12,
-                      }}
-                      title={expanded ? "收起详情" : "展开详情"}
-                      aria-expanded={expanded}
-                    >
-                      {expanded ? "▾" : "▸"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openDescribe(svc);
-                      }}
-                      style={{
-                        padding: 0,
-                        margin: 0,
-                        border: "none",
-                        background: "none",
-                        color: "inherit",
-                        cursor: "pointer",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        minWidth: 0,
-                      }}
-                    >
-                      {sname}
-                    </button>
-                    <button
-                      type="button"
+                      className="wl-table-hover-copy__btn"
                       onClick={(e) => {
                         e.stopPropagation();
                         copyName(sname);
                       }}
-                      style={copyNameButtonStyle}
-                      title="复制名称"
+                      title="复制 Service 名称"
+                      aria-label={`复制 Service 名称：${sname}`}
                     >
-                      <img src={copyIcon} alt="复制" style={{ height: 14, width: "auto", display: "block" }} />
+                      <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
                     </button>
                   </span>
                 </td>
@@ -595,7 +590,12 @@ export function ServicesListTable({
                                   }}
                                 >
                                   {canPod ? (
-                                    <ResourceNameWithCopy name={er.podName} onCopy={copyName} fontSize={12} />
+                                    <ResourceNameWithCopy
+                                      name={er.podName}
+                                      onCopy={copyName}
+                                      fontSize={12}
+                                      copyButtonTitle="复制 Pod 名称"
+                                    />
                                   ) : (
                                     er.podName
                                   )}
