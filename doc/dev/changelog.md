@@ -4,6 +4,47 @@
 
 ## 2026-03（近期）
 
+### Events（事件）列表、Describe 与排序
+
+- **后端**：`events` 已纳入通用资源 list/watch（`server/internal/httpapi/resources.go` 等，与 PVC 同路径模式）。
+- **前端**：`web/src/pages/App.tsx` 中独立 `eventItems` 状态、list 跳过与 refresh nonce、`watchResourceList` + `applyK8sNamespacedWatchEvent`；Watch 缺口节流合并 `runEventsWatchGapFill`（与 Pods/PVC 等同类策略）。
+- **表格**：`web/src/components/EventsListTable.tsx`；列派生与 Involved 展示：`web/src/utils/eventTable.ts`。
+- **排序**：`web/src/utils/resourceListSort.ts` 中 `EventSortRow` / `compareEventsDefaultTriage`（无列排序时异常优先）与 `compareEventsForSort`（表头列排序）；按 **Age** 排序时与 `listAgeNow` / `serverTimeMs` 对齐。
+- **Describe**：`web/src/components/describe/EventDescribeContent.tsx`；关联资源跳转由 `onJumpToResource` 与 `resolveInvolvedKindToListView`（`web/src/utils/v1HiddenViews.ts`）统一解析；v1 侧栏未开放的 kind（DaemonSet、Job、CronJob、ConfigMap、Secret 等）不跳转；旧会话键 `namespaces` 与上述隐藏视图回落 **Pods**。
+- **用户文档**：`doc/guide/events.md`；索引：`doc/guide/resource-lists.md`、`doc/README.md`。
+
+### v1 使用行为埋点（可选）
+
+- **后端**：`server/internal/analytics/analytics.go`（`AppendLine` 写 NDJSON）、`server/internal/httpapi/analytics.go`（`POST /api/analytics/events`）、`router.go` 注册；环境变量 **`WEBLENS_ANALYTICS_LOG`**（默认 `logs/analytics.log`）。
+- **前端**：`web/src/utils/usageAnalytics.ts`（`trackUsage`，`sendBeacon` / `fetch keepalive`）；主要调用：`web/src/pages/App.tsx`、`web/src/components/FileManagerPanel.tsx`。
+- **仓库**：`.gitignore` 增加 `logs/`，避免本地埋点文件入库。
+- **开发说明**：`doc/dev/analytics.md`。
+
+### 底栏标签横向滚动与视口横向溢出
+
+- **`web/src/global.css`**：`html, body, #root` 设置 **`overflow-x: hidden`**，去掉视口级横向滚动条，避免与底部标签条横向 scrollbar 叠成双条、拖动时误滚整页；各业务表格等仍在自身 **`overflow-x: auto`** 容器内横向滚动。
+- **`web/src/components/BottomPanel.tsx`**：底栏根节点 **`overflowX/Y: hidden`**、标签滚动容器 **`paddingBottom`** 为横向 scrollbar 预留带区、**`maxHeight`（最小化）** 调高以容纳预留；**`className="wl-bottom-panel-tabs-scroll"`**。
+- **`global.css`**：`.wl-bottom-panel-tabs-scroll::-webkit-scrollbar { height: 6px; }`，减轻悬停/拖动 thumb 遮挡标签标题（WebKit 系）。
+
+### PersistentVolumeClaims（PVC）列表与运维
+
+- **后端**：`server/internal/httpapi/pvc_ops.go`（describe、yaml、delete 等）与 `resources.go` 中 list/watch 路由；详见源码与 `web/src/api.ts` 中 `fetchPvcDescribe`、`deletePvc` 等。
+- **前端**：`web/src/components/PVCListTable.tsx`、`web/src/utils/pvcTable.ts`、`web/src/components/describe/PvcDescribeContent.tsx`；编排与 watch 缺口补齐在 `web/src/pages/App.tsx`（`persistentvolumeclaims` 视图）。
+- **用户文档**：`doc/guide/resource-lists.md`「PersistentVolumeClaims（PVC）」。
+
+### Nodes 与资源级「无权限」优雅降级（可复用）
+
+- **背景**：部分 kubeconfig / ServiceAccount 无集群级 `nodes` 的 list/watch 权限时，原先整页 `setError` 或原始报错体验较差。
+- **产品行为**：侧栏 **保留 Nodes**；有权限时列表与 Watch 不变；无权限时主区域展示 **`ResourceAccessDeniedState`**（深色卡片、人话说明、可选折叠「技术摘要」），**不**把大段原始错误作为主内容。
+- **前端实现要点**：
+  - 通用组件：`web/src/components/ResourceAccessDeniedState.tsx`
+  - 错误归类：`web/src/utils/k8sAccessErrors.ts`（`isK8sAccessDeniedError`、`k8sAccessDeniedSummary` 等）
+  - 按集群 + 资源键的轻量缓存：`web/src/utils/resourceAccessCache.ts`（Nodes 使用 `resourceKey: "nodes"`），避免同集群反复打接口与刷错
+  - **Watch**：`web/src/api.ts` 中 `watchResourceList` 增加可选 **`shouldReconnect`**；401/403 等访问拒绝时 **不重连**，避免刷屏
+  - 编排与 Nodes 分支：`web/src/pages/App.tsx`（list 成功写 `granted`、拒绝写 `denied`；「刷新列表」对 Nodes 调用 `clearResourceAccessDecision` 后重试）
+- **后续资源复用**：为新资源选定 `resourceKey`，在 list/watch 失败分支调用同一套 `isK8sAccessDeniedError` + 缓存 + `ResourceAccessDeniedState`，并为 watch 传入 `shouldReconnect` 策略即可。
+- **用户文档**：`doc/guide/resource-lists.md`「Nodes 与访问权限」。
+
 ### Ingress / Services 与跨资源联动 UI
 
 - **后端**：`server/internal/httpapi/ingress_ops.go`、`service_ops.go` 等，提供 Ingress / Service 结构化 describe 与列表相关能力（与 `resources.go` 协同）；详见各文件注释与 `web/src/api.ts` 类型。
@@ -23,7 +64,7 @@
 
 ### 资源列表标题简化
 
-- 列表主标题统一为 **`资源类型 · namespace / 条数`**，去掉标题中的 **集群 ID / 组合括号**（与上方「集群与命名空间 · 当前：…」去重），减轻长集群名下顶部栏横向挤压；实现：`web/src/pages/App.tsx`。
+- 列表主标题统一为 **`资源类型 · namespace / 条数`**，去掉标题中的 **集群 ID / 作用域括号**（与上方「集群与命名空间 · 当前：…」去重），减轻长集群名下顶部栏横向挤压；实现：`web/src/pages/App.tsx`。
 - 用户说明：`doc/guide/resource-lists.md`「列表标题格式」。
 
 ### 资源列表：服务端时间（serverTimeMs）与 Age
@@ -81,5 +122,5 @@
 ### 搜索/过滤输入
 
 - 新增可复用组件 `web/src/components/ClearableSearchInput.tsx`：有关键字时显示右侧清空按钮，点击清空并 focus 回输入框
-- 已接入：平台配置「已添加组合」搜索、集群下拉内搜索、资源列表 Name 过滤、Logs 关键字、Pod/Deployment YAML 编辑区关键字（样式见 `global.css` `.wl-clearable-search-clear`）
+- 已接入：平台配置「已添加作用域」搜索、集群下拉内搜索、资源列表 Name 过滤、Logs 关键字、Pod/Deployment YAML 编辑区关键字（样式见 `global.css` `.wl-clearable-search-clear`）
 

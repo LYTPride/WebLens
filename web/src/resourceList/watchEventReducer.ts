@@ -113,3 +113,55 @@ export function applyK8sNamespacedWatchEvent<T>(
   }
   return next;
 }
+
+type ClusterScopedMeta = {
+  metadata?: { uid?: string; name?: string; creationTimestamp?: string };
+};
+
+function withPreservedClusterScopedCreationTimestamp<T extends ClusterScopedMeta>(
+  prev: T[],
+  incoming: T,
+  uid: string,
+): T {
+  const incTs = readCreationTimestampFromMetadata(incoming.metadata);
+  if (incTs) return incoming;
+  const prevItem = prev.find((x) => (x.metadata?.uid || "") === uid);
+  const oldTs = prevItem ? readCreationTimestampFromMetadata(prevItem.metadata) : undefined;
+  if (oldTs) {
+    return {
+      ...incoming,
+      metadata: { ...incoming.metadata, creationTimestamp: oldTs },
+    };
+  }
+  return incoming;
+}
+
+/** Nodes / 其它集群级资源：按 metadata.uid 合并，保留 creationTimestamp */
+export function applyK8sClusterScopedWatchEvent<T extends ClusterScopedMeta>(
+  prev: T[],
+  ev: ResourceWatchEvent<T>,
+): T[] {
+  if (ev.type !== "ADDED" && ev.type !== "MODIFIED" && ev.type !== "DELETED") {
+    return prev;
+  }
+  let obj = ev.object as T;
+  const uid = obj.metadata?.uid;
+  const name = obj.metadata?.name;
+  if (!uid || !name) return prev;
+  if (ev.type === "DELETED") {
+    return prev.filter((i) => (i.metadata?.uid || "") !== uid);
+  }
+  obj = withPreservedClusterScopedCreationTimestamp(prev, obj, uid);
+  let replaced = false;
+  const next = prev.map((i) => {
+    if ((i.metadata?.uid || "") === uid) {
+      replaced = true;
+      return obj;
+    }
+    return i;
+  });
+  if (!replaced) {
+    next.push(obj);
+  }
+  return next;
+}

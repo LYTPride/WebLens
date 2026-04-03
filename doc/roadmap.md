@@ -10,7 +10,7 @@
 
 - 认证增强：JWT / OIDC
 - 权限模型：平台用户与 Kubernetes RBAC 映射
-- 观测能力：Prometheus / Metrics Server 集成
+- 观测能力：Prometheus / Metrics Server 集成（当前已有可选 **v1 使用埋点 NDJSON**，见 `doc/dev/analytics.md`，可后续对接集中分析）
 
 ## 长期
 

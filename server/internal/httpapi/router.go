@@ -98,7 +98,7 @@ func NewRouter(reg *cluster.Registry) *gin.Engine {
 		})
 	})
 
-	// resource routes (pods, deployments, namespaces, nodes, etc.)
+	// resource routes (pods, deployments, nodes, etc.)
 	registerResourceRoutes(r, reg)
 
 	// pod logs
@@ -112,6 +112,8 @@ func NewRouter(reg *cluster.Registry) *gin.Engine {
 
 	// cluster combos (preset cluster + namespace)
 	registerClusterComboRoutes(r, reg)
+
+	registerAnalyticsRoutes(r)
 
 	return r
 }

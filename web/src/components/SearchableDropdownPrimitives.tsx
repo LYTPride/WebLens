@@ -1,7 +1,7 @@
 import React from "react";
 import type { ClusterSummary } from "../api";
 
-/** 与主页「组合选择」下拉内搜索框一致的 input 样式，供多处复用 */
+/** 与主页「作用域选择」下拉内搜索框一致的 input 样式，供多处复用 */
 export const WL_SEARCHABLE_DROPDOWN_INPUT_STYLE: React.CSSProperties = {
   padding: "6px 10px",
   borderRadius: 6,

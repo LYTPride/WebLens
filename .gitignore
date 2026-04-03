@@ -8,6 +8,9 @@ server/bin/
 # 发布打包临时目录
 release/
 
+# 服务端 v1 使用行为埋点（本地运行生成）
+logs/
+
 # OS / IDE
 .DS_Store
 *.swp
