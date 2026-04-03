@@ -10,6 +10,8 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
+  /* 仅保留各业务区内部的横向滚动（如表格）；禁止视口级横向滚动，避免与底部标签条 scrollbar 叠成双条并误拖整页 */
+  overflow-x: hidden;
 }
 
 body {
@@ -55,6 +57,11 @@ body {
 
 *::-webkit-scrollbar-thumb:hover {
   background-color: #6b7280;
+}
+
+/* 底栏标签横向滚动：略矮横条 + 内联 padding-bottom，减少悬停/拖动 thumb 盖住标题 */
+.wl-bottom-panel-tabs-scroll::-webkit-scrollbar {
+  height: 6px;
 }
 
 /* 三点菜单：一级与二级菜单行高亮（背景仅由 class 控制，避免被内联覆盖） */
@@ -266,18 +273,21 @@ th.wl-table-sticky-head input[type="checkbox"] {
   font-weight: 500;
 }
 
+/* 预留固定槽位，避免 hover 显示复制 icon 时排版抖动 */
 .wl-resource-name-with-copy__tools {
   display: inline-flex;
+  flex: 0 0 22px;
+  width: 22px;
   flex-shrink: 0;
-  align-items: center;
-  gap: 6px;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 .wl-resource-name-with-copy__copy {
   margin: 0;
   padding: 0;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border: none;
   background: none;
   cursor: pointer;
@@ -287,6 +297,13 @@ th.wl-table-sticky-head input[type="checkbox"] {
   line-height: 0;
   border-radius: 4px;
   color: inherit;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.wl-resource-name-with-copy:hover .wl-resource-name-with-copy__copy,
+.wl-resource-name-with-copy:focus-within .wl-resource-name-with-copy__copy {
+  opacity: 1;
 }
 
 .wl-resource-name-with-copy__copy:hover {
@@ -296,6 +313,63 @@ th.wl-table-sticky-head input[type="checkbox"] {
 .wl-resource-name-with-copy__copy:focus-visible {
   outline: 2px solid #38bdf8;
   outline-offset: 2px;
+  opacity: 1;
+}
+
+/**
+ * 列表 / 展开行：资源名单元格内「名称 + 复制 icon」
+ * 默认隐藏 icon，悬停名称区域（整格）或聚焦时显示；右侧预留 22px 避免抖动
+ */
+.wl-table-hover-copy {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+  box-sizing: border-box;
+}
+
+.wl-table-hover-copy__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.wl-table-hover-copy__btn {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  line-height: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.wl-table-hover-copy:hover .wl-table-hover-copy__btn,
+.wl-table-hover-copy:focus-within .wl-table-hover-copy__btn {
+  opacity: 1;
+}
+
+.wl-table-hover-copy__btn:hover {
+  background-color: rgba(148, 163, 184, 0.12);
+}
+
+.wl-table-hover-copy__btn:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+  opacity: 1;
 }
 
 /* ClearableSearchInput 清空按钮 */

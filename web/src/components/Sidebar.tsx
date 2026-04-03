@@ -5,21 +5,18 @@ export const SIDEBAR_WIDTH = 220;
 
 const MENU: { title: string; items: { id: ResourceKind; label: string }[] }[] = [
   {
+    title: "集群",
+    items: [
+      { id: "events", label: "Events" },
+      { id: "nodes", label: "Nodes" },
+    ],
+  },
+  {
     title: "工作负载",
     items: [
       { id: "pods", label: "Pods" },
       { id: "deployments", label: "Deployments" },
       { id: "statefulsets", label: "Stateful Sets" },
-      { id: "daemonsets", label: "Daemon Sets" },
-      { id: "jobs", label: "Jobs" },
-      { id: "cronjobs", label: "Cron Jobs" },
-    ],
-  },
-  {
-    title: "配置",
-    items: [
-      { id: "configmaps", label: "Config Maps" },
-      { id: "secrets", label: "Secrets" },
     ],
   },
   {
@@ -32,14 +29,6 @@ const MENU: { title: string; items: { id: ResourceKind; label: string }[] }[] = 
   {
     title: "存储",
     items: [{ id: "persistentvolumeclaims", label: "Persistent Volume Claims" }],
-  },
-  {
-    title: "集群",
-    items: [
-      { id: "nodes", label: "Nodes" },
-      { id: "namespaces", label: "Namespaces" },
-      { id: "events", label: "Events" },
-    ],
   },
 ];
 
@@ -89,21 +78,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onSelect }) => {
   return (
     <nav style={sidebarStyle}>
       <div style={sidebarInnerStyle}>
-      {MENU.map((group) => (
-        <div key={group.title}>
-          <div style={groupTitleStyle}>{group.title}</div>
-          {group.items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              style={itemStyle(currentView === item.id)}
-              onClick={() => onSelect(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      ))}
+        {MENU.map((group) => (
+          <div key={group.title}>
+            <div style={groupTitleStyle}>{group.title}</div>
+            {group.items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                style={itemStyle(currentView === item.id)}
+                onClick={() => onSelect(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        ))}
       </div>
     </nav>
   );

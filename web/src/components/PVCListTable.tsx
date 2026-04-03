@@ -88,16 +88,6 @@ const tdStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
-const copyNameButtonStyle: React.CSSProperties = {
-  marginLeft: 6,
-  padding: 0,
-  border: "none",
-  background: "none",
-  cursor: "pointer",
-  flexShrink: 0,
-  lineHeight: 0,
-};
-
 const menuItemStyleForDropdown: React.CSSProperties = {
   display: "block",
   width: "100%",
@@ -277,38 +267,43 @@ export function PVCListTable({
           return (
             <tr key={(row.metadata as { uid?: string })?.uid || menuKey} className="wl-table-row">
               <td style={baseCell} title={pname}>
-                <span style={{ display: "inline-flex", alignItems: "center", maxWidth: "100%" }}>
+                <span className="wl-table-hover-copy">
+                  <span className="wl-table-hover-copy__main">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDescribe(row);
+                      }}
+                      style={{
+                        padding: 0,
+                        margin: 0,
+                        border: "none",
+                        background: "none",
+                        color: "inherit",
+                        cursor: "pointer",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        minWidth: 0,
+                        flex: "1 1 auto",
+                        textAlign: "left",
+                      }}
+                    >
+                      {pname}
+                    </button>
+                  </span>
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openDescribe(row);
-                    }}
-                    style={{
-                      padding: 0,
-                      margin: 0,
-                      border: "none",
-                      background: "none",
-                      color: "inherit",
-                      cursor: "pointer",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      minWidth: 0,
-                    }}
-                  >
-                    {pname}
-                  </button>
-                  <button
-                    type="button"
+                    className="wl-table-hover-copy__btn"
                     onClick={(e) => {
                       e.stopPropagation();
                       copyName(pname);
                     }}
-                    style={copyNameButtonStyle}
-                    title="复制名称"
+                    title="复制 PVC 名称"
+                    aria-label={`复制 PVC 名称：${pname}`}
                   >
-                    <img src={copyIcon} alt="复制" style={{ height: 14, width: "auto", display: "block" }} />
+                    <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
                   </button>
                 </span>
               </td>

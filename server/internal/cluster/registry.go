@@ -51,8 +51,9 @@ func (r *Registry) LoadFromDir(dir string) error {
 	r.clients = make(map[string]*kubernetes.Clientset)
 	r.restCfgs = make(map[string]*rest.Config)
 
-	if dir == "" {
-		return fmt.Errorf("kubeconfig directory is empty")
+	if strings.TrimSpace(dir) == "" {
+		// 未配置目录：空注册表，由 UI 提示用户填写绝对路径；不作为错误阻断启动
+		return nil
 	}
 
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {

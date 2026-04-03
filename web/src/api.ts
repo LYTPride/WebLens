@@ -387,13 +387,13 @@ export async function reloadClustersFromBackend() {
   return res.data.items;
 }
 
-/** 获取所有预设的集群组合（clusterId + namespace） */
+/** 获取所有预设的作用域（clusterId + namespace，可选别名） */
 export async function fetchClusterCombos(): Promise<ClusterCombo[]> {
   const res = await api.get<{ items: ClusterCombo[] }>("/api/cluster-combos");
   return res.data.items;
 }
 
-/** 新增或更新一个集群组合 */
+/** 新增或更新一个作用域预设 */
 export async function addClusterCombo(
   clusterId: string,
   namespace: string,
@@ -407,7 +407,7 @@ export async function addClusterCombo(
   return res.data.items;
 }
 
-/** 更新组合别名 */
+/** 更新作用域别名 */
 export async function updateClusterComboAlias(id: string, alias: string): Promise<ClusterCombo[]> {
   const res = await api.put<{ items: ClusterCombo[] }>(`/api/cluster-combos/${encodeURIComponent(id)}`, {
     alias,
@@ -415,13 +415,13 @@ export async function updateClusterComboAlias(id: string, alias: string): Promis
   return res.data.items;
 }
 
-/** 删除一个组合 */
+/** 删除一个作用域预设 */
 export async function deleteClusterComboApi(id: string): Promise<ClusterCombo[]> {
   const res = await api.delete<{ items: ClusterCombo[] }>(`/api/cluster-combos/${encodeURIComponent(id)}`);
   return res.data.items;
 }
 
-/** 测试组合可用性（返回 ok + 可选错误信息） */
+/** 测试作用域可用性（返回 ok + 可选错误信息） */
 export async function testClusterCombo(id: string): Promise<{ ok: boolean; error?: string }> {
   const res = await api.post<{ ok: boolean; error?: string }>(
     `/api/cluster-combos/${encodeURIComponent(id)}/test`,
@@ -1297,8 +1297,7 @@ export type ResourceKind =
   | "persistentvolumeclaims"
   /** 仅内部用于 Services 页关联 watch，不出现在侧栏 */
   | "endpoints"
-  | "nodes"
-  | "namespaces";
+  | "nodes";
 
 /** 返回某资源的 API 路径（不含 /api/clusters/:id/） */
 export function resourcePath(kind: ResourceKind): string {

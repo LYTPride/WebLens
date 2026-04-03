@@ -213,7 +213,12 @@ export function PvcDescribeContent({
                 {usedRows.map((r) => (
                   <tr key={r.podName}>
                     <td style={miniTd}>
-                      <ResourceNameWithCopy name={r.podName} onCopy={onCopyName} fontSize={12} />
+                      <ResourceNameWithCopy
+                        name={r.podName}
+                        onCopy={onCopyName}
+                        fontSize={12}
+                        copyButtonTitle="复制 Pod 名称"
+                      />
                     </td>
                     <td style={miniTd}>
                       <PodHealthPill label={r.healthLabel} title={r.healthReasonsText || undefined} />

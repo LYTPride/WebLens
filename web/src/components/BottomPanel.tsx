@@ -192,14 +192,21 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
         left: 0,
         right: 0,
         bottom: 0,
+        width: "100%",
+        maxWidth: "100%",
         height: minimized ? "auto" : heightPx,
-        maxHeight: minimized ? 40 : undefined,
+        /* 拖拽条 8px + 标签行；标签滚动区含底部 padding 为 scrollbar 留带，最小化总高约 60 */
+        maxHeight: minimized ? 60 : undefined,
         display: "flex",
         flexDirection: "column",
         backgroundColor: "#0f172a",
         borderTop: "1px solid #1e293b",
         zIndex: 100,
         boxShadow: "0 -2px 12px rgba(0,0,0,0.3)",
+        /* 防止宽标签把 fixed 层撑出视口，避免视口级横向滚动与标签条 scrollbar 混淆 */
+        overflowX: "hidden",
+        overflowY: "hidden",
+        boxSizing: "border-box",
       }}
     >
       {/* 拖拽条 */}
@@ -232,9 +239,31 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
           borderBottom: "1px solid #1e293b",
           flexShrink: 0,
           minHeight: 36,
+          /* 作为列 flex 子项时须可窄于内容，否则整行 min-width 会变成所有标签宽度之和 */
+          minWidth: 0,
+          width: "100%",
+          maxWidth: "100%",
+          overflow: "hidden",
         }}
       >
-        <div style={{ display: "flex", flex: 1, overflowX: "auto", minWidth: 0 }}>
+        <div
+          className="wl-bottom-panel-tabs-scroll"
+          style={{
+            display: "flex",
+            flex: 1,
+            flexBasis: 0,
+            alignItems: "center",
+            overflowX: "auto",
+            overflowY: "hidden",
+            minWidth: 0,
+            maxWidth: "100%",
+            overscrollBehaviorX: "contain",
+            WebkitOverflowScrolling: "touch",
+            /* 为横向 scrollbar 留出独立带区，避免悬停/拖动时压住标签标题 */
+            paddingBottom: 12,
+            boxSizing: "border-box",
+          }}
+        >
           {tabs.map((t) => (
             <div
               key={t.id}
@@ -285,7 +314,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", gap: 4, padding: "4px 8px" }}>
+        <div style={{ display: "flex", gap: 4, padding: "4px 8px", flexShrink: 0, alignItems: "center" }}>
           <button
             type="button"
             onClick={() => onMinimizedChange(!minimized)}
