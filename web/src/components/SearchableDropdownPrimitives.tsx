@@ -44,6 +44,13 @@ export const WL_SEARCHABLE_DROPDOWN_SCROLL_STYLE: React.CSSProperties = {
   maxHeight: 260,
 };
 
+/** Portal 大下拉：高度由外层面板 maxHeight 约束，列表区仅 flex 滚动 */
+export const WL_SEARCHABLE_DROPDOWN_SCROLL_PORTAL_STYLE: React.CSSProperties = {
+  overflowY: "auto",
+  flex: 1,
+  minHeight: 0,
+};
+
 export function kubeconfigDisplayFileName(filePath: string): string {
   return filePath.replace(/^.*[/\\]/, "") || filePath;
 }
@@ -71,12 +78,12 @@ export function SearchableDropdownTwoColumnRow({
     <button
       type="button"
       onClick={onClick}
+      className={`wl-searchable-dropdown-row${selected ? " wl-searchable-dropdown-row--selected" : ""}`}
       style={{
         display: "block",
         width: "100%",
         padding: "8px 12px",
         textAlign: "left",
-        backgroundColor: selected ? "#1e293b" : "transparent",
         border: "none",
         borderBottom: borderBottom ? "1px solid #1e293b" : undefined,
         cursor: "pointer",

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchPodLogs, streamPodLogs } from "../api";
 import { ClearableSearchInput } from "./ClearableSearchInput";
+import { DropdownMenuPortal } from "./DropdownMenuPortal";
 
 interface LogsTabProps {
   clusterId: string;
@@ -34,6 +35,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   const [sinceTime, setSinceTime] = useState<string | null>(null);
   const preRef = useRef<HTMLPreElement>(null);
   const currentMatchRef = useRef<HTMLSpanElement>(null);
+  const downloadMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
   useEffect(() => {
@@ -336,6 +338,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
         </button>
         <div style={{ position: "relative" }}>
           <button
+            ref={downloadMenuOpen ? downloadMenuTriggerRef : undefined}
             type="button"
             onClick={() => setDownloadMenuOpen((v) => !v)}
             title="下载日志"
@@ -344,49 +347,52 @@ export const LogsTab: React.FC<LogsTabProps> = ({
             Download
           </button>
           {downloadMenuOpen && (
-            <div
+          <DropdownMenuPortal
+            onClose={() => setDownloadMenuOpen(false)}
+            triggerRef={downloadMenuTriggerRef}
+            align="right"
+            surfaceStyle={{ padding: 0, minWidth: 140 }}
+          >
+            <button
+              type="button"
+              className="wl-menu-item"
+              onClick={() => {
+                setDownloadMenuOpen(false);
+                downloadAsFile("visible");
+              }}
               style={{
-                position: "absolute",
-                right: 0,
-                top: "100%",
-                marginTop: 4,
-                minWidth: 140,
-                backgroundColor: "#020617",
-                borderRadius: 6,
-                border: "1px solid #1e293b",
-                boxShadow: "0 4px 10px rgba(0,0,0,0.5)",
-                zIndex: 10,
-                overflow: "hidden",
+                display: "block",
+                width: "100%",
+                padding: "8px 12px",
+                border: "none",
+                cursor: "pointer",
+                fontSize: 13,
+                textAlign: "left",
               }}
             >
-              <button
-                type="button"
-                onClick={() => downloadAsFile("visible")}
-                style={{
-                  ...navBtnStyle,
-                  display: "block",
-                  width: "100%",
-                  borderRadius: 0,
-                  textAlign: "left",
-                }}
-              >
-                Visible logs
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadAsFile("all")}
-                style={{
-                  ...navBtnStyle,
-                  display: "block",
-                  width: "100%",
-                  borderRadius: 0,
-                  borderTop: "1px solid #1e293b",
-                  textAlign: "left",
-                }}
-              >
-                All logs
-              </button>
-            </div>
+              Visible logs
+            </button>
+            <button
+              type="button"
+              className="wl-menu-item"
+              onClick={() => {
+                setDownloadMenuOpen(false);
+                downloadAsFile("all");
+              }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "8px 12px",
+                border: "none",
+                borderTop: "1px solid #334155",
+                cursor: "pointer",
+                fontSize: 13,
+                textAlign: "left",
+              }}
+            >
+              All logs
+            </button>
+          </DropdownMenuPortal>
           )}
         </div>
       </div>

@@ -29,6 +29,7 @@
 - [文件管理面板设计说明](./dev/file-manager-design.md)（含与列表共用的 **`ConfirmDialog` / `InputDialog`** 说明）
 - [v1 使用行为埋点（可选）](./dev/analytics.md)（`WEBLENS_ANALYTICS_LOG`、`POST /api/analytics/events`、`trackUsage`）
 - [开发变更记录](./dev/changelog.md)
+- [全局下拉 Portal 与次级展开表格](./dev/portal-dropdown-and-secondary-tables.md)（`WlPortal`、统一定位与 z-index、Ingress/STS/Services 子表列宽）
 
 ## 路线规划
 

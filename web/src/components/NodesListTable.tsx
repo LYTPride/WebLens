@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import { ResizableTh } from "./ResizableTh";
 import { ResourceSortArrows } from "./ResourceSortArrows";
 import {
@@ -18,6 +18,7 @@ import {
 import type { Pod } from "../api";
 import { formatAgeFromMetadata } from "../utils/k8sCreationTimestamp";
 import copyIcon from "../assets/icon-copy.png";
+import { DropdownMenuPortal } from "./DropdownMenuPortal";
 
 export const NODE_COLUMN_KEYS = [
   "name",
@@ -85,8 +86,6 @@ const menuItemStyleForDropdown: React.CSSProperties = {
   width: "100%",
   padding: "8px 12px",
   border: "none",
-  background: "none",
-  color: "#e5e7eb",
   cursor: "pointer",
   fontSize: 13,
   textAlign: "left",
@@ -162,6 +161,7 @@ export function NodesListTable({
   openEditTab,
   copyName,
 }: NodesListTableProps) {
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const colCount = NODE_COLUMN_KEYS.length;
   return (
     <table
@@ -293,6 +293,7 @@ export function NodesListTable({
               <td style={{ ...tdStyle, overflow: "visible" }} onClick={(e) => e.stopPropagation()}>
                 <div style={{ position: "relative" }}>
                   <button
+                    ref={isMenuOpen ? menuTriggerRef : undefined}
                     type="button"
                     className="wl-table-menu-trigger"
                     disabled={rowBusy || !effectiveClusterId}
@@ -314,39 +315,25 @@ export function NodesListTable({
                     ⋮
                   </button>
                   {isMenuOpen && (
-                    <>
-                      <div
-                        style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                        onClick={() => setMenuOpenKey(null)}
-                        aria-hidden
-                      />
-                      <div
-                        className="wl-table-dropdown-menu"
-                        style={{
-                          position: "absolute",
-                          right: 0,
-                          top: "100%",
-                          marginTop: 4,
-                          minWidth: 160,
-                          zIndex: 41,
-                          padding: "4px 0",
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          className="wl-menu-item"
-                          style={menuItemStyleForDropdown}
-                          disabled={rowBusy}
-                          onClick={() => {
-                            setMenuOpenKey(null);
-                            openEditTab(row);
-                          }}
-                        >
-                          <span style={{ marginRight: 8 }}>✎</span> Edit
-                        </button>
-                      </div>
-                    </>
+                  <DropdownMenuPortal
+                    onClose={() => setMenuOpenKey(null)}
+                    triggerRef={menuTriggerRef}
+                    align="right"
+                    surfaceStyle={{ padding: "4px 0", minWidth: 160 }}
+                  >
+                    <button
+                      type="button"
+                      className="wl-menu-item"
+                      style={menuItemStyleForDropdown}
+                      disabled={rowBusy}
+                      onClick={() => {
+                        setMenuOpenKey(null);
+                        openEditTab(row);
+                      }}
+                    >
+                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                    </button>
+                  </DropdownMenuPortal>
                   )}
                 </div>
               </td>
