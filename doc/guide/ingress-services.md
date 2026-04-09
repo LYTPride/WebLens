@@ -4,8 +4,8 @@
 
 ## 列表与展开
 
-- **Ingress**：列表支持按当前命名空间加载；行可展开查看规则级诊断行（Host、Path、Backend Service、状态、异常说明等），与 Describe 中 Rules 表使用同一套排障模型（见 `ingressTroubleshoot`）。
-- **Services**：列表支持排序、列宽、行展开；展开区展示端口子表与 **Endpoints / 关联后端** 子表（IP、Ready、Pod、Node、说明、联动等）。
+- **Ingress**：列表支持按当前命名空间加载；行可展开查看规则级诊断行（Host、Path、Backend Service、状态、异常说明等），与 Describe 中 Rules 表使用同一套排障模型（见 `ingressTroubleshoot`）。展开后的 **规则子表** 支持 **表头拖拽调列宽**，窄屏下子表可横向滚动，单元格内长文本换行展示。
+- **Services**：列表支持排序、列宽、行展开；展开区展示端口子表与 **Endpoints / 关联后端** 子表（IP、Ready、Pod、Node、说明、联动等）。两张子表均支持 **表头拖拽调列宽**，布局规则见 [资源列表](./resource-lists.md)「表头列宽（主表与行内展开子表）」。
 
 ## Describe 面板
 

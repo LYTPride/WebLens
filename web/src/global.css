@@ -76,6 +76,12 @@ body {
   background-color: #0f172a;
 }
 
+/* 激活项在 hover 时仍使用统一悬浮底，避免与 is-active 底色“无反馈” */
+.wl-menu-item.is-active:hover {
+  background-color: #334155;
+  color: #e2e8f0;
+}
+
 /* 鼠标悬停：深色主题下的高亮 */
 .wl-menu-item:hover {
   background-color: #334155;
@@ -87,7 +93,25 @@ body {
   color: #f97373;
 }
 .wl-menu-item.wl-menu-item-danger:hover {
-  color: #e2e8f0;
+  background-color: #334155;
+  color: #fecaca;
+}
+.wl-menu-item.wl-menu-item-danger.is-active:hover {
+  color: #fecaca;
+}
+
+.wl-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wl-menu-item:disabled:hover {
+  background-color: transparent;
+  color: inherit;
+}
+
+.wl-menu-item.wl-menu-item-danger:disabled:hover {
+  color: #f97373;
 }
 
 /* 资源列表 sticky 表头（Pods / Deployments / StatefulSet 等复用 .wl-table-sticky-head） */
@@ -186,12 +210,42 @@ th.wl-table-sticky-head input[type="checkbox"] {
   cursor: not-allowed;
 }
 
-/* 表格行内下拉菜单容器（与现有内联阴影一致，便于后续统一改主题） */
-.wl-table-dropdown-menu {
+/* Portal 统一下拉容器（与历史 class 并存；色值与 z-index 分层见 web/src/constants/zLayers.ts） */
+.wl-table-dropdown-menu,
+.wl-dropdown-surface--menu {
   background-color: #1e293b;
   border: 1px solid #334155;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.wl-searchable-dropdown-panel,
+.wl-dropdown-surface--searchable {
+  background-color: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+}
+
+/* 可搜索下拉双列行：与 .wl-menu-item 统一的 hover 反馈 */
+.wl-searchable-dropdown-row {
+  background-color: transparent;
+  color: #e2e8f0;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.wl-searchable-dropdown-row:hover {
+  background-color: #334155;
+  color: #e2e8f0;
+}
+
+.wl-searchable-dropdown-row.wl-searchable-dropdown-row--selected {
+  background-color: #1e293b;
+}
+
+.wl-searchable-dropdown-row.wl-searchable-dropdown-row--selected:hover {
+  background-color: #334155;
 }
 
 /* 跨资源联动入口（Ingress / Services / 后续资源页复用）：轻量胶囊，非主按钮、非默认超链接 */

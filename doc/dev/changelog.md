@@ -4,6 +4,12 @@
 
 ## 2026-03（近期）
 
+### 全局下拉 Portal 与次级展开表格
+
+- **下拉 / 菜单**：统一挂载到 `document.body`（`WlPortal`），定位由 `computeDropdownPosition` + `useFloatingDropdownPosition` 负责（下优先、贴边避让、`maxHeight`）；**z-index** 集中在 `web/src/constants/zLayers.ts`；**Esc** 与点击遮罩关闭（`useEscapeToClose`、全屏透明层）。轻量菜单与可搜索面板分别见 `DropdownMenuPortal.tsx`、`SearchableDropdownPanelPortal.tsx`；视觉容器 `WlDropdownSurface`。列表行菜单、平台配置菜单、作用域选择、日志 Download 等均按 **打开时才挂载 Portal** 条件渲染。
+- **次级展开子表**：新增 `SecondaryExpandTable` 与 `secondaryExpandTableConfig.ts`；**Ingress 规则子表**、**StatefulSet Pod 子表**、**Services 的 Ports / Endpoints 子表** 使用与主表相同的 `useResourceListColumnResize` + `ResizableTh`（子表表头 `sticky={false}`），`colgroup` 与表头列宽一致；单元格统一换行与防串列样式；子表容器 **`overflow-x: auto`**，避免窄屏撑破整页。
+- **开发说明**：`doc/dev/portal-dropdown-and-secondary-tables.md`。
+
 ### Events（事件）列表、Describe 与排序
 
 - **后端**：`events` 已纳入通用资源 list/watch（`server/internal/httpapi/resources.go` 等，与 PVC 同路径模式）。
