@@ -6,6 +6,7 @@
 
 ### 主题系统收敛、导航入口调整与 Shell 主题切换修复
 
+- **文档同步**：根 `README.md`、`doc/README.md`、`doc/guide/resource-lists.md`（Nodes 与 v1 入口策略）、`doc/guide/shell.md`、`doc/dev/shell-implementation.md`、`doc/dev/architecture.md`；新增 **`doc/dev/theme-ui.md`** 集中说明主题、顶栏 icon 区与侧栏轨道。
 - **主题系统统一接入**：补齐深浅主题 token 并在多处表格/详情组件去硬编码，统一使用 `--wl-*` 变量；`Deployment` 列表与详情中的 `Conditions` 标签改为语义色 token（浅色主题下可读性恢复，深色效果保持）。
 - **受限态公共修复**：`ResourceAccessDeniedState` 卡片背景、阴影、文字和按钮全面接入主题变量；浅色主题不再出现深色面板残留。
 - **Node 入口收敛（逻辑保留）**：`nodes` 加入 `V1_HIDDEN_VIEWS`，侧栏不再展示 Nodes；`App.tsx` 增加隐藏视图回退，避免通过常规 UI 进入 Nodes 页面；Nodes 相关列表/状态/API 逻辑未删除，后续可恢复入口。

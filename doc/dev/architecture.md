@@ -25,6 +25,7 @@ WebLens 采用前后端分离 + 同源部署模式：
 
 ## 主要模块
 
+- **前端主题**：`web/src/theme/`（`ThemeProvider`、`tokens.css`、`themeStorage`）；顶栏主题切换与界面语义色统一由 `--wl-*` 变量驱动，详见 [主题与顶栏 / 侧栏 UI](./theme-ui.md)
 - `server/internal/cluster`：kubeconfig 扫描与多集群注册
 - `server/internal/httpapi`：API 路由与资源操作（含 Deployment 的 List/Watch/YAML 更新、Scale、Restart、Delete 等；Ingress / Service 结构化 describe 等见 `ingress_ops.go`、`service_ops.go`）；**可选** v1 使用埋点 `POST /api/analytics/events`（`analytics.go` + `internal/analytics`）
 - `web/src/pages/App.tsx`：主页面状态编排（多资源列表、列宽、菜单、作用域内跳过重复 list 与 watch 生命周期）
