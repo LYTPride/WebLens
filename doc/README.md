@@ -23,12 +23,14 @@
 ## 开发文档（dev）
 
 - [架构设计](./dev/architecture.md)
+- [主题与顶栏 / 侧栏 UI](./dev/theme-ui.md)（`ThemeProvider`、`tokens.css`、顶栏 icon 区、侧栏轨道与 `V1_HIDDEN_VIEWS`）
 - [资源列表数据流（list / watch / 缓存）](./dev/resource-list-dataflow.md)（规范正文见仓库 [`web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md`](../web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md)，含 **serverTimeMs**、Age、Watch 缺口 list 合并）
 - [Pod 状态标签模型](./dev/health-label-model.md)
 - [Shell 实现说明](./dev/shell-implementation.md)
 - [文件管理面板设计说明](./dev/file-manager-design.md)（含与列表共用的 **`ConfirmDialog` / `InputDialog`** 说明）
 - [v1 使用行为埋点（可选）](./dev/analytics.md)（`WEBLENS_ANALYTICS_LOG`、`POST /api/analytics/events`、`trackUsage`）
 - [开发变更记录](./dev/changelog.md)
+- [全局下拉 Portal 与次级展开表格](./dev/portal-dropdown-and-secondary-tables.md)（`WlPortal`、统一定位与 z-index、Ingress/STS/Services 子表列宽）
 
 ## 路线规划
 

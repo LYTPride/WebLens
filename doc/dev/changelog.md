@@ -4,6 +4,22 @@
 
 ## 2026-03（近期）
 
+### 主题系统收敛、导航入口调整与 Shell 主题切换修复
+
+- **文档同步**：根 `README.md`、`doc/README.md`、`doc/guide/resource-lists.md`（Nodes 与 v1 入口策略）、`doc/guide/shell.md`、`doc/dev/shell-implementation.md`、`doc/dev/architecture.md`；新增 **`doc/dev/theme-ui.md`** 集中说明主题、顶栏 icon 区与侧栏轨道。
+- **主题系统统一接入**：补齐深浅主题 token 并在多处表格/详情组件去硬编码，统一使用 `--wl-*` 变量；`Deployment` 列表与详情中的 `Conditions` 标签改为语义色 token（浅色主题下可读性恢复，深色效果保持）。
+- **受限态公共修复**：`ResourceAccessDeniedState` 卡片背景、阴影、文字和按钮全面接入主题变量；浅色主题不再出现深色面板残留。
+- **Node 入口收敛（逻辑保留）**：`nodes` 加入 `V1_HIDDEN_VIEWS`，侧栏不再展示 Nodes；`App.tsx` 增加隐藏视图回退，避免通过常规 UI 进入 Nodes 页面；Nodes 相关列表/状态/API 逻辑未删除，后续可恢复入口。
+- **顶栏右上角操作区重构**：主题切换与平台配置统一为轻量 icon action；平台配置从文字区块改为齿轮入口，保持原菜单内容与交互；点击齿轮增加轻量自转反馈，hover 仅 icon 提亮。
+- **左侧边栏与把手重构**：把手改为边栏右缘中部局部凸耳（连续曲线，同体色），收起态仅保留小把手入口；去除“整条竖向控制条 / 外挂按钮”观感，展开收起保持一体化抽拉动画。
+- **Shell 主题切换修复**：修复“深色进入 Shell 后切浅色仍黑底 / 浅色进入后切深色仍白底”问题；`PodShell` 在主题切换后双帧重应用 xterm 主题并强制 refresh，同步 viewport 背景避免残留底色。
+
+### 全局下拉 Portal 与次级展开表格
+
+- **下拉 / 菜单**：统一挂载到 `document.body`（`WlPortal`），定位由 `computeDropdownPosition` + `useFloatingDropdownPosition` 负责（下优先、贴边避让、`maxHeight`）；**z-index** 集中在 `web/src/constants/zLayers.ts`；**Esc** 与点击遮罩关闭（`useEscapeToClose`、全屏透明层）。轻量菜单与可搜索面板分别见 `DropdownMenuPortal.tsx`、`SearchableDropdownPanelPortal.tsx`；视觉容器 `WlDropdownSurface`。列表行菜单、平台配置菜单、作用域选择、日志 Download 等均按 **打开时才挂载 Portal** 条件渲染。
+- **次级展开子表**：新增 `SecondaryExpandTable` 与 `secondaryExpandTableConfig.ts`；**Ingress 规则子表**、**StatefulSet Pod 子表**、**Services 的 Ports / Endpoints 子表** 使用与主表相同的 `useResourceListColumnResize` + `ResizableTh`（子表表头 `sticky={false}`），`colgroup` 与表头列宽一致；单元格统一换行与防串列样式；子表容器 **`overflow-x: auto`**，避免窄屏撑破整页。
+- **开发说明**：`doc/dev/portal-dropdown-and-secondary-tables.md`。
+
 ### Events（事件）列表、Describe 与排序
 
 - **后端**：`events` 已纳入通用资源 list/watch（`server/internal/httpapi/resources.go` 等，与 PVC 同路径模式）。

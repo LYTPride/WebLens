@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchPodLogs, streamPodLogs } from "../api";
 import { ClearableSearchInput } from "./ClearableSearchInput";
+import { DropdownMenuPortal } from "./DropdownMenuPortal";
 
 interface LogsTabProps {
   clusterId: string;
@@ -34,6 +35,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   const [sinceTime, setSinceTime] = useState<string | null>(null);
   const preRef = useRef<HTMLPreElement>(null);
   const currentMatchRef = useRef<HTMLSpanElement>(null);
+  const downloadMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
   useEffect(() => {
@@ -199,20 +201,20 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           alignItems: "center",
           gap: 8,
           padding: "6px 10px",
-          borderBottom: "1px solid #1e293b",
+          borderBottom: "1px solid var(--wl-border-sidebar)",
           flexShrink: 0,
         }}
       >
-        <label style={{ fontSize: 12, color: "#94a3b8" }}>容器：</label>
+        <label style={{ fontSize: 12, color: "var(--wl-text-secondary)" }}>容器：</label>
         <select
           value={currentContainer}
           onChange={(e) => setCurrentContainer(e.target.value)}
           style={{
             padding: "4px 8px",
             borderRadius: 4,
-            border: "1px solid #334155",
-            backgroundColor: "#0f172a",
-            color: "#e2e8f0",
+            border: "1px solid var(--wl-border-strong)",
+            backgroundColor: "var(--wl-bg-elevated)",
+            color: "var(--wl-text-heading)",
             fontSize: 12,
             cursor: "pointer",
           }}
@@ -224,7 +226,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           ))}
         </select>
         {sinceTime && (
-          <span style={{ fontSize: 12, color: "#64748b", marginLeft: 8, whiteSpace: "nowrap" }}>
+          <span style={{ fontSize: 12, color: "var(--wl-text-muted)", marginLeft: 8, whiteSpace: "nowrap" }}>
             Logs from{" "}
             {(() => {
               const d = new Date(sinceTime);
@@ -238,7 +240,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           </span>
         )}
         <div style={{ flex: 1, minWidth: 0 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#94a3b8" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--wl-text-secondary)" }}>
           <input
             type="checkbox"
             checked={showPrevious}
@@ -247,7 +249,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           />
           previous 容器日志
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#94a3b8" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--wl-text-secondary)" }}>
           <input
             type="checkbox"
             checked={showTimestamps}
@@ -297,15 +299,15 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           inputStyle={{
             padding: "4px 8px",
             borderRadius: 4,
-            border: "1px solid #334155",
-            backgroundColor: "#020617",
-            color: "#e2e8f0",
+            border: "1px solid var(--wl-border-strong)",
+            backgroundColor: "var(--wl-bg-input)",
+            color: "var(--wl-text-heading)",
             fontSize: 12,
           }}
         />
         {keyword && (
           <>
-            <span style={{ fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: 12, color: "var(--wl-text-secondary)", whiteSpace: "nowrap" }}>
               × {total > 0 ? `${safeIndex + 1}/${total}` : "0/0"}
             </span>
             <button
@@ -336,6 +338,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({
         </button>
         <div style={{ position: "relative" }}>
           <button
+            ref={downloadMenuOpen ? downloadMenuTriggerRef : undefined}
             type="button"
             onClick={() => setDownloadMenuOpen((v) => !v)}
             title="下载日志"
@@ -344,49 +347,52 @@ export const LogsTab: React.FC<LogsTabProps> = ({
             Download
           </button>
           {downloadMenuOpen && (
-            <div
+          <DropdownMenuPortal
+            onClose={() => setDownloadMenuOpen(false)}
+            triggerRef={downloadMenuTriggerRef}
+            align="right"
+            surfaceStyle={{ padding: 0, minWidth: 140 }}
+          >
+            <button
+              type="button"
+              className="wl-menu-item"
+              onClick={() => {
+                setDownloadMenuOpen(false);
+                downloadAsFile("visible");
+              }}
               style={{
-                position: "absolute",
-                right: 0,
-                top: "100%",
-                marginTop: 4,
-                minWidth: 140,
-                backgroundColor: "#020617",
-                borderRadius: 6,
-                border: "1px solid #1e293b",
-                boxShadow: "0 4px 10px rgba(0,0,0,0.5)",
-                zIndex: 10,
-                overflow: "hidden",
+                display: "block",
+                width: "100%",
+                padding: "8px 12px",
+                border: "none",
+                cursor: "pointer",
+                fontSize: 13,
+                textAlign: "left",
               }}
             >
-              <button
-                type="button"
-                onClick={() => downloadAsFile("visible")}
-                style={{
-                  ...navBtnStyle,
-                  display: "block",
-                  width: "100%",
-                  borderRadius: 0,
-                  textAlign: "left",
-                }}
-              >
-                Visible logs
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadAsFile("all")}
-                style={{
-                  ...navBtnStyle,
-                  display: "block",
-                  width: "100%",
-                  borderRadius: 0,
-                  borderTop: "1px solid #1e293b",
-                  textAlign: "left",
-                }}
-              >
-                All logs
-              </button>
-            </div>
+              Visible logs
+            </button>
+            <button
+              type="button"
+              className="wl-menu-item"
+              onClick={() => {
+                setDownloadMenuOpen(false);
+                downloadAsFile("all");
+              }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "8px 12px",
+                border: "none",
+                borderTop: "1px solid var(--wl-border-strong)",
+                cursor: "pointer",
+                fontSize: 13,
+                textAlign: "left",
+              }}
+            >
+              All logs
+            </button>
+          </DropdownMenuPortal>
           )}
         </div>
       </div>
@@ -401,8 +407,8 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           fontSize: 13,
           fontFamily:
             "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-          color: "#e2e8f0",
-          backgroundColor: "#020617",
+          color: "var(--wl-text-heading)",
+          backgroundColor: "var(--wl-describe-table-bg)",
           whiteSpace: "pre-wrap",
           wordBreak: "break-all",
           minHeight: 0,
@@ -421,8 +427,12 @@ export const LogsTab: React.FC<LogsTabProps> = ({
                 key={i}
                 ref={seg.matchIndex === safeIndex ? currentMatchRef : undefined}
                 style={{
-                  backgroundColor: seg.matchIndex === safeIndex ? "#b45309" : "#475569",
-                  color: "#fff",
+                  backgroundColor:
+                    seg.matchIndex === safeIndex ? "#b45309" : "var(--wl-log-match-inactive-bg)",
+                  color:
+                    seg.matchIndex === safeIndex
+                      ? "var(--wl-text-on-primary)"
+                      : "var(--wl-log-match-inactive-text)",
                 }}
               >
                 {seg.value}
@@ -438,9 +448,9 @@ export const LogsTab: React.FC<LogsTabProps> = ({
 const navBtnStyle: React.CSSProperties = {
   padding: "2px 6px",
   borderRadius: 4,
-  border: "1px solid #334155",
-  backgroundColor: "#1e293b",
-  color: "#e2e8f0",
+  border: "1px solid var(--wl-border-strong)",
+  backgroundColor: "var(--wl-bg-control)",
+  color: "var(--wl-text-heading)",
   cursor: "pointer",
   fontSize: 12,
   lineHeight: 1.2,

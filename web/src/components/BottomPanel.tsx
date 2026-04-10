@@ -199,10 +199,10 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
         maxHeight: minimized ? 60 : undefined,
         display: "flex",
         flexDirection: "column",
-        backgroundColor: "#0f172a",
-        borderTop: "1px solid #1e293b",
+        backgroundColor: "var(--wl-bg-elevated)",
+        borderTop: "1px solid var(--wl-border-sidebar)",
         zIndex: 100,
-        boxShadow: "0 -2px 12px rgba(0,0,0,0.3)",
+        boxShadow: "var(--wl-shadow-bottom-panel)",
         /* 防止宽标签把 fixed 层撑出视口，避免视口级横向滚动与标签条 scrollbar 混淆 */
         overflowX: "hidden",
         overflowY: "hidden",
@@ -218,7 +218,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
         style={{
           height: 8,
           cursor: minimized ? "pointer" : "ns-resize",
-          background: dragging ? "#334155" : "linear-gradient(180deg, #1e293b 0%, #0f172a 100%)",
+          background: dragging
+            ? "var(--wl-bg-control)"
+            : "linear-gradient(180deg, var(--wl-border-sidebar) 0%, var(--wl-bg-elevated) 100%)",
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
@@ -227,7 +229,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
         title={minimized ? "点击展开" : "拖拽调整高度"}
       >
         {!minimized && (
-          <span style={{ width: 40, height: 3, borderRadius: 2, backgroundColor: "#475569", fontSize: 0 }} />
+          <span
+            style={{ width: 40, height: 3, borderRadius: 2, backgroundColor: "var(--wl-bottom-resize-handle)", fontSize: 0 }}
+          />
         )}
       </div>
 
@@ -236,7 +240,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
         style={{
           display: "flex",
           alignItems: "center",
-          borderBottom: "1px solid #1e293b",
+          borderBottom: "1px solid var(--wl-border-sidebar)",
           flexShrink: 0,
           minHeight: 36,
           /* 作为列 flex 子项时须可窄于内容，否则整行 min-width 会变成所有标签宽度之和 */
@@ -275,9 +279,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                 alignItems: "center",
                 gap: 6,
                 padding: "6px 10px",
-                borderRight: "1px solid #1e293b",
-                backgroundColor: activeTabId === t.id ? "#1e293b" : "transparent",
-                color: activeTabId === t.id ? "#e2e8f0" : "#94a3b8",
+                borderRight: "1px solid var(--wl-border-sidebar)",
+                backgroundColor: activeTabId === t.id ? "var(--wl-bg-control)" : "transparent",
+                color: activeTabId === t.id ? "var(--wl-text-heading)" : "var(--wl-text-secondary)",
                 cursor: "pointer",
                 fontSize: 12,
                 whiteSpace: "nowrap",
@@ -302,7 +306,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   padding: 0,
                   border: "none",
                   background: "none",
-                  color: "#64748b",
+                  color: "var(--wl-text-muted)",
                   cursor: "pointer",
                   fontSize: 14,
                   lineHeight: 1,
@@ -348,7 +352,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                 flex: 1,
                 minHeight: 0,
                 overflow: "hidden",
-                backgroundColor: tab.type === "shell" ? "#020617" : undefined,
+                backgroundColor: tab.type === "shell" ? "var(--wl-bg-table)" : undefined,
               }}
             >
               {tab.type === "shell" ? (
@@ -380,9 +384,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                         style={{
                           width: 6,
                           cursor: "col-resize",
-                          background: fileDragging ? "#334155" : "transparent",
-                          borderLeft: "1px solid rgba(30,41,59,0.6)",
-                          borderRight: "1px solid rgba(30,41,59,0.6)",
+                          background: fileDragging ? "var(--wl-bg-control)" : "transparent",
+                          borderLeft: "1px solid var(--wl-border-subtle)",
+                          borderRight: "1px solid var(--wl-border-subtle)",
                         }}
                       />
                       <div
@@ -392,8 +396,8 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                           maxWidth: 780,
                           display: "flex",
                           flexDirection: "column",
-                          backgroundColor: "#020617",
-                          borderLeft: "1px solid #1e293b",
+                          backgroundColor: "var(--wl-bg-table)",
+                          borderLeft: "1px solid var(--wl-border-sidebar)",
                         }}
                       >
                         <div
@@ -411,11 +415,11 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                           }}
                           style={{
                             padding: "10px 12px",
-                            borderBottom: "1px solid #1e293b",
+                            borderBottom: "1px solid var(--wl-border-sidebar)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
-                            backgroundColor: "#020617",
+                            backgroundColor: "var(--wl-bg-table)",
                             flexShrink: 0,
                           }}
                         >
@@ -427,9 +431,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                               minWidth: 0,
                             }}
                           >
-                            <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>文件管理</div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--wl-text-heading)" }}>文件管理</div>
                             {filePanelIntroVisualByTab[tab.id] && (
-                              <span style={{ fontSize: 11, color: "#64748b", fontWeight: 400 }}>
+                              <span style={{ fontSize: 11, color: "var(--wl-text-muted)", fontWeight: 400 }}>
                                 支持上传 / 下载与目录操作
                               </span>
                             )}
@@ -457,9 +461,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                             style={{
                               padding: "2px 6px",
                               borderRadius: 6,
-                              border: "1px solid #334155",
-                              backgroundColor: "#1e293b",
-                              color: "#e2e8f0",
+                              border: "1px solid var(--wl-border-strong)",
+                              backgroundColor: "var(--wl-bg-control)",
+                              color: "var(--wl-text-heading)",
                               cursor: "pointer",
                               fontSize: 12,
                             }}
@@ -484,8 +488,8 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                       style={{
                         width: 24,
                         minWidth: 24,
-                        borderLeft: "1px solid #1e293b",
-                        backgroundColor: "#020617",
+                        borderLeft: "1px solid var(--wl-border-sidebar)",
+                        backgroundColor: "var(--wl-bg-table)",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -515,9 +519,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                           width: 20,
                           height: 48,
                           borderRadius: 10,
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
-                          color: "#e2e8f0",
+                          border: "1px solid var(--wl-border-strong)",
+                          backgroundColor: "var(--wl-bg-control)",
+                          color: "var(--wl-text-heading)",
                           cursor: "pointer",
                           fontSize: 12,
                         }}
@@ -559,9 +563,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
 const panelBtnStyle: React.CSSProperties = {
   padding: "4px 8px",
   borderRadius: 4,
-  border: "1px solid #334155",
-  backgroundColor: "#1e293b",
-  color: "#94a3b8",
+  border: "1px solid var(--wl-border-strong)",
+  backgroundColor: "var(--wl-bg-control)",
+  color: "var(--wl-text-secondary)",
   cursor: "pointer",
   fontSize: 12,
 };

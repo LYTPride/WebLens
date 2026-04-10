@@ -1,0 +1,277 @@
+/**
+ * WebLens 主题 token：界面层级色随 [data-theme] 切换；语义色在 :root 固定（Pod 健康等组件内联色不改）。
+ * 首屏脚本与 ThemeProvider 均设置 document.documentElement[data-theme]。
+ */
+
+:root {
+  /* —— 语义 / 操作色（深浅共用，含义不变）—— */
+  --wl-action-primary: #0d9488;
+  --wl-action-primary-locked: #334155;
+  --wl-action-danger: #b91c1c;
+  --wl-text-on-primary: #ffffff;
+  --wl-accent-sky: #38bdf8;
+  --wl-accent-sky-muted: #7dd3fc;
+  --wl-checkbox-accent: #0d9488;
+  /* 菜单危险项（与 global .wl-menu-item-danger 一致） */
+  --wl-menu-danger-text: #f97373;
+  --wl-menu-danger-hover-text: #fecaca;
+}
+
+/* ========== Dark（当前工作台） ========== */
+[data-theme="dark"] {
+  --wl-bg-page: #020617;
+  --wl-bg-workspace: #111827;
+  --wl-bg-header-tray: #020617;
+  /* 顶栏右侧「平台配置」功能块填充（与托盘区分，弱按钮感） */
+  --wl-header-platform-fill: #1e293b;
+  --wl-bg-sidebar: #0f172a;
+  --wl-border-sidebar: #1e293b;
+  --wl-sidebar-handle-bg: #1e293b;
+
+  --wl-bg-elevated: #0f172a;
+  --wl-bg-control: #1e293b;
+  --wl-bg-table: #020617;
+  --wl-bg-table-header: #0f172a;
+  --wl-bg-table-header-hover: #1e293b;
+  --wl-border-table-header: #1f2937;
+  --wl-border-table-row: #111827;
+  --wl-text-table-header: #9ca3af;
+
+  --wl-bg-row-hover: #0f172a;
+  --wl-bg-expanded: #0f172a;
+
+  --wl-text-primary: #e5e7eb;
+  --wl-text-heading: #e2e8f0;
+  --wl-text-secondary: #94a3b8;
+  --wl-text-muted: #64748b;
+  --wl-text-label: #9ca3af;
+
+  --wl-border-subtle: #1f2937;
+  --wl-border-strong: #334155;
+
+  --wl-bg-input: #020617;
+  --wl-bg-button-disabled: #0b1220;
+  --wl-bg-modal: #0f172a;
+  --wl-shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --wl-shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --wl-overlay-scrim: rgba(0, 0, 0, 0.5);
+
+  --wl-bg-toast: rgba(15, 23, 42, 0.95);
+  --wl-shadow-toast: 0 4px 12px rgba(0, 0, 0, 0.45);
+
+  --wl-logo-badge-bg: #f9fafb;
+  --wl-logo-badge-text: #0f172a;
+
+  --wl-menu-surface: #1e293b;
+  --wl-menu-border: #334155;
+  --wl-menu-search-bg: #0f172a;
+  --wl-menu-search-border: #1e293b;
+  --wl-menu-item-active: #0f172a;
+  --wl-menu-item-hover: #334155;
+  --wl-text-menu: #e2e8f0;
+
+  --wl-jump-bg: rgba(56, 189, 248, 0.08);
+  --wl-jump-border: rgba(56, 189, 248, 0.35);
+  --wl-jump-text: #7dd3fc;
+  --wl-jump-hover-bg: rgba(56, 189, 248, 0.16);
+  --wl-jump-hover-border: rgba(56, 189, 248, 0.55);
+  --wl-jump-hover-text: #bae6fd;
+
+  --wl-resource-name-text: #e2e8f0;
+  --wl-copy-icon: #94a3b8;
+  --wl-copy-icon-hover: #e2e8f0;
+  --wl-copy-hover-bg: rgba(148, 163, 184, 0.12);
+
+  --wl-scrollbar-thumb: #4b5563;
+  --wl-scrollbar-thumb-hover: #6b7280;
+  --wl-scrollbar-track: #020617;
+
+  --wl-describe-section-bg: #0f172a;
+  --wl-describe-table-bg: #020617;
+
+  --wl-sort-pulse-line: rgba(56, 189, 248, 0.55);
+  --wl-sort-pulse-bg: rgba(56, 189, 248, 0.09);
+  --wl-sort-pulse-row-hover: #0f172a;
+
+  --wl-file-intro-line: rgba(56, 189, 248, 0.28);
+  --wl-file-intro-bg: rgba(56, 189, 248, 0.06);
+
+  --wl-secondary-expand-th: #94a3b8;
+  --wl-secondary-expand-td-text: #e5e7eb;
+
+  --wl-action-primary-locked: #334155;
+
+  --wl-log-match-inactive-bg: #475569;
+  --wl-log-match-inactive-text: #ffffff;
+
+  --wl-shadow-bottom-panel: 0 -2px 12px rgba(0, 0, 0, 0.3);
+  --wl-bottom-resize-handle: #475569;
+
+  /* 状态/健康胶囊（深色下保持原对比；浅色在 light 块中单独提高字色对比） */
+  --wl-pill-success-text: #bbf7d0;
+  --wl-pill-success-bg: rgba(22, 163, 74, 0.15);
+  --wl-pill-success-border: rgba(22, 163, 74, 0.6);
+  --wl-pill-attention-text: #facc15;
+  --wl-pill-attention-bg: rgba(202, 138, 4, 0.18);
+  --wl-pill-attention-border: rgba(234, 179, 8, 0.7);
+  --wl-pill-orange-text: #fed7aa;
+  --wl-pill-orange-bg: rgba(249, 115, 22, 0.2);
+  --wl-pill-orange-border: rgba(249, 115, 22, 0.75);
+  --wl-pill-danger-text: #fecaca;
+  --wl-pill-danger-bg: rgba(185, 28, 28, 0.25);
+  --wl-pill-danger-border: rgba(248, 113, 113, 0.85);
+  --wl-pill-neutral-text: #cbd5e1;
+  --wl-pill-neutral-bg: rgba(100, 116, 139, 0.2);
+  --wl-pill-neutral-border: rgba(148, 163, 184, 0.55);
+  --wl-pill-info-text: #bfdbfe;
+  --wl-pill-info-bg: rgba(59, 130, 246, 0.15);
+  --wl-pill-info-border: rgba(96, 165, 250, 0.65);
+  --wl-pill-muted-text: #cbd5e1;
+  --wl-pill-muted-bg: rgba(148, 163, 184, 0.12);
+  --wl-pill-muted-border: rgba(148, 163, 184, 0.45);
+  --wl-pill-surface-text: #e2e8f0;
+  --wl-pill-surface-bg: rgba(30, 41, 59, 0.85);
+  --wl-pill-surface-border: rgba(51, 65, 85, 0.9);
+
+  /* 列表顶栏风险/警示文案 */
+  --wl-list-alert-text: #fca5a5;
+  --wl-list-alert-bg: transparent;
+  --wl-list-alert-glow: 0 0 10px rgba(248, 113, 113, 0.22);
+  --wl-list-warn-accent-text: #fbbf24;
+
+  /* 受限态 / 无权限卡片（与 modal 区分时可略深） */
+  --wl-access-denied-card-bg: rgba(15, 23, 42, 0.96);
+  --wl-access-denied-card-shadow: 0 12px 40px rgba(0, 0, 0, 0.38);
+
+  /* 侧栏曲线把手：仅 hover 凸出区域 */
+  --wl-sidebar-grip-hover-bg: rgba(71, 85, 105, 0.46);
+
+  color-scheme: dark;
+}
+
+/* ========== Light（浅蓝灰工作台，非简单反相） ========== */
+[data-theme="light"] {
+  --wl-bg-page: #d8e4f0;
+  --wl-bg-workspace: #eef2f7;
+  --wl-bg-header-tray: #f8fafc;
+  --wl-header-platform-fill: #e8eef5;
+  --wl-bg-sidebar: #ffffff;
+  --wl-border-sidebar: #c5d3e3;
+  --wl-sidebar-handle-bg: #e8f0fa;
+
+  --wl-bg-elevated: #f8fafc;
+  --wl-bg-control: #e2e8f0;
+  --wl-bg-table: #ffffff;
+  --wl-bg-table-header: #e8f0fa;
+  --wl-bg-table-header-hover: #dce8f5;
+  --wl-border-table-header: #c5d3e3;
+  --wl-border-table-row: #e2e8f0;
+  --wl-text-table-header: #475569;
+
+  --wl-bg-row-hover: #f1f5f9;
+  --wl-bg-expanded: #f0f6fc;
+
+  --wl-text-primary: #0f172a;
+  --wl-text-heading: #0f172a;
+  --wl-text-secondary: #475569;
+  --wl-text-muted: #64748b;
+  --wl-text-label: #64748b;
+
+  --wl-border-subtle: #e2e8f0;
+  --wl-border-strong: #cbd5e1;
+
+  --wl-bg-input: #ffffff;
+  --wl-bg-button-disabled: #e8eef5;
+  --wl-bg-modal: #ffffff;
+  --wl-shadow-modal: 0 12px 40px rgba(15, 23, 42, 0.12);
+  --wl-shadow-dropdown: 0 8px 24px rgba(15, 23, 42, 0.1);
+  --wl-overlay-scrim: rgba(15, 23, 42, 0.35);
+
+  --wl-bg-toast: rgba(255, 255, 255, 0.97);
+  --wl-shadow-toast: 0 4px 16px rgba(15, 23, 42, 0.12);
+
+  --wl-logo-badge-bg: #0ea5e9;
+  --wl-logo-badge-text: #ffffff;
+
+  --wl-menu-surface: #ffffff;
+  --wl-menu-border: #cbd5e1;
+  --wl-menu-search-bg: #f8fafc;
+  --wl-menu-search-border: #e2e8f0;
+  --wl-menu-item-active: #e0f2fe;
+  --wl-menu-item-hover: #e2e8f0;
+  --wl-text-menu: #0f172a;
+
+  --wl-jump-bg: rgba(14, 165, 233, 0.1);
+  --wl-jump-border: rgba(14, 165, 233, 0.35);
+  --wl-jump-text: #0369a1;
+  --wl-jump-hover-bg: rgba(14, 165, 233, 0.16);
+  --wl-jump-hover-border: rgba(14, 165, 233, 0.5);
+  --wl-jump-hover-text: #0c4a6e;
+
+  --wl-resource-name-text: #0f172a;
+  --wl-copy-icon: #64748b;
+  --wl-copy-icon-hover: #0f172a;
+  --wl-copy-hover-bg: rgba(148, 163, 184, 0.2);
+
+  --wl-scrollbar-thumb: #94a3b8;
+  --wl-scrollbar-thumb-hover: #64748b;
+  --wl-scrollbar-track: #e2e8f0;
+
+  --wl-describe-section-bg: #f8fafc;
+  --wl-describe-table-bg: #ffffff;
+
+  --wl-sort-pulse-line: rgba(14, 165, 233, 0.55);
+  --wl-sort-pulse-bg: rgba(14, 165, 233, 0.12);
+  --wl-sort-pulse-row-hover: #f1f5f9;
+
+  --wl-file-intro-line: rgba(14, 165, 233, 0.4);
+  --wl-file-intro-bg: rgba(14, 165, 233, 0.08);
+
+  --wl-secondary-expand-th: #64748b;
+  --wl-secondary-expand-td-text: #0f172a;
+
+  --wl-action-primary-locked: #94a3b8;
+
+  --wl-log-match-inactive-bg: #cbd5e1;
+  --wl-log-match-inactive-text: #0f172a;
+
+  --wl-shadow-bottom-panel: 0 -4px 20px rgba(15, 23, 42, 0.08);
+  --wl-bottom-resize-handle: #94a3b8;
+
+  --wl-pill-success-text: #166534;
+  --wl-pill-success-bg: rgba(22, 163, 74, 0.14);
+  --wl-pill-success-border: rgba(22, 163, 74, 0.45);
+  --wl-pill-attention-text: #854d0e;
+  --wl-pill-attention-bg: rgba(234, 179, 8, 0.22);
+  --wl-pill-attention-border: rgba(180, 83, 9, 0.45);
+  --wl-pill-orange-text: #9a3412;
+  --wl-pill-orange-bg: rgba(249, 115, 22, 0.16);
+  --wl-pill-orange-border: rgba(194, 65, 12, 0.42);
+  --wl-pill-danger-text: #991b1b;
+  --wl-pill-danger-bg: rgba(254, 202, 202, 0.65);
+  --wl-pill-danger-border: rgba(185, 28, 28, 0.4);
+  --wl-pill-neutral-text: #475569;
+  --wl-pill-neutral-bg: rgba(148, 163, 184, 0.2);
+  --wl-pill-neutral-border: rgba(100, 116, 139, 0.38);
+  --wl-pill-info-text: #1e40af;
+  --wl-pill-info-bg: rgba(59, 130, 246, 0.12);
+  --wl-pill-info-border: rgba(37, 99, 235, 0.38);
+  --wl-pill-muted-text: #475569;
+  --wl-pill-muted-bg: rgba(148, 163, 184, 0.18);
+  --wl-pill-muted-border: rgba(100, 116, 139, 0.35);
+  --wl-pill-surface-text: #0f172a;
+  --wl-pill-surface-bg: rgba(226, 232, 240, 0.95);
+  --wl-pill-surface-border: rgba(100, 116, 139, 0.35);
+
+  --wl-list-alert-text: #991b1b;
+  --wl-list-alert-bg: rgba(254, 226, 226, 0.75);
+  --wl-list-alert-glow: none;
+  --wl-list-warn-accent-text: #b45309;
+
+  --wl-access-denied-card-bg: var(--wl-bg-modal);
+  --wl-access-denied-card-shadow: var(--wl-shadow-modal);
+
+  --wl-sidebar-grip-hover-bg: rgba(148, 163, 184, 0.22);
+
+  color-scheme: light;
+}

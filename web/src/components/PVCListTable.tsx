@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import { ResizableTh } from "./ResizableTh";
 import { ResourceSortArrows } from "./ResourceSortArrows";
 import {
@@ -19,7 +19,8 @@ import {
 } from "../utils/pvcTable";
 import type { Pod } from "../api";
 import { formatAgeFromMetadata } from "../utils/k8sCreationTimestamp";
-import copyIcon from "../assets/icon-copy.png";
+import { CopyIcon } from "./icons/CopyIcon";
+import { DropdownMenuPortal } from "./DropdownMenuPortal";
 
 export const PVC_COLUMN_KEYS = [
   "name",
@@ -77,14 +78,14 @@ const PVC_COLUMN_SORT: Partial<Record<(typeof PVC_COLUMN_KEYS)[number], PvcSortK
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 12,
-  color: "#9ca3af",
+  color: "var(--wl-text-table-header)",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 13,
 };
 
@@ -93,29 +94,27 @@ const menuItemStyleForDropdown: React.CSSProperties = {
   width: "100%",
   padding: "8px 12px",
   border: "none",
-  background: "none",
-  color: "#e5e7eb",
   cursor: "pointer",
   fontSize: 13,
   textAlign: "left",
 };
 
 function statusPillStyle(label: "健康" | "警告" | "严重" | "删除中") {
-  let bg = "rgba(22,163,74,0.15)";
-  let border = "rgba(22,163,74,0.6)";
-  let color = "#bbf7d0";
+  let bg = "var(--wl-pill-success-bg)";
+  let border = "var(--wl-pill-success-border)";
+  let color = "var(--wl-pill-success-text)";
   if (label === "删除中") {
-    bg = "rgba(148,163,184,0.12)";
-    border = "rgba(148,163,184,0.45)";
-    color = "#cbd5e1";
+    bg = "var(--wl-pill-muted-bg)";
+    border = "var(--wl-pill-muted-border)";
+    color = "var(--wl-pill-muted-text)";
   } else if (label === "警告") {
-    bg = "rgba(202,138,4,0.18)";
-    border = "rgba(234,179,8,0.7)";
-    color = "#facc15";
+    bg = "var(--wl-pill-attention-bg)";
+    border = "var(--wl-pill-attention-border)";
+    color = "var(--wl-pill-attention-text)";
   } else if (label === "严重") {
-    bg = "rgba(185,28,28,0.25)";
-    border = "rgba(248,113,113,0.85)";
-    color = "#fecaca";
+    bg = "var(--wl-pill-danger-bg)";
+    border = "var(--wl-pill-danger-border)";
+    color = "var(--wl-pill-danger-text)";
   }
   return {
     display: "inline-flex",
@@ -188,6 +187,7 @@ export function PVCListTable({
   setError,
   deletePvcApi,
 }: PVCListTableProps) {
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const colCount = PVC_COLUMN_KEYS.length;
   return (
     <table
@@ -195,7 +195,7 @@ export function PVCListTable({
         width: totalWidth,
         minWidth: "100%",
         borderCollapse: "collapse",
-        backgroundColor: "#020617",
+        backgroundColor: "var(--wl-bg-table)",
         tableLayout: "fixed",
       }}
     >
@@ -232,14 +232,14 @@ export function PVCListTable({
       <tbody className="wl-table-body">
         {pvcLoading && sortedRows.length === 0 && (
           <tr className="wl-table-row">
-            <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+            <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
               加载中…
             </td>
           </tr>
         )}
         {!pvcLoading && sortedRows.length === 0 && (
           <tr className="wl-table-row">
-            <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+            <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
               暂无 PersistentVolumeClaim
             </td>
           </tr>
@@ -271,6 +271,7 @@ export function PVCListTable({
                   <span className="wl-table-hover-copy__main">
                     <button
                       type="button"
+                      className="wl-table-hover-copy__truncate"
                       onClick={(e) => {
                         e.stopPropagation();
                         openDescribe(row);
@@ -282,12 +283,6 @@ export function PVCListTable({
                         background: "none",
                         color: "inherit",
                         cursor: "pointer",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        minWidth: 0,
-                        flex: "1 1 auto",
-                        textAlign: "left",
                       }}
                     >
                       {pname}
@@ -303,7 +298,7 @@ export function PVCListTable({
                     title="复制 PVC 名称"
                     aria-label={`复制 PVC 名称：${pname}`}
                   >
-                    <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                    <CopyIcon />
                   </button>
                 </span>
               </td>
@@ -337,6 +332,7 @@ export function PVCListTable({
               <td style={{ ...tdStyle, overflow: "visible" }} onClick={(e) => e.stopPropagation()}>
                 <div style={{ position: "relative" }}>
                   <button
+                    ref={isMenuOpen ? menuTriggerRef : undefined}
                     type="button"
                     className="wl-table-menu-trigger"
                     disabled={rowBusy || !effectiveClusterId}
@@ -358,72 +354,58 @@ export function PVCListTable({
                     ⋮
                   </button>
                   {isMenuOpen && (
-                    <>
-                      <div
-                        style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                        onClick={() => setMenuOpenKey(null)}
-                        aria-hidden
-                      />
-                      <div
-                        className="wl-table-dropdown-menu"
-                        style={{
-                          position: "absolute",
-                          right: 0,
-                          top: "100%",
-                          marginTop: 4,
-                          minWidth: 160,
-                          zIndex: 41,
-                          padding: "4px 0",
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          className="wl-menu-item"
-                          style={menuItemStyleForDropdown}
-                          disabled={rowBusy}
-                          onClick={() => {
-                            setMenuOpenKey(null);
-                            openEditTab(row);
-                          }}
-                        >
-                          <span style={{ marginRight: 8 }}>✎</span> Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="wl-menu-item wl-menu-item-danger"
-                          style={menuItemStyleForDropdown}
-                          disabled={rowBusy || !effectiveClusterId}
-                          onClick={() => {
-                            setMenuOpenKey(null);
-                            if (!effectiveClusterId) return;
-                            setActionConfirm({
-                              title: "确认删除 1 个 PersistentVolumeClaim？",
-                              description: "删除后不可恢复。",
-                              items: [`${ns}/${pname}`],
-                              variant: "danger",
-                              onConfirm: async () => {
-                                setRowBusyKey(menuKey);
-                                try {
-                                  await deletePvcApi(effectiveClusterId, ns, pname);
-                                  onDeletedOne(ns, pname);
-                                  setToastMessage("已删除 PVC");
-                                  setError(null);
-                                } catch (e: unknown) {
-                                  const err = e as { response?: { data?: { error?: string } }; message?: string };
-                                  setToastMessage(err?.response?.data?.error ?? err?.message ?? "删除失败");
-                                  throw e;
-                                } finally {
-                                  setRowBusyKey(null);
-                                }
-                              },
-                            });
-                          }}
-                        >
-                          <span style={{ marginRight: 8 }}>🗑</span> Delete
-                        </button>
-                      </div>
-                    </>
+                  <DropdownMenuPortal
+                    onClose={() => setMenuOpenKey(null)}
+                    triggerRef={menuTriggerRef}
+                    align="right"
+                    surfaceStyle={{ padding: "4px 0", minWidth: 160 }}
+                  >
+                    <button
+                      type="button"
+                      className="wl-menu-item"
+                      style={menuItemStyleForDropdown}
+                      disabled={rowBusy}
+                      onClick={() => {
+                        setMenuOpenKey(null);
+                        openEditTab(row);
+                      }}
+                    >
+                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="wl-menu-item wl-menu-item-danger"
+                      style={menuItemStyleForDropdown}
+                      disabled={rowBusy || !effectiveClusterId}
+                      onClick={() => {
+                        setMenuOpenKey(null);
+                        if (!effectiveClusterId) return;
+                        setActionConfirm({
+                          title: "确认删除 1 个 PersistentVolumeClaim？",
+                          description: "删除后不可恢复。",
+                          items: [`${ns}/${pname}`],
+                          variant: "danger",
+                          onConfirm: async () => {
+                            setRowBusyKey(menuKey);
+                            try {
+                              await deletePvcApi(effectiveClusterId, ns, pname);
+                              onDeletedOne(ns, pname);
+                              setToastMessage("已删除 PVC");
+                              setError(null);
+                            } catch (e: unknown) {
+                              const err = e as { response?: { data?: { error?: string } }; message?: string };
+                              setToastMessage(err?.response?.data?.error ?? err?.message ?? "删除失败");
+                              throw e;
+                            } finally {
+                              setRowBusyKey(null);
+                            }
+                          },
+                        });
+                      }}
+                    >
+                      <span style={{ marginRight: 8 }}>🗑</span> Delete
+                    </button>
+                  </DropdownMenuPortal>
                   )}
                 </div>
               </td>

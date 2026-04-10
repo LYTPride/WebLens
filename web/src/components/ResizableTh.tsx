@@ -1,4 +1,5 @@
 import React from "react";
+import { Z_INDEX } from "../constants/zLayers";
 
 export interface ResizableThProps {
   label: React.ReactNode;
@@ -31,9 +32,9 @@ export const ResizableTh: React.FC<ResizableThProps> = ({
         ? {
             position: "sticky" as const,
             top: 0,
-            zIndex: 2,
-            backgroundColor: "#0f172a",
-            boxShadow: "0 1px 0 0 #1f2937",
+            zIndex: Z_INDEX.stickyTableHead,
+            backgroundColor: "var(--wl-bg-table-header)",
+            boxShadow: "0 1px 0 0 var(--wl-border-table-header)",
           }
         : { position: "relative" as const }),
       width,

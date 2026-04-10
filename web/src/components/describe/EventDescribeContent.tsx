@@ -7,7 +7,7 @@ import { ResourceJumpChip } from "../ResourceJumpChip";
 const sectionTitle: React.CSSProperties = {
   margin: "0 0 8px",
   fontSize: 13,
-  color: "#e5e7eb",
+  color: "var(--wl-text-primary)",
 };
 
 function formatTime(s: string | undefined): string {
@@ -63,7 +63,7 @@ export function EventDescribeContent({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <section>
         <h4 style={sectionTitle}>基本信息</h4>
-        <div style={{ fontSize: 12, color: "#cbd5e1", lineHeight: 1.65 }}>
+        <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.65 }}>
           <div>Type：{event.type || "—"}</div>
           <div>Reason：{event.reason || "—"}</div>
           <div>Namespace：{event.metadata?.namespace || "—"}</div>
@@ -78,14 +78,14 @@ export function EventDescribeContent({
         <div
           style={{
             fontSize: 12,
-            color: "#e2e8f0",
+            color: "var(--wl-text-heading)",
             lineHeight: 1.6,
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             padding: "8px 10px",
             borderRadius: 6,
             backgroundColor: "rgba(15,23,42,0.9)",
-            border: "1px solid #334155",
+            border: "1px solid var(--wl-border-strong)",
           }}
         >
           {event.message || "—"}
@@ -98,9 +98,9 @@ export function EventDescribeContent({
               marginTop: 8,
               padding: "4px 10px",
               borderRadius: 6,
-              border: "1px solid #475569",
-              backgroundColor: "#0f172a",
-              color: "#94a3b8",
+              border: "1px solid var(--wl-border-strong)",
+              backgroundColor: "var(--wl-describe-section-bg)",
+              color: "var(--wl-text-secondary)",
               cursor: "pointer",
               fontSize: 12,
             }}
@@ -112,7 +112,7 @@ export function EventDescribeContent({
 
       <section>
         <h4 style={sectionTitle}>Involved Object</h4>
-        <div style={{ fontSize: 12, color: "#cbd5e1", lineHeight: 1.65 }}>
+        <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.65 }}>
           <div>Kind：{event.involvedObject?.kind || "—"}</div>
           <div>Name：{event.involvedObject?.name || "—"}</div>
           <div>Namespace：{event.involvedObject?.namespace || event.metadata?.namespace || "—"}</div>
@@ -134,10 +134,10 @@ export function EventDescribeContent({
                 onJumpToResource(event.involvedObject?.kind, filterName);
               }}
             />
-            <span style={{ fontSize: 11, color: "#64748b" }}>{formatEventInvolved(event)}</span>
+            <span style={{ fontSize: 11, color: "var(--wl-text-muted)" }}>{formatEventInvolved(event)}</span>
           </div>
         ) : (
-          <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>
+          <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--wl-text-muted)" }}>
             该 Involved Object 暂无一键跳转（支持常见工作负载与网络/存储资源；v1 未开放或无法列表展示的类型已省略）。
           </p>
         )}
@@ -145,7 +145,7 @@ export function EventDescribeContent({
 
       <section>
         <h4 style={sectionTitle}>Source</h4>
-        <div style={{ fontSize: 12, color: "#cbd5e1", lineHeight: 1.65 }}>
+        <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.65 }}>
           <div>Component：{event.source?.component || "—"}</div>
           <div>Host：{event.source?.host || "—"}</div>
         </div>

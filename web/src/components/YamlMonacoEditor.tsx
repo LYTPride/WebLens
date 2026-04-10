@@ -1,6 +1,7 @@
-import React, { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
+import { useTheme } from "../theme/ThemeContext";
 
 const FONT =
   '"JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
@@ -16,10 +17,11 @@ export type YamlMonacoEditorProps = {
   onChange: (next: string) => void;
 };
 
-const THEME_ID = "weblens-yaml-dark";
+const THEME_DARK_ID = "weblens-yaml-dark";
+const THEME_LIGHT_ID = "weblens-yaml-light";
 
-const beforeMount: BeforeMount = (monaco) => {
-  monaco.editor.defineTheme(THEME_ID, {
+function defineYamlThemes(monaco: typeof import("monaco-editor")) {
+  monaco.editor.defineTheme(THEME_DARK_ID, {
     base: "vs-dark",
     inherit: true,
     rules: [
@@ -46,15 +48,50 @@ const beforeMount: BeforeMount = (monaco) => {
       "editorStickyScroll.shadow": "#00000066",
     },
   });
+
+  monaco.editor.defineTheme(THEME_LIGHT_ID, {
+    base: "vs",
+    inherit: true,
+    rules: [
+      { token: "tag.yaml", foreground: "0f766e" },
+      { token: "string.yaml", foreground: "1d4ed8" },
+      { token: "number.yaml", foreground: "a16207" },
+      { token: "keyword.yaml", foreground: "6d28d9" },
+      { token: "comment.yaml", foreground: "64748b" },
+      { token: "delimiter.yaml", foreground: "475569" },
+    ],
+    colors: {
+      "editor.background": "#f8fafc",
+      "editor.foreground": "#0f172a",
+      "editorLineNumber.foreground": "#94a3b8",
+      "editorLineNumber.activeForeground": "#475569",
+      "editorIndentGuide.background": "#e2e8f0",
+      "editorIndentGuide.activeBackground": "#cbd5e1",
+      "editorGutter.background": "#f1f5f9",
+      "minimap.background": "#f8fafc",
+      "scrollbarSlider.background": "#cbd5e1aa",
+      "scrollbarSlider.hoverBackground": "#94a3b8cc",
+      "editorStickyScroll.background": "#eef2f7",
+      "editorStickyScroll.border": "#e2e8f0",
+      "editorStickyScroll.shadow": "#0f172a22",
+    },
+  });
+}
+
+const beforeMount: BeforeMount = (monaco) => {
+  defineYamlThemes(monaco);
 };
 
 /**
  * 统一 YAML 编辑：Monaco + 原生 sticky scroll（indentation 模型）+ 内置行号与 minimap。
- * Pod / Deployment 等均通过此组件复用。
+ * 主题随 WebLens 深浅切换（不丢编辑器状态）。
  */
 export const YamlMonacoEditor = forwardRef<YamlMonacoEditorHandle, YamlMonacoEditorProps>(
   function YamlMonacoEditor({ value, onChange }, ref) {
+    const { theme: appTheme } = useTheme();
+    const monacoThemeId = appTheme === "light" ? THEME_LIGHT_ID : THEME_DARK_ID;
     const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+    const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
 
     const selectRangeByOffset = useCallback((start: number, end: number) => {
       const editor = editorRef.current;
@@ -92,17 +129,26 @@ export const YamlMonacoEditor = forwardRef<YamlMonacoEditorHandle, YamlMonacoEdi
       [selectRangeByOffset],
     );
 
-    const onMount: OnMount = useCallback((editor, monaco) => {
-      editorRef.current = editor;
-      monaco.editor.setTheme(THEME_ID);
-    }, []);
+    useEffect(() => {
+      const m = monacoRef.current;
+      if (m) m.editor.setTheme(monacoThemeId);
+    }, [monacoThemeId]);
+
+    const onMount: OnMount = useCallback(
+      (editor, monaco) => {
+        editorRef.current = editor;
+        monacoRef.current = monaco;
+        monaco.editor.setTheme(monacoThemeId);
+      },
+      [monacoThemeId],
+    );
 
     return (
       <Editor
         height="100%"
         width="100%"
         defaultLanguage="yaml"
-        theme={THEME_ID}
+        theme={monacoThemeId}
         value={value}
         onChange={(v) => onChange(v ?? "")}
         beforeMount={beforeMount}
