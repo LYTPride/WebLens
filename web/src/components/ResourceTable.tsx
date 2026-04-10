@@ -3,18 +3,18 @@ import React from "react";
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 12,
-  color: "#9ca3af",
+  color: "var(--wl-text-table-header)",
   position: "sticky",
   top: 0,
   zIndex: 1,
-  backgroundColor: "#0f172a",
+  backgroundColor: "var(--wl-bg-table-header)",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 13,
 };
 
@@ -43,13 +43,13 @@ export function ResourceTable<T extends { metadata: { name: string; namespace?: 
     <div style={{ marginBottom: 24 }}>
       <h3 style={{ fontSize: 15, marginBottom: 8 }}>{title}</h3>
       {loading ? (
-        <div style={{ color: "#9ca3af" }}>加载中…</div>
+        <div style={{ color: "var(--wl-text-label)" }}>加载中…</div>
       ) : (
           <table
             style={{
               width: "100%",
               borderCollapse: "collapse",
-              backgroundColor: "#020617",
+              backgroundColor: "var(--wl-bg-table)",
             }}
           >
             <thead>
@@ -75,7 +75,7 @@ export function ResourceTable<T extends { metadata: { name: string; namespace?: 
           </table>
       )}
       {!loading && items.length === 0 && (
-        <div style={{ color: "#64748b", padding: 12 }}>暂无数据</div>
+        <div style={{ color: "var(--wl-text-muted)", padding: 12 }}>暂无数据</div>
       )}
     </div>
   );

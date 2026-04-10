@@ -480,7 +480,7 @@ export const FileManagerPanel: React.FC<Props> = ({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid #0b1220" }}>
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--wl-border-table-row)" }}>
         <div
           role="group"
           aria-label="路径地址栏"
@@ -574,7 +574,7 @@ export const FileManagerPanel: React.FC<Props> = ({
           flexWrap: "nowrap",
           gap: 4,
           overflowX: "auto",
-          borderBottom: "1px solid #0b1220",
+          borderBottom: "1px solid var(--wl-border-table-row)",
         }}
       >
         <button
@@ -635,7 +635,7 @@ export const FileManagerPanel: React.FC<Props> = ({
       <FileTransferTasksPanel tasks={transferTasks} onDismissTask={removeTransferTask} />
 
       {error && (
-        <div style={{ padding: "8px 12px", color: "#f87171", fontSize: 12, borderBottom: "1px solid #0b1220" }}>
+        <div style={{ padding: "8px 12px", color: "#f87171", fontSize: 12, borderBottom: "1px solid var(--wl-border-table-row)" }}>
           {error}
         </div>
       )}
@@ -653,21 +653,21 @@ export const FileManagerPanel: React.FC<Props> = ({
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={4} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>
+                <td colSpan={4} style={{ ...td, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                   加载中…
                 </td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={4} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>
+                <td colSpan={4} style={{ ...td, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                   空目录
                 </td>
               </tr>
             )}
             {!loading &&
               items.map((it) => (
-                <tr key={it.name} style={{ borderBottom: "1px solid #0b1220" }}>
+                <tr key={it.name} style={{ borderBottom: "1px solid var(--wl-border-table-row)" }}>
                   <td style={td}>
                     <input
                       type="checkbox"
@@ -676,20 +676,25 @@ export const FileManagerPanel: React.FC<Props> = ({
                     />
                   </td>
                   <td
-                    style={{ ...td, cursor: it.type === "dir" ? "pointer" : "default", color: "#e2e8f0" }}
+                    style={{ ...td, cursor: it.type === "dir" ? "pointer" : "default", color: "var(--wl-text-heading)" }}
                     onClick={() => {
                       if (it.type !== "dir") return;
                       setCurrentPath(joinPath(currentPath, it.name));
                     }}
                     title={it.type === "dir" ? "点击进入目录" : it.name}
                   >
-                    <span style={{ marginRight: 6, color: it.type === "dir" ? "#38bdf8" : "#94a3b8" }}>
+                    <span
+                      style={{
+                        marginRight: 6,
+                        color: it.type === "dir" ? "var(--wl-accent-sky)" : "var(--wl-text-secondary)",
+                      }}
+                    >
                       {it.type === "dir" ? "📁" : "📄"}
                     </span>
                     {it.name}
                   </td>
-                  <td style={{ ...td, color: "#94a3b8" }}>{it.type === "dir" ? "dir" : "file"}</td>
-                  <td style={{ ...td, color: "#94a3b8" }}>{it.type === "dir" ? "-" : sizeText(it.size)}</td>
+                  <td style={{ ...td, color: "var(--wl-text-secondary)" }}>{it.type === "dir" ? "dir" : "file"}</td>
+                  <td style={{ ...td, color: "var(--wl-text-secondary)" }}>{it.type === "dir" ? "-" : sizeText(it.size)}</td>
                 </tr>
               ))}
           </tbody>
@@ -767,8 +772,8 @@ const addressBarShellStyle: React.CSSProperties = {
   alignItems: "stretch",
   minHeight: 34,
   borderRadius: 6,
-  border: "1px solid #334155",
-  backgroundColor: "#0f172a",
+  border: "1px solid var(--wl-border-strong)",
+  backgroundColor: "var(--wl-bg-elevated)",
   overflow: "hidden",
 };
 
@@ -777,7 +782,7 @@ const addressBarIconStyle: React.CSSProperties = {
   alignItems: "center",
   paddingLeft: 10,
   paddingRight: 2,
-  color: "#64748b",
+  color: "var(--wl-text-muted)",
   fontSize: 14,
   flexShrink: 0,
   userSelect: "none",
@@ -786,7 +791,7 @@ const addressBarIconStyle: React.CSSProperties = {
 const crumbBtnStyle: React.CSSProperties = {
   border: "none",
   background: "transparent",
-  color: "#38bdf8",
+  color: "var(--wl-accent-sky)",
   cursor: "pointer",
   fontSize: 12,
   padding: "4px 6px",
@@ -797,7 +802,7 @@ const crumbBtnStyle: React.CSSProperties = {
 };
 
 const crumbSepStyle: React.CSSProperties = {
-  color: "#475569",
+  color: "var(--wl-text-muted)",
   fontSize: 13,
   fontWeight: 600,
   userSelect: "none",
@@ -810,8 +815,8 @@ const addressInputStyle: React.CSSProperties = {
   minWidth: 0,
   border: "none",
   outline: "none",
-  backgroundColor: "#020617",
-  color: "#e5e7eb",
+  backgroundColor: "var(--wl-bg-table)",
+  color: "var(--wl-text-primary)",
   fontSize: 12,
   padding: "6px 10px",
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
@@ -820,9 +825,9 @@ const addressInputStyle: React.CSSProperties = {
 const toolBtn: React.CSSProperties = {
   padding: "3px 7px",
   borderRadius: 6,
-  border: "1px solid #334155",
-  backgroundColor: "#1e293b",
-  color: "#e5e7eb",
+  border: "1px solid var(--wl-border-strong)",
+  backgroundColor: "var(--wl-bg-control)",
+  color: "var(--wl-text-primary)",
   cursor: "pointer",
   fontSize: 11,
   whiteSpace: "nowrap",
@@ -833,18 +838,18 @@ const toolBtnStyle = (disabled: boolean): React.CSSProperties => ({
   ...toolBtn,
   cursor: disabled ? "not-allowed" : "pointer",
   opacity: disabled ? 0.45 : 1,
-  backgroundColor: disabled ? "#0b1220" : toolBtn.backgroundColor,
-  color: disabled ? "#64748b" : toolBtn.color,
+  backgroundColor: disabled ? "var(--wl-bg-button-disabled)" : toolBtn.backgroundColor,
+  color: disabled ? "var(--wl-text-muted)" : toolBtn.color,
 });
 
 const th: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderBottom: "1px solid #1e293b",
-  color: "#94a3b8",
+  borderBottom: "1px solid var(--wl-border-sidebar)",
+  color: "var(--wl-text-secondary)",
   position: "sticky",
   top: 0,
-  backgroundColor: "#020617",
+  backgroundColor: "var(--wl-bg-table)",
   zIndex: 1,
 };
 

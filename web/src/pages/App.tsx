@@ -45,6 +45,7 @@ import {
   type NodeDescribe,
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
+import { ThemeToggleButton } from "../components/ThemeToggleButton";
 import { ResourceTable, type Column } from "../components/ResourceTable";
 import { BottomPanel, type PanelTab } from "../components/BottomPanel";
 import { ResizableTh } from "../components/ResizableTh";
@@ -142,14 +143,15 @@ import { ClearableSearchInput } from "../components/ClearableSearchInput";
 import { PodHealthPill, PodListStatusPill } from "../components/PodStatusPills";
 import {
   WL_SEARCHABLE_DROPDOWN_INPUT_STYLE,
-  WL_SEARCHABLE_DROPDOWN_PANEL_STYLE,
   WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE,
   WL_SEARCHABLE_DROPDOWN_SCROLL_STYLE,
+  WL_SEARCHABLE_DROPDOWN_SCROLL_PORTAL_STYLE,
   SearchableDropdownTwoColumnRow,
   clusterOptionColumns,
   kubeconfigDisplayFileName,
 } from "../components/SearchableDropdownPrimitives";
-import { useFocusInputWhenOpen } from "../hooks/useFocusInputWhenOpen";
+import { DropdownMenuPortal } from "../components/DropdownMenuPortal";
+import { SearchableDropdownPanelPortal } from "../components/SearchableDropdownPanelPortal";
 import { DescribeEventsSection } from "../components/describe/DescribeEventsSection";
 import { DeploymentDescribeContent } from "../components/describe/DeploymentDescribeContent";
 import { StatefulSetDescribeContent } from "../components/describe/StatefulSetDescribeContent";
@@ -166,6 +168,22 @@ import { ResourceJumpChip } from "../components/ResourceJumpChip";
 import { ResourceNameWithCopy } from "../components/ResourceNameWithCopy";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useResourceListColumnResize } from "../resourceList/useResourceListColumnResize";
+import {
+  INGRESS_RULE_EXPAND_COLUMNS,
+  INGRESS_RULE_EXPAND_DEFAULTS,
+  INGRESS_RULE_EXPAND_KEYS,
+  STS_POD_EXPAND_COLUMNS,
+  STS_POD_EXPAND_DEFAULTS,
+  STS_POD_EXPAND_KEYS,
+  SECONDARY_EXPAND_MIN_COL_WIDTH,
+} from "../resourceList/secondaryExpandTableConfig";
+import {
+  SecondaryExpandTable,
+  secondaryExpandActionsCellStyle,
+  secondaryExpandBreakAllCellStyle,
+  secondaryExpandDataCellStyle,
+  secondaryExpandTdBase,
+} from "../components/SecondaryExpandTable";
 import { useSortedRowPositionChangeHighlight } from "../hooks/useSortedRowPositionChangeHighlight";
 import { useNowTick } from "../hooks/useNowTick";
 import {
@@ -193,9 +211,13 @@ import {
   newServerClockSnapshot,
   type ServerClockSnapshot,
 } from "../utils/serverClock";
-import { normalizeSessionViewForV1, resolveInvolvedKindToListView } from "../utils/v1HiddenViews";
+import {
+  normalizeSessionViewForV1,
+  resolveInvolvedKindToListView,
+  V1_HIDDEN_VIEWS,
+} from "../utils/v1HiddenViews";
 import { trackUsage } from "../utils/usageAnalytics";
-import copyIcon from "../assets/icon-copy.png";
+import { CopyIcon } from "../components/icons/CopyIcon";
 
 const ALL_NAMESPACES = "";
 
@@ -494,9 +516,9 @@ function mergeDeploymentIntoList(items: K8sItem[], updated: unknown): K8sItem[] 
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 12,
-  color: "#9ca3af",
+  color: "var(--wl-text-table-header)",
 };
 
 /** 与 ResizableTh 默认 sticky 表头一致（定位、背景、底边），供首列勾选 th 使用，避免滚动时与表头脱节 */
@@ -504,14 +526,14 @@ const stickyHeaderThCheckbox: React.CSSProperties = {
   position: "sticky",
   top: 0,
   zIndex: 2,
-  backgroundColor: "#0f172a",
-  boxShadow: "0 1px 0 0 #1f2937",
+  backgroundColor: "var(--wl-bg-table-header)",
+  boxShadow: "0 1px 0 0 var(--wl-border-table-header)",
   boxSizing: "border-box",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 13,
 };
 
@@ -581,7 +603,7 @@ function deploymentReplicasColumn(d: DeploymentRow): string {
 const DeploymentConditionsCell: React.FC<{ d: DeploymentRow }> = ({ d }) => {
   const conditions = d.status?.conditions ?? [];
   if (!conditions.length) {
-    return <span style={{ color: "#64748b" }}>-</span>;
+    return <span style={{ color: "var(--wl-text-muted)" }}>-</span>;
   }
   const priority = (t: string) => {
     if (t === "Available") return 0;
@@ -595,17 +617,17 @@ const DeploymentConditionsCell: React.FC<{ d: DeploymentRow }> = ({ d }) => {
       {sorted.map((c) => {
         const ok = c.status === "True";
         const failType = c.type === "ReplicaFailure";
-        let bg = "rgba(22,163,74,0.15)";
-        let border = "rgba(22,163,74,0.55)";
-        let color = "#6ee7b7";
+        let bg = "var(--wl-pill-success-bg)";
+        let border = "var(--wl-pill-success-border)";
+        let color = "var(--wl-pill-success-text)";
         if (failType || !ok) {
-          bg = "rgba(185,28,28,0.18)";
-          border = "rgba(248,113,113,0.65)";
-          color = "#fecaca";
+          bg = "var(--wl-pill-danger-bg)";
+          border = "var(--wl-pill-danger-border)";
+          color = "var(--wl-pill-danger-text)";
         } else if (c.type === "Progressing") {
-          bg = "rgba(6,182,212,0.12)";
-          border = "rgba(34,211,238,0.45)";
-          color = "#a5f3fc";
+          bg = "var(--wl-pill-info-bg)";
+          border = "var(--wl-pill-info-border)";
+          color = "var(--wl-pill-info-text)";
         }
         return (
           <span
@@ -697,6 +719,7 @@ export const App: React.FC = () => {
   const [configError, setConfigError] = useState<string | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
   const [platformMenuOpen, setPlatformMenuOpen] = useState(false);
+  const [platformGearSpinning, setPlatformGearSpinning] = useState(false);
   /** 集群作用域预设（cluster + namespace） */
   const [clusterCombos, setClusterCombos] = useState<ClusterCombo[]>([]);
   const [clusterCombosLoading, setClusterCombosLoading] = useState(false);
@@ -712,6 +735,13 @@ export const App: React.FC = () => {
   const [configClusterSearchKeyword, setConfigClusterSearchKeyword] = useState("");
   const configClusterSearchRef = useRef<HTMLInputElement>(null);
   const clusterComboSearchRef = useRef<HTMLInputElement>(null);
+  const platformMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const clusterScopeTriggerRef = useRef<HTMLButtonElement>(null);
+  const configClusterPickTriggerRef = useRef<HTMLButtonElement>(null);
+  const podMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const deploymentMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const statefulsetMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const ingressMenuTriggerRef = useRef<HTMLButtonElement>(null);
   /** 作用域选择：当前选中（待应用）与已应用 */
   const [activeComboId, setActiveComboId] = useState<string | null>(null);
   const [effectiveComboId, setEffectiveComboId] = useState<string | null>(null);
@@ -856,6 +886,24 @@ export const App: React.FC = () => {
     defaults: EVENT_COLUMN_DEFAULTS,
     minWidthForKey: eventColumnMinWidth,
   });
+  const {
+    columnWidths: ingressRuleColumnWidths,
+    beginResize: beginResizeIngressRule,
+    totalDataWidth: ingressRuleExpandTotalWidth,
+  } = useResourceListColumnResize({
+    columnKeys: INGRESS_RULE_EXPAND_KEYS,
+    defaults: INGRESS_RULE_EXPAND_DEFAULTS,
+    minWidthForKey: () => SECONDARY_EXPAND_MIN_COL_WIDTH,
+  });
+  const {
+    columnWidths: stsPodExpandColumnWidths,
+    beginResize: beginResizeStsPodExpand,
+    totalDataWidth: stsPodExpandTotalWidth,
+  } = useResourceListColumnResize({
+    columnKeys: STS_POD_EXPAND_KEYS,
+    defaults: STS_POD_EXPAND_DEFAULTS,
+    minWidthForKey: () => SECONDARY_EXPAND_MIN_COL_WIDTH,
+  });
   /** 用户手动输入并点击「应用」的命名空间，避免 namespaces 接口返回后覆盖导致列表消失 */
   const manualNamespaceRef = useRef<{ clusterId: string; namespace: string } | null>(null);
   /** 当前选中的 cluster/namespace，用于 loadPods 返回时丢弃过期响应 */
@@ -998,9 +1046,6 @@ export const App: React.FC = () => {
       return next.size === prev.size ? prev : next;
     });
   }, [deploymentItems]);
-
-  useFocusInputWhenOpen(clusterDropdownOpen, clusterComboSearchRef, true);
-  useFocusInputWhenOpen(configClusterPickOpen, configClusterSearchRef, true);
 
   useEffect(() => {
     if (!configModalOpen) {
@@ -3653,10 +3698,17 @@ export const App: React.FC = () => {
 
   /** 任意视图下用于「跳转 Nodes」是否应禁用（缓存拒绝或 Nodes 页已判定拒绝） */
   const nodesNavBlockedGlobal = useMemo(() => {
+    if (V1_HIDDEN_VIEWS.has("nodes")) return true;
     if (!effectiveClusterId) return false;
     if (getResourceAccessDecision(effectiveClusterId, NODES_RESOURCE_KEY) === "denied") return true;
     return nodesAccessDenied;
   }, [effectiveClusterId, nodesAccessDenied]);
+
+  useEffect(() => {
+    if (V1_HIDDEN_VIEWS.has(currentView)) {
+      setCurrentView("events");
+    }
+  }, [currentView]);
 
   const statefulsetStsStatsByKey = useMemo(() => {
     const m = new Map<string, { owned: Pod[]; stats: ReturnType<typeof buildStatefulSetSortStats> }>();
@@ -3859,16 +3911,7 @@ export const App: React.FC = () => {
         return (
           <span className="wl-table-hover-copy">
             <span className="wl-table-hover-copy__main">
-              <span
-                style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  minWidth: 0,
-                  flex: "1 1 auto",
-                }}
-                title={name}
-              >
+              <span className="wl-table-hover-copy__truncate" title={name}>
                 {name}
               </span>
             </span>
@@ -3879,7 +3922,7 @@ export const App: React.FC = () => {
               title="复制名称"
               aria-label={`复制名称：${name}`}
             >
-              <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+              <CopyIcon />
             </button>
           </span>
         );
@@ -3895,8 +3938,8 @@ export const App: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        backgroundColor: "#111827",
-        color: "#e5e7eb",
+        backgroundColor: "var(--wl-bg-workspace)",
+        color: "var(--wl-text-primary)",
         fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
         position: "relative",
         pointerEvents: "auto",
@@ -3912,11 +3955,11 @@ export const App: React.FC = () => {
             transform: "translateX(-50%)",
             padding: "6px 14px",
             borderRadius: 999,
-            backgroundColor: "rgba(15,23,42,0.95)",
-            color: "#e5e7eb",
+            backgroundColor: "var(--wl-bg-toast)",
+            color: "var(--wl-text-primary)",
             fontSize: 12,
             zIndex: 200,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.45)",
+            boxShadow: "var(--wl-shadow-toast)",
             animation: "wl-toast-fadeout 3s ease-out forwards",
           }}
           onAnimationEnd={() => setToastMessage(null)}
@@ -3949,16 +3992,16 @@ export const App: React.FC = () => {
               maxWidth: "90vw",
               padding: 20,
               borderRadius: 10,
-              border: "1px solid #334155",
-              backgroundColor: "#0f172a",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
+              border: "1px solid var(--wl-border-strong)",
+              backgroundColor: "var(--wl-bg-elevated)",
+              boxShadow: "var(--wl-shadow-modal)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div id="deploy-scale-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "#e2e8f0" }}>
+            <div id="deploy-scale-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--wl-text-heading)" }}>
               调整副本数（{deployScaleModal.resource === "statefulset" ? "StatefulSet" : "Deployment"}）
             </div>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", marginBottom: 10 }}>
               {deployScaleModal.namespace}/{deployScaleModal.name} · 当前 {deployScaleModal.current}
             </div>
             <input
@@ -3972,9 +4015,9 @@ export const App: React.FC = () => {
                 width: "100%",
                 padding: "8px 10px",
                 borderRadius: 6,
-                border: "1px solid #334155",
-                backgroundColor: "#020617",
-                color: "#e5e7eb",
+                border: "1px solid var(--wl-border-strong)",
+                backgroundColor: "var(--wl-bg-table)",
+                color: "var(--wl-text-primary)",
                 fontSize: 14,
                 marginBottom: 16,
               }}
@@ -3989,9 +4032,9 @@ export const App: React.FC = () => {
                 style={{
                   padding: "6px 14px",
                   borderRadius: 6,
-                  border: "1px solid #334155",
+                  border: "1px solid var(--wl-border-strong)",
                   backgroundColor: "transparent",
-                  color: "#94a3b8",
+                  color: "var(--wl-text-secondary)",
                   cursor: deployScaleSaving ? "not-allowed" : "pointer",
                   fontSize: 13,
                 }}
@@ -4042,8 +4085,8 @@ export const App: React.FC = () => {
                   padding: "6px 14px",
                   borderRadius: 6,
                   border: "none",
-                  backgroundColor: deployScaleSaving ? "#334155" : "#0d9488",
-                  color: "#fff",
+                  backgroundColor: deployScaleSaving ? "var(--wl-action-primary-locked)" : "var(--wl-action-primary)",
+                  color: "var(--wl-text-on-primary)",
                   cursor: deployScaleSaving ? "not-allowed" : "pointer",
                   fontSize: 13,
                 }}
@@ -4097,7 +4140,8 @@ export const App: React.FC = () => {
       <header
         style={{
           flexShrink: 0,
-          borderBottom: "1px solid #1f2937",
+          borderBottom: "1px solid var(--wl-border-subtle)",
+          backgroundColor: "var(--wl-bg-elevated)",
           display: "flex",
           alignItems: "stretch",
           justifyContent: "space-between",
@@ -4111,14 +4155,16 @@ export const App: React.FC = () => {
             alignItems: "center",
             gap: 6,
             padding: "12px 20px",
+            flex: 1,
+            minWidth: 0,
           }}
         >
           <span
             style={{
               padding: "2px 8px",
               borderRadius: 999,
-              backgroundColor: "#f9fafb",
-              color: "#0f172a",
+              backgroundColor: "var(--wl-logo-badge-bg)",
+              color: "var(--wl-logo-badge-text)",
               fontSize: 14,
               fontWeight: 700,
               letterSpacing: 0.5,
@@ -4126,102 +4172,102 @@ export const App: React.FC = () => {
           >
             Web
           </span>
-          <span style={{ fontSize: 18, fontWeight: 600 }}>Lens</span>
+          <span style={{ fontSize: 18, fontWeight: 600, color: "var(--wl-text-heading)" }}>Lens</span>
         </div>
         <div
+          className="wl-header-tray"
           style={{
             position: "relative",
             display: "flex",
-            alignItems: "stretch",
+            alignItems: "center",
+            gap: 2,
             marginLeft: "auto",
             marginRight: 0,
-            backgroundColor: "#020617",
-            borderLeft: "1px solid #1f2937",
+            padding: "8px 12px",
           }}
         >
+          <ThemeToggleButton />
           <button
+            ref={platformMenuTriggerRef}
             type="button"
-            onClick={() => setPlatformMenuOpen((o) => !o)}
-            style={{
-              padding: "0 18px",
-              borderRadius: 0,
-              border: "none",
-              backgroundColor: "transparent",
-              color: "#e5e7eb",
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 500,
+            className="wl-header-settings-action"
+            title="平台配置"
+            aria-label="平台配置"
+            onClick={() => {
+              setPlatformGearSpinning(true);
+              setPlatformMenuOpen((o) => !o);
             }}
+            onAnimationEnd={() => setPlatformGearSpinning(false)}
+            data-spinning={platformGearSpinning ? "true" : "false"}
           >
-            平台配置
+            <span className="wl-header-settings-action__icon" aria-hidden>
+              <svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 0 1 0 2.82 2 2 0 0 1-2.82 0l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 0 1-2.82 0 2 2 0 0 1 0-2.82l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 0 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 0 1 0-2.82 2 2 0 0 1 2.82 0l.06.06a1.7 1.7 0 0 0 1.87.34h0A1.7 1.7 0 0 0 10.03 3.1V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56h0a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 0 1 2.82 0 2 2 0 0 1 0 2.82l-.06.06a1.7 1.7 0 0 0-.34 1.87v0A1.7 1.7 0 0 0 20.97 10H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1z" />
+              </svg>
+            </span>
           </button>
           {platformMenuOpen && (
-            <>
-              <div
-                style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                onClick={() => setPlatformMenuOpen(false)}
-                aria-hidden
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  top: "100%",
-                  marginTop: 4,
-                  minWidth: 180,
-                  backgroundColor: "#020617",
-                  border: "1px solid #1e293b",
-                  borderRadius: 8,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.45)",
-                  zIndex: 41,
-                  padding: 4,
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPlatformMenuOpen(false);
-                    setConfigActiveTab("kubeconfig");
-                    setConfigModalOpen(true);
-                    setConfigError(null);
-                    fetchConfig()
-                      .then((c) => setConfigKubeconfigDir(c.kubeconfigDir))
-                      .catch(() => setConfigKubeconfigDir(""));
-                  }}
-                  style={{
-                    ...menuItemStyle,
-                    borderBottom: "1px solid rgba(248,250,252,0.16)",
-                  }}
-                >
-                  kubeconfig目录
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setPlatformMenuOpen(false);
-                    setConfigActiveTab("combos");
-                    setConfigModalOpen(true);
-                    setConfigError(null);
-                    // 如果已加载过作用域列表，优先展示现有列表，再后台刷新，避免长时间空白
-                    if (clusterCombos.length === 0) {
-                      setClusterCombosLoading(true);
-                    }
-                    try {
-                      const items = await fetchClusterCombos();
-                      setClusterCombos(items);
-                    } catch (e: any) {
-                      setConfigError(e?.message || "加载作用域列表失败");
-                    } finally {
-                      setClusterCombosLoading(false);
-                    }
-                  }}
-                  style={menuItemStyle}
-                >
-                  集群设置
-                </button>
-              </div>
-            </>
+          <DropdownMenuPortal
+            onClose={() => setPlatformMenuOpen(false)}
+            triggerRef={platformMenuTriggerRef}
+            align="right"
+            surfaceStyle={{ padding: 4, minWidth: 180 }}
+          >
+            <button
+              type="button"
+              className="wl-menu-item"
+              onClick={() => {
+                setPlatformMenuOpen(false);
+                setConfigActiveTab("kubeconfig");
+                setConfigModalOpen(true);
+                setConfigError(null);
+                fetchConfig()
+                  .then((c) => setConfigKubeconfigDir(c.kubeconfigDir))
+                  .catch(() => setConfigKubeconfigDir(""));
+              }}
+              style={{
+                ...menuItemStyleForDropdown,
+                borderBottom: "1px solid rgba(248,250,252,0.12)",
+              }}
+            >
+              kubeconfig目录
+            </button>
+            <button
+              type="button"
+              className="wl-menu-item"
+              onClick={async () => {
+                setPlatformMenuOpen(false);
+                setConfigActiveTab("combos");
+                setConfigModalOpen(true);
+                setConfigError(null);
+                // 如果已加载过作用域列表，优先展示现有列表，再后台刷新，避免长时间空白
+                if (clusterCombos.length === 0) {
+                  setClusterCombosLoading(true);
+                }
+                try {
+                  const items = await fetchClusterCombos();
+                  setClusterCombos(items);
+                } catch (e: any) {
+                  setConfigError(e?.message || "加载作用域列表失败");
+                } finally {
+                  setClusterCombosLoading(false);
+                }
+              }}
+              style={menuItemStyleForDropdown}
+            >
+              集群设置
+            </button>
+          </DropdownMenuPortal>
           )}
         </div>
       </header>
@@ -4241,8 +4287,8 @@ export const App: React.FC = () => {
         >
           <div
             style={{
-              backgroundColor: "#0f172a",
-              border: "1px solid #1e293b",
+              backgroundColor: "var(--wl-bg-elevated)",
+              border: "1px solid var(--wl-border-sidebar)",
               borderRadius: 8,
               padding: 20,
               minWidth: 520,
@@ -4256,7 +4302,7 @@ export const App: React.FC = () => {
 
             {configActiveTab === "kubeconfig" && (
               <>
-                <label style={{ display: "block", fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
+                <label style={{ display: "block", fontSize: 13, color: "var(--wl-text-label)", marginBottom: 6 }}>
                   kubeconfig 存放目录（仅支持绝对路径）
                 </label>
                 <input
@@ -4269,9 +4315,9 @@ export const App: React.FC = () => {
                     boxSizing: "border-box",
                     padding: "8px 12px",
                     borderRadius: 6,
-                    border: "1px solid #1f2937",
-                    backgroundColor: "#020617",
-                    color: "#e5e7eb",
+                    border: "1px solid var(--wl-border-subtle)",
+                    backgroundColor: "var(--wl-bg-table)",
+                    color: "var(--wl-text-primary)",
                     fontSize: 13,
                     marginBottom: 12,
                   }}
@@ -4286,9 +4332,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "6px 14px",
                       borderRadius: 6,
-                      border: "1px solid #334155",
+                      border: "1px solid var(--wl-border-strong)",
                       backgroundColor: "transparent",
-                      color: "#e5e7eb",
+                      color: "var(--wl-text-primary)",
                       cursor: configSaving ? "not-allowed" : "pointer",
                       fontSize: 13,
                     }}
@@ -4325,9 +4371,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "6px 14px",
                       borderRadius: 6,
-                      border: "1px solid #334155",
-                      backgroundColor: "#1e293b",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-strong)",
+                      backgroundColor: "var(--wl-bg-control)",
+                      color: "var(--wl-text-primary)",
                       cursor: configSaving ? "not-allowed" : "pointer",
                       fontSize: 13,
                     }}
@@ -4340,30 +4386,31 @@ export const App: React.FC = () => {
 
             {configActiveTab === "combos" && (
               <>
-                <div style={{ marginBottom: 12, fontSize: 13, color: "#9ca3af" }}>
+                <div style={{ marginBottom: 12, fontSize: 13, color: "var(--wl-text-label)" }}>
                   通过预设「集群 + 命名空间」作用域，简化主界面切换操作。
                 </div>
                 <div
                   style={{
                     borderRadius: 8,
-                    border: "1px solid #1e293b",
+                    border: "1px solid var(--wl-border-sidebar)",
                     padding: 12,
                     marginBottom: 12,
-                    backgroundColor: "#020617",
+                    backgroundColor: "var(--wl-bg-table)",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13, color: "#9ca3af" }}>集群选择</span>
+                    <span style={{ fontSize: 13, color: "var(--wl-text-label)" }}>集群选择</span>
                     <div style={{ position: "relative" }}>
                       <button
+                        ref={configClusterPickTriggerRef}
                         type="button"
                         onClick={() => setConfigClusterPickOpen((o) => !o)}
                         style={{
                           padding: "6px 10px",
                           borderRadius: 6,
-                          border: "1px solid #1f2937",
-                          backgroundColor: "#0f172a",
-                          color: "#e5e7eb",
+                          border: "1px solid var(--wl-border-subtle)",
+                          backgroundColor: "var(--wl-bg-elevated)",
+                          color: "var(--wl-text-primary)",
                           fontSize: 13,
                           minWidth: 280,
                           maxWidth: 420,
@@ -4380,62 +4427,55 @@ export const App: React.FC = () => {
                         })()}
                       </button>
                       {configClusterPickOpen && (
-                        <>
-                          <div
-                            style={{ position: "fixed", inset: 0, zIndex: 105 }}
-                            onClick={() => setConfigClusterPickOpen(false)}
-                            aria-hidden
+                      <SearchableDropdownPanelPortal
+                        onClose={() => setConfigClusterPickOpen(false)}
+                        triggerRef={configClusterPickTriggerRef}
+                        minWidthPx={360}
+                        panelStyle={{ maxWidth: "min(92vw, 520px)" }}
+                        repositionKey={`${configClusterSearchKeyword}:${configClusterPickFiltered.length}`}
+                        autoFocusInputRef={configClusterSearchRef}
+                        autoFocusSelectAllIfNonEmpty
+                      >
+                        <div style={WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE}>
+                          <ClearableSearchInput
+                            ref={configClusterSearchRef}
+                            value={configClusterSearchKeyword}
+                            onChange={setConfigClusterSearchKeyword}
+                            placeholder="搜索 kubeconfig 文件名 / 集群名"
+                            style={{ width: "100%", boxSizing: "border-box" }}
+                            inputStyle={WL_SEARCHABLE_DROPDOWN_INPUT_STYLE}
                           />
-                          <div
-                            style={{
-                              ...WL_SEARCHABLE_DROPDOWN_PANEL_STYLE,
-                              zIndex: 106,
-                              minWidth: 360,
-                              maxWidth: "min(92vw, 520px)",
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div style={WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE}>
-                              <ClearableSearchInput
-                                ref={configClusterSearchRef}
-                                value={configClusterSearchKeyword}
-                                onChange={setConfigClusterSearchKeyword}
-                                placeholder="搜索 kubeconfig 文件名 / 集群名"
-                                style={{ width: "100%", boxSizing: "border-box" }}
-                                inputStyle={WL_SEARCHABLE_DROPDOWN_INPUT_STYLE}
+                        </div>
+                        <div style={WL_SEARCHABLE_DROPDOWN_SCROLL_PORTAL_STYLE}>
+                          {clusters.length === 0 && (
+                            <div style={{ padding: 12, fontSize: 12, color: "var(--wl-text-label)" }}>
+                              暂无集群，请先配置 kubeconfig 目录并刷新。
+                            </div>
+                          )}
+                          {clusters.length > 0 &&
+                            configClusterPickFiltered.length === 0 && (
+                              <div style={{ padding: 12, fontSize: 12, color: "var(--wl-text-label)" }}>
+                                无匹配的集群，请调整关键字或点击「刷新」更新列表。
+                              </div>
+                            )}
+                          {configClusterPickFiltered.map((c, idx, arr) => {
+                            const { left, right } = clusterOptionColumns(c);
+                            return (
+                              <SearchableDropdownTwoColumnRow
+                                key={c.id}
+                                left={left}
+                                right={right}
+                                selected={c.id === comboClusterId}
+                                borderBottom={idx < arr.length - 1}
+                                onClick={() => {
+                                  setComboClusterId(c.id);
+                                  setConfigClusterPickOpen(false);
+                                }}
                               />
-                            </div>
-                            <div style={WL_SEARCHABLE_DROPDOWN_SCROLL_STYLE}>
-                              {clusters.length === 0 && (
-                                <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
-                                  暂无集群，请先配置 kubeconfig 目录并刷新。
-                                </div>
-                              )}
-                              {clusters.length > 0 &&
-                                configClusterPickFiltered.length === 0 && (
-                                  <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
-                                    无匹配的集群，请调整关键字或点击「刷新」更新列表。
-                                  </div>
-                                )}
-                              {configClusterPickFiltered.map((c, idx, arr) => {
-                                const { left, right } = clusterOptionColumns(c);
-                                return (
-                                  <SearchableDropdownTwoColumnRow
-                                    key={c.id}
-                                    left={left}
-                                    right={right}
-                                    selected={c.id === comboClusterId}
-                                    borderBottom={idx < arr.length - 1}
-                                    onClick={() => {
-                                      setComboClusterId(c.id);
-                                      setConfigClusterPickOpen(false);
-                                    }}
-                                  />
-                                );
-                              })}
-                            </div>
-                          </div>
-                        </>
+                            );
+                          })}
+                        </div>
+                      </SearchableDropdownPanelPortal>
                       )}
                     </div>
                     <button
@@ -4445,16 +4485,16 @@ export const App: React.FC = () => {
                       style={{
                         padding: "6px 10px",
                         borderRadius: 6,
-                        border: "1px solid #1f2937",
-                        backgroundColor: reloading ? "#0b1220" : "#0f172a",
-                        color: "#e5e7eb",
+                        border: "1px solid var(--wl-border-subtle)",
+                        backgroundColor: reloading ? "var(--wl-bg-button-disabled)" : "var(--wl-bg-elevated)",
+                        color: "var(--wl-text-primary)",
                         cursor: reloading ? "not-allowed" : "pointer",
                         fontSize: 13,
                       }}
                     >
                       {reloading ? "刷新中..." : "刷新"}
                     </button>
-                    <span style={{ fontSize: 13, color: "#9ca3af" }}>命名空间</span>
+                    <span style={{ fontSize: 13, color: "var(--wl-text-label)" }}>命名空间</span>
                     <input
                       type="text"
                       value={comboNamespace}
@@ -4463,9 +4503,9 @@ export const App: React.FC = () => {
                       style={{
                         padding: "6px 10px",
                         borderRadius: 6,
-                        border: "1px solid #1f2937",
-                        backgroundColor: "#0f172a",
-                        color: "#e5e7eb",
+                        border: "1px solid var(--wl-border-subtle)",
+                        backgroundColor: "var(--wl-bg-elevated)",
+                        color: "var(--wl-text-primary)",
                         fontSize: 13,
                         minWidth: 180,
                       }}
@@ -4487,10 +4527,10 @@ export const App: React.FC = () => {
                       style={{
                         padding: "6px 10px",
                         borderRadius: 6,
-                        border: "1px solid #334155",
+                        border: "1px solid var(--wl-border-strong)",
                         backgroundColor:
-                          !comboClusterId || !comboNamespace.trim() ? "#020617" : "#1e293b",
-                        color: "#e5e7eb",
+                          !comboClusterId || !comboNamespace.trim() ? "var(--wl-bg-table)" : "var(--wl-bg-control)",
+                        color: "var(--wl-text-primary)",
                         cursor:
                           !comboClusterId || !comboNamespace.trim() ? "not-allowed" : "pointer",
                         fontSize: 13,
@@ -4499,13 +4539,13 @@ export const App: React.FC = () => {
                       添加
                     </button>
                   </div>
-                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                  <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>
                     集群不存在或命名空间无权限时，可先通过“测试”按钮验证。
                   </div>
                 </div>
 
                 <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                  <span style={{ fontSize: 13, color: "#9ca3af" }}>已添加作用域</span>
+                  <span style={{ fontSize: 13, color: "var(--wl-text-label)" }}>已添加作用域</span>
                   <ClearableSearchInput
                     value={comboSearchKeyword}
                     onChange={setComboSearchKeyword}
@@ -4514,9 +4554,9 @@ export const App: React.FC = () => {
                     inputStyle={{
                       padding: "4px 8px",
                       borderRadius: 6,
-                      border: "1px solid #1f2937",
-                      backgroundColor: "#020617",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-subtle)",
+                      backgroundColor: "var(--wl-bg-table)",
+                      color: "var(--wl-text-primary)",
                       fontSize: 12,
                     }}
                   />
@@ -4527,8 +4567,8 @@ export const App: React.FC = () => {
                     maxHeight: 260,
                     overflowY: "auto",
                     borderRadius: 6,
-                    border: "1px solid #1f2937",
-                    backgroundColor: "#020617",
+                    border: "1px solid var(--wl-border-subtle)",
+                    backgroundColor: "var(--wl-bg-table)",
                   }}
                 >
                   <table
@@ -4540,16 +4580,16 @@ export const App: React.FC = () => {
                   >
                     <thead>
                       <tr>
-                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           集群 kubeconfig
                         </th>
-                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           命名空间
                         </th>
-                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           别名
                         </th>
-                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           操作
                         </th>
                       </tr>
@@ -4588,7 +4628,7 @@ export const App: React.FC = () => {
                                   {cluster ? (
                                     <>
                                       <div>{cluster.name}</div>
-                                      <div style={{ fontSize: 11, color: "#64748b" }}>{fileName}</div>
+                                      <div style={{ fontSize: 11, color: "var(--wl-text-muted)" }}>{fileName}</div>
                                     </>
                                   ) : (
                                     <span style={{ color: "#f97373" }}>集群未找到：{combo.clusterId}</span>
@@ -4611,9 +4651,9 @@ export const App: React.FC = () => {
                                         flex: 1,
                                         padding: "4px 6px",
                                         borderRadius: 4,
-                                        border: "1px solid #1f2937",
-                                        backgroundColor: "#020617",
-                                        color: "#e5e7eb",
+                                        border: "1px solid var(--wl-border-subtle)",
+                                        backgroundColor: "var(--wl-bg-table)",
+                                        color: "var(--wl-text-primary)",
                                       }}
                                     />
                                     <button
@@ -4732,33 +4772,24 @@ export const App: React.FC = () => {
       )}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
-        {/* 左侧边栏：可折叠，收起后主工作区展宽 */}
-        <div style={{ display: "flex", flexDirection: "row", height: "100%" }}>
-          {!sidebarCollapsed && <Sidebar currentView={currentView} onSelect={setCurrentView} />}
+        {/* 左侧边栏：全宽导航 + 右缘中部绝对定位凸耳把手；收起时仅窄槽+工作区底，无整列侧栏色条 */}
+        <div
+          className="wl-sidebar-rail"
+          data-collapsed={sidebarCollapsed ? "true" : "false"}
+        >
+          <div className="wl-sidebar-rail__nav" aria-hidden={sidebarCollapsed}>
+            <Sidebar currentView={currentView} onSelect={setCurrentView} edge="rail" />
+          </div>
           <button
             type="button"
+            className="wl-sidebar-grip"
             onClick={() => setSidebarCollapsed((v) => !v)}
-            title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
-            style={{
-              width: 24,
-              minWidth: 24,
-              height: 64,
-              margin: "auto 0",
-              border: "none",
-              outline: "none",
-              backgroundColor: "#020617",
-              borderRight: "1px solid #1e293b",
-              color: "#e5e7eb",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 11,
-              borderRadius: 999,
-              boxShadow: "0 0 0 1px rgba(15,23,42,0.8)",
-            }}
+            aria-expanded={!sidebarCollapsed}
+            aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
           >
-            {sidebarCollapsed ? "▶" : "◀"}
+            <span className="wl-sidebar-grip__chevron" aria-hidden>
+              {"<"}
+            </span>
           </button>
         </div>
 
@@ -4800,17 +4831,18 @@ export const App: React.FC = () => {
                     flexWrap: "wrap",
                   }}
                 >
-                  <span style={{ fontSize: 14, color: "#9ca3af" }}>作用域选择：</span>
+                  <span style={{ fontSize: 14, color: "var(--wl-text-label)" }}>作用域选择：</span>
                   <div style={{ position: "relative" }}>
                     <button
+                      ref={clusterScopeTriggerRef}
                       type="button"
                       onClick={() => setClusterDropdownOpen((o) => !o)}
                       style={{
                         padding: "6px 12px",
                         borderRadius: 6,
-                        border: "1px solid #1f2937",
-                        backgroundColor: "#0f172a",
-                        color: "#e5e7eb",
+                        border: "1px solid var(--wl-border-subtle)",
+                        backgroundColor: "var(--wl-bg-elevated)",
+                        color: "var(--wl-text-primary)",
                         fontSize: 13,
                         minWidth: 260,
                         textAlign: "left",
@@ -4829,65 +4861,63 @@ export const App: React.FC = () => {
                         : "请选择作用域"}
                     </button>
                     {clusterDropdownOpen && (
-                      <>
-                        <div
-                          style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                          onClick={() => setClusterDropdownOpen(false)}
-                          aria-hidden
+                    <SearchableDropdownPanelPortal
+                      onClose={() => setClusterDropdownOpen(false)}
+                      triggerRef={clusterScopeTriggerRef}
+                      minWidthPx={320}
+                      panelStyle={{ maxWidth: "min(92vw, 520px)" }}
+                      repositionKey={`${clusterSearchKeyword}:${clusterComboDropdownFiltered.length}`}
+                      autoFocusInputRef={clusterComboSearchRef}
+                      autoFocusSelectAllIfNonEmpty
+                    >
+                      <div style={WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE}>
+                        <ClearableSearchInput
+                          ref={clusterComboSearchRef}
+                          value={clusterSearchKeyword}
+                          onChange={setClusterSearchKeyword}
+                          placeholder="搜索 kubeconfig 文件名 / 命名空间 / 作用域别名关键字"
+                          style={{ width: "100%", boxSizing: "border-box" }}
+                          inputStyle={WL_SEARCHABLE_DROPDOWN_INPUT_STYLE}
                         />
-                        <div
-                          style={{ ...WL_SEARCHABLE_DROPDOWN_PANEL_STYLE, zIndex: 41 }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div style={WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE}>
-                            <ClearableSearchInput
-                              ref={clusterComboSearchRef}
-                              value={clusterSearchKeyword}
-                              onChange={setClusterSearchKeyword}
-                              placeholder="搜索 kubeconfig 文件名 / 命名空间 / 作用域别名关键字"
-                              style={{ width: "100%", boxSizing: "border-box" }}
-                              inputStyle={WL_SEARCHABLE_DROPDOWN_INPUT_STYLE}
+                      </div>
+                      <div style={WL_SEARCHABLE_DROPDOWN_SCROLL_PORTAL_STYLE}>
+                        {clusterCombos.length === 0 && (
+                          <div style={{ padding: 12, fontSize: 12, color: "var(--wl-text-label)" }}>
+                            暂未添加作用域，请先在右上角「平台配置 · 集群作用域设置」中添加。
+                          </div>
+                        )}
+                        {clusterCombos.length > 0 && clusterComboDropdownFiltered.length === 0 && (
+                          <div style={{ padding: 12, fontSize: 12, color: "var(--wl-text-label)" }}>
+                            无匹配作用域，请调整关键字。
+                          </div>
+                        )}
+                        {clusterComboDropdownFiltered.map((combo, idx, arr) => {
+                          const cluster = clusters.find((c) => c.id === combo.clusterId);
+                          const fileName = cluster
+                            ? kubeconfigDisplayFileName(cluster.filePath)
+                            : `集群未找到：${combo.clusterId}`;
+                          const ns = combo.namespace || "所有命名空间";
+                          const name = cluster?.name ?? combo.clusterId;
+                          const right = combo.alias
+                            ? `${combo.alias} · ${name} · ${ns}`
+                            : `${name} · ${ns}`;
+                          return (
+                            <SearchableDropdownTwoColumnRow
+                              key={combo.id}
+                              left={fileName}
+                              right={right}
+                              selected={combo.id === activeComboId}
+                              borderBottom={idx < arr.length - 1}
+                              onClick={() => {
+                                setActiveComboId(combo.id);
+                                setClusterDropdownOpen(false);
+                                setClusterSearchKeyword("");
+                              }}
                             />
-                          </div>
-                          <div style={WL_SEARCHABLE_DROPDOWN_SCROLL_STYLE}>
-                            {clusterCombos.length === 0 && (
-                              <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
-                                暂未添加作用域，请先在右上角「平台配置 · 集群作用域设置」中添加。
-                              </div>
-                            )}
-                            {clusterCombos.length > 0 && clusterComboDropdownFiltered.length === 0 && (
-                              <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
-                                无匹配作用域，请调整关键字。
-                              </div>
-                            )}
-                            {clusterComboDropdownFiltered.map((combo, idx, arr) => {
-                              const cluster = clusters.find((c) => c.id === combo.clusterId);
-                              const fileName = cluster
-                                ? kubeconfigDisplayFileName(cluster.filePath)
-                                : `集群未找到：${combo.clusterId}`;
-                              const ns = combo.namespace || "所有命名空间";
-                              const name = cluster?.name ?? combo.clusterId;
-                              const right = combo.alias
-                                ? `${combo.alias} · ${name} · ${ns}`
-                                : `${name} · ${ns}`;
-                              return (
-                                <SearchableDropdownTwoColumnRow
-                                  key={combo.id}
-                                  left={fileName}
-                                  right={right}
-                                  selected={combo.id === activeComboId}
-                                  borderBottom={idx < arr.length - 1}
-                                  onClick={() => {
-                                    setActiveComboId(combo.id);
-                                    setClusterDropdownOpen(false);
-                                    setClusterSearchKeyword("");
-                                  }}
-                                />
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </>
+                          );
+                        })}
+                      </div>
+                    </SearchableDropdownPanelPortal>
                     )}
                   </div>
                   <button
@@ -4896,9 +4926,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "6px 12px",
                       borderRadius: 6,
-                      border: "1px solid #334155",
-                      backgroundColor: "#1e293b",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-strong)",
+                      backgroundColor: "var(--wl-bg-control)",
+                      color: "var(--wl-text-primary)",
                       cursor: !activeComboId ? "not-allowed" : "pointer",
                       fontSize: 13,
                     }}
@@ -4914,9 +4944,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "6px 10px",
                       borderRadius: 6,
-                      border: "1px solid #1f2937",
-                      backgroundColor: reloading ? "#0b1220" : "#0f172a",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-subtle)",
+                      backgroundColor: reloading ? "var(--wl-bg-button-disabled)" : "var(--wl-bg-elevated)",
+                      color: "var(--wl-text-primary)",
                       cursor: reloading ? "not-allowed" : "pointer",
                       fontSize: 13,
                     }}
@@ -4926,7 +4956,7 @@ export const App: React.FC = () => {
                   </button>
                 </div>
 
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: "var(--wl-text-muted)", marginBottom: 12 }}>
                   集群与命名空间 · 当前：
                   {effectiveComboId
                     ? (() => {
@@ -5034,9 +5064,9 @@ export const App: React.FC = () => {
                         style={{
                           padding: "4px 10px",
                           borderRadius: 6,
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
-                          color: "#e5e7eb",
+                          border: "1px solid var(--wl-border-strong)",
+                          backgroundColor: "var(--wl-bg-control)",
+                          color: "var(--wl-text-primary)",
                           cursor: "pointer",
                           fontSize: 12,
                         }}
@@ -5054,16 +5084,16 @@ export const App: React.FC = () => {
                           flexWrap: "wrap",
                           padding: "4px 10px",
                           borderRadius: 6,
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
+                          border: "1px solid var(--wl-border-strong)",
+                          backgroundColor: "var(--wl-bg-control)",
                           fontSize: 12,
-                          color: "#e2e8f0",
+                          color: "var(--wl-text-heading)",
                         }}
                       >
                         <span>
                           已选 {selectedPodKeys.size} 项
                           {podSelectedNotVisibleCount > 0 && (
-                            <span style={{ color: "#94a3b8" }}>
+                            <span style={{ color: "var(--wl-text-secondary)" }}>
                               {" "}
                               （其中 {podSelectedNotVisibleCount} 项当前未显示）
                             </span>
@@ -5096,9 +5126,9 @@ export const App: React.FC = () => {
                           style={{
                             padding: "3px 10px",
                             borderRadius: 4,
-                            border: "1px solid #334155",
+                            border: "1px solid var(--wl-border-strong)",
                             backgroundColor: "transparent",
-                            color: "#94a3b8",
+                            color: "var(--wl-text-secondary)",
                             cursor: "pointer",
                             fontSize: 11,
                           }}
@@ -5116,16 +5146,16 @@ export const App: React.FC = () => {
                           flexWrap: "wrap",
                           padding: "4px 10px",
                           borderRadius: 6,
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
+                          border: "1px solid var(--wl-border-strong)",
+                          backgroundColor: "var(--wl-bg-control)",
                           fontSize: 12,
-                          color: "#e2e8f0",
+                          color: "var(--wl-text-heading)",
                         }}
                       >
                         <span>
                           已选 {selectedDeploymentKeys.size} 项
                           {deploymentSelectedNotVisibleCount > 0 && (
-                            <span style={{ color: "#94a3b8" }}>
+                            <span style={{ color: "var(--wl-text-secondary)" }}>
                               {" "}
                               （其中 {deploymentSelectedNotVisibleCount} 项当前未显示）
                             </span>
@@ -5164,7 +5194,7 @@ export const App: React.FC = () => {
                           style={{
                             padding: "3px 10px",
                             borderRadius: 4,
-                            border: "1px solid #334155",
+                            border: "1px solid var(--wl-border-strong)",
                             backgroundColor: "rgba(13,148,136,0.25)",
                             color: "#99f6e4",
                             cursor: effectiveClusterId ? "pointer" : "not-allowed",
@@ -5179,9 +5209,9 @@ export const App: React.FC = () => {
                           style={{
                             padding: "3px 10px",
                             borderRadius: 4,
-                            border: "1px solid #334155",
+                            border: "1px solid var(--wl-border-strong)",
                             backgroundColor: "transparent",
-                            color: "#94a3b8",
+                            color: "var(--wl-text-secondary)",
                             cursor: "pointer",
                             fontSize: 11,
                           }}
@@ -5205,15 +5235,8 @@ export const App: React.FC = () => {
                         currentView === "events") &&
                       showServerClockSkewHint && (
                         <span
+                          className="wl-list-inline-warn-accent"
                           title={`本地与服务端时间偏差约 ${Math.abs(serverClockSkewMs)}ms`}
-                          style={{
-                            fontSize: 12,
-                            color: "#fbbf24",
-                            marginLeft: 12,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                          }}
                         >
                           <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>
                             ⏱
@@ -5222,18 +5245,7 @@ export const App: React.FC = () => {
                         </span>
                       )}
                     {!applyingSelection && currentView === "pods" && hasNonHealthyPods && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5241,18 +5253,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "statefulsets" && hasNonHealthyStatefulSets && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5260,18 +5261,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "ingresses" && hasNonHealthyIngresses && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5279,18 +5269,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "events" && hasWarningEvents && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5298,18 +5277,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "persistentvolumeclaims" && hasRiskyPvcs && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5317,18 +5285,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "services" && hasRiskyServices && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5356,9 +5313,9 @@ export const App: React.FC = () => {
                     inputStyle={{
                       padding: "4px 8px",
                       borderRadius: 6,
-                      border: "1px solid #1f2937",
-                      backgroundColor: "#020617",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-subtle)",
+                      backgroundColor: "var(--wl-bg-table)",
+                      color: "var(--wl-text-primary)",
                       fontSize: 12,
                     }}
                   />
@@ -5383,7 +5340,7 @@ export const App: React.FC = () => {
                       width: podTableTotalWidth,
                       minWidth: "100%",
                       borderCollapse: "collapse",
-                      backgroundColor: "#020617",
+                      backgroundColor: "var(--wl-bg-table)",
                       tableLayout: "fixed",
                     }}
                   >
@@ -5521,6 +5478,7 @@ export const App: React.FC = () => {
                                 <span className="wl-table-hover-copy__main">
                                   <button
                                     type="button"
+                                    className="wl-table-hover-copy__truncate"
                                     onClick={() => openDescribeForPod(p)}
                                     style={{
                                       padding: 0,
@@ -5529,12 +5487,6 @@ export const App: React.FC = () => {
                                       background: "none",
                                       color: "inherit",
                                       cursor: "pointer",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                      minWidth: 0,
-                                      flex: "1 1 auto",
-                                      textAlign: "left",
                                     }}
                                   >
                                     {p.metadata.name}
@@ -5547,7 +5499,7 @@ export const App: React.FC = () => {
                                   title="复制 Pod 名称"
                                   aria-label={`复制 Pod 名称：${p.metadata.name}`}
                                 >
-                                  <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                  <CopyIcon />
                                 </button>
                               </span>
                             </td>
@@ -5565,6 +5517,7 @@ export const App: React.FC = () => {
                             <td style={{ ...tdStyle, overflow: "visible" }}>
                               <div style={{ position: "relative" }}>
                                 <button
+                                  ref={isMenuOpen ? podMenuTriggerRef : undefined}
                                   type="button"
                                   className="wl-table-menu-trigger"
                                   onClick={() =>
@@ -5590,118 +5543,111 @@ export const App: React.FC = () => {
                                   ⋮
                                 </button>
                                 {isMenuOpen && (
-                                  <>
-                                    <div
-                                      style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                                      onClick={() => { setPodMenuOpenKey(null); setPodMenuSubmenu(null); }}
-                                      aria-hidden
-                                    />
-                                    <div
-                                      className="wl-table-dropdown-menu"
+                                <DropdownMenuPortal
+                                  onClose={() => {
+                                    setPodMenuOpenKey(null);
+                                    setPodMenuSubmenu(null);
+                                  }}
+                                  triggerRef={podMenuTriggerRef}
+                                  align="right"
+                                  repositionKey={podMenuSubmenu ?? ""}
+                                  surfaceStyle={{
+                                    padding: "4px 0",
+                                    display: "flex",
+                                    minWidth: 140,
+                                  }}
+                                >
+                                  <div style={{ padding: "4px 0", borderRight: podMenuSubmenu ? "1px solid var(--wl-border-strong)" : undefined }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPodMenuSubmenu((s) => (s === "shell" ? null : "shell"))}
+                                      className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
                                       style={{
-                                        position: "absolute",
-                                        right: 0,
-                                        top: "100%",
-                                        marginTop: 4,
-                                        minWidth: 140,
-                                        zIndex: 41,
-                                        padding: "4px 0",
+                                        ...menuItemStyleForDropdown,
                                         display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                        width: "100%",
                                       }}
-                                      onClick={(e) => e.stopPropagation()}
                                     >
-                                      <div style={{ padding: "4px 0", borderRight: podMenuSubmenu ? "1px solid #334155" : undefined }}>
+                                      <span><span style={{ marginRight: 8 }}>⌘</span> Shell</span>
+                                      <span style={{ fontSize: 10 }}>▸</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPodMenuSubmenu((s) => (s === "logs" ? null : "logs"))}
+                                      className={`wl-menu-item${podMenuSubmenu === "logs" ? " is-active" : ""}`}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                        width: "100%",
+                                      }}
+                                    >
+                                      <span><span style={{ marginRight: 8 }}>≡</span> Logs</span>
+                                      <span style={{ fontSize: 10 }}>▸</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditTab(p)}
+                                      className="wl-menu-item"
+                                      style={menuItemStyleForDropdown}
+                                    >
+                                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setPodMenuOpenKey(null);
+                                        setPodMenuSubmenu(null);
+                                        if (!effectiveClusterId) return;
+                                        const ns = p.metadata.namespace;
+                                        const name = p.metadata.name;
+                                        setActionConfirm({
+                                          title: "确认删除 1 个 Pod？",
+                                          description: "删除后 Pod 将终止并从集群移除。",
+                                          items: [`${ns}/${name}`],
+                                          variant: "danger",
+                                          onConfirm: async () => {
+                                            try {
+                                              await deletePod(effectiveClusterId, ns, name);
+                                              trackUsage({
+                                                event: "delete_pod",
+                                                resource: "pod",
+                                                target: `${ns}/${name}`,
+                                                ...usageScopeFields(),
+                                              });
+                                              setError(null);
+                                            } catch (err: any) {
+                                              setError(err?.response?.data?.error ?? err?.message ?? "删除失败");
+                                              throw err;
+                                            }
+                                          },
+                                        });
+                                      }}
+                                      className="wl-menu-item wl-menu-item-danger"
+                                      style={menuItemStyleForDropdown}
+                                    >
+                                      <span style={{ marginRight: 8 }}>🗑</span> Delete
+                                    </button>
+                                  </div>
+                                  {podMenuSubmenu && (
+                                    <div style={{ minWidth: 100, padding: "4px 0" }}>
+                                      {containers.map((c) => (
                                         <button
+                                          key={c}
                                           type="button"
-                                          onClick={() => setPodMenuSubmenu((s) => (s === "shell" ? null : "shell"))}
-                                          className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
-                                          style={{
-                                            ...menuItemStyleForDropdown,
-                                            display: "flex",
-                                            alignItems: "center",
-                                            justifyContent: "space-between",
-                                            width: "100%",
-                                          }}
-                                        >
-                                          <span><span style={{ marginRight: 8 }}>⌘</span> Shell</span>
-                                          <span style={{ fontSize: 10 }}>▸</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setPodMenuSubmenu((s) => (s === "logs" ? null : "logs"))}
-                                          className={`wl-menu-item${podMenuSubmenu === "logs" ? " is-active" : ""}`}
-                                          style={{
-                                            ...menuItemStyleForDropdown,
-                                            display: "flex",
-                                            alignItems: "center",
-                                            justifyContent: "space-between",
-                                            width: "100%",
-                                          }}
-                                        >
-                                          <span><span style={{ marginRight: 8 }}>≡</span> Logs</span>
-                                          <span style={{ fontSize: 10 }}>▸</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => openEditTab(p)}
+                                          onClick={() => openPanelTab(podMenuSubmenu, p, c)}
                                           className="wl-menu-item"
                                           style={menuItemStyleForDropdown}
                                         >
-                                          <span style={{ marginRight: 8 }}>✎</span> Edit
+                                          {c}
                                         </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setPodMenuOpenKey(null);
-                                            setPodMenuSubmenu(null);
-                                            if (!effectiveClusterId) return;
-                                            const ns = p.metadata.namespace;
-                                            const name = p.metadata.name;
-                                            setActionConfirm({
-                                              title: "确认删除 1 个 Pod？",
-                                              description: "删除后 Pod 将终止并从集群移除。",
-                                              items: [`${ns}/${name}`],
-                                              variant: "danger",
-                                              onConfirm: async () => {
-                                                try {
-                                                  await deletePod(effectiveClusterId, ns, name);
-                                                  trackUsage({
-                                                    event: "delete_pod",
-                                                    resource: "pod",
-                                                    target: `${ns}/${name}`,
-                                                    ...usageScopeFields(),
-                                                  });
-                                                  setError(null);
-                                                } catch (err: any) {
-                                                  setError(err?.response?.data?.error ?? err?.message ?? "删除失败");
-                                                  throw err;
-                                                }
-                                              },
-                                            });
-                                          }}
-                                          className="wl-menu-item wl-menu-item-danger"
-                                          style={menuItemStyleForDropdown}
-                                        >
-                                          <span style={{ marginRight: 8 }}>🗑</span> Delete
-                                        </button>
-                                      </div>
-                                      {podMenuSubmenu && (
-                                        <div style={{ minWidth: 100, padding: "4px 0" }}>
-                                          {containers.map((c) => (
-                                            <button
-                                              key={c}
-                                              type="button"
-                                              onClick={() => openPanelTab(podMenuSubmenu, p, c)}
-                                              className="wl-menu-item"
-                                              style={menuItemStyleForDropdown}
-                                            >
-                                              {c}
-                                            </button>
-                                          ))}
-                                        </div>
-                                      )}
+                                      ))}
                                     </div>
-                                  </>
+                                  )}
+                                </DropdownMenuPortal>
                                 )}
                               </div>
                             </td>
@@ -5718,7 +5664,7 @@ export const App: React.FC = () => {
                       width: deployTableTotalWidth,
                       minWidth: "100%",
                       borderCollapse: "collapse",
-                      backgroundColor: "#020617",
+                      backgroundColor: "var(--wl-bg-table)",
                       tableLayout: "fixed",
                     }}
                   >
@@ -5796,14 +5742,14 @@ export const App: React.FC = () => {
                     <tbody className="wl-table-body">
                       {deploymentLoading && deploymentItems.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             加载中…
                           </td>
                         </tr>
                       )}
                       {!deploymentLoading && sortedDeployments.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             暂无 Deployment
                           </td>
                         </tr>
@@ -5859,6 +5805,7 @@ export const App: React.FC = () => {
                                 <span className="wl-table-hover-copy__main">
                                   <button
                                     type="button"
+                                    className="wl-table-hover-copy__truncate"
                                     onClick={() => openDescribeForDeployment(d)}
                                     style={{
                                       padding: 0,
@@ -5867,12 +5814,6 @@ export const App: React.FC = () => {
                                       background: "none",
                                       color: "inherit",
                                       cursor: "pointer",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                      minWidth: 0,
-                                      flex: "1 1 auto",
-                                      textAlign: "left",
                                     }}
                                   >
                                     {d.metadata.name}
@@ -5885,7 +5826,7 @@ export const App: React.FC = () => {
                                   title="复制 Deployment 名称"
                                   aria-label={`复制 Deployment 名称：${d.metadata.name}`}
                                 >
-                                  <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                  <CopyIcon />
                                 </button>
                               </span>
                             </td>
@@ -5907,6 +5848,7 @@ export const App: React.FC = () => {
                             <td style={{ ...tdStyle, overflow: "visible" }}>
                               <div style={{ position: "relative" }}>
                                 <button
+                                  ref={isMenuOpen ? deploymentMenuTriggerRef : undefined}
                                   type="button"
                                   className="wl-table-menu-trigger"
                                   disabled={rowBusy || !effectiveClusterId}
@@ -5930,142 +5872,128 @@ export const App: React.FC = () => {
                                   ⋮
                                 </button>
                                 {isMenuOpen && (
-                                  <>
-                                    <div
-                                      style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                                      onClick={() => setDeploymentMenuOpenKey(null)}
-                                      aria-hidden
-                                    />
-                                    <div
-                                      className="wl-table-dropdown-menu"
-                                      style={{
-                                        position: "absolute",
-                                        right: 0,
-                                        top: "100%",
-                                        marginTop: 4,
-                                        minWidth: 160,
-                                        zIndex: 41,
-                                        padding: "4px 0",
-                                      }}
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <button
-                                        type="button"
-                                        className="wl-menu-item"
-                                        style={menuItemStyleForDropdown}
-                                        disabled={rowBusy}
-                                        onClick={() => {
-                                          setDeploymentMenuOpenKey(null);
-                                          setDeployScaleInput(String(d.spec?.replicas ?? 0));
-                                          setDeployScaleModal({
-                                            namespace: ns,
-                                            name: dname,
-                                            current: d.spec?.replicas ?? 0,
-                                            resource: "deployment",
-                                          });
-                                        }}
-                                      >
-                                        <span style={{ marginRight: 8 }}>⇅</span> Scale
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="wl-menu-item"
-                                        style={menuItemStyleForDropdown}
-                                        disabled={rowBusy || !effectiveClusterId}
-                                        onClick={() => {
-                                          setDeploymentMenuOpenKey(null);
-                                          if (!effectiveClusterId) return;
-                                          setActionConfirm({
-                                            title: "确认重启 1 个 Deployment？",
-                                            description: "将触发滚动更新，Pod 会按策略逐步重建。",
-                                            items: [`${ns}/${dname}`],
-                                            variant: "primary",
-                                            onConfirm: async () => {
-                                              setDeploymentRowBusyKey(menuKey);
-                                              try {
-                                                const data = await restartDeployment(effectiveClusterId, ns, dname);
-                                                trackUsage({
-                                                  event: "restart_deployment",
-                                                  resource: "deployment",
-                                                  target: `${ns}/${dname}`,
-                                                  ...usageScopeFields(),
-                                                });
-                                                setDeploymentItems((prev) => mergeDeploymentIntoList(prev, data));
-                                                setToastMessage("已触发重启");
-                                                setError(null);
-                                              } catch (err: any) {
-                                                setToastMessage(
-                                                  err?.response?.data?.error ?? err?.message ?? "重启失败",
-                                                );
-                                                throw err;
-                                              } finally {
-                                                setDeploymentRowBusyKey(null);
-                                              }
-                                            },
-                                          });
-                                        }}
-                                      >
-                                        <span style={{ marginRight: 8 }}>↻</span> Restart
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="wl-menu-item"
-                                        style={menuItemStyleForDropdown}
-                                        disabled={rowBusy}
-                                        onClick={() => openEditDeploymentTab(d)}
-                                      >
-                                        <span style={{ marginRight: 8 }}>✎</span> Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="wl-menu-item wl-menu-item-danger"
-                                        style={menuItemStyleForDropdown}
-                                        disabled={rowBusy || !effectiveClusterId}
-                                        onClick={() => {
-                                          setDeploymentMenuOpenKey(null);
-                                          if (!effectiveClusterId) return;
-                                          setActionConfirm({
-                                            title: "确认删除 1 个 Deployment？",
-                                            description: "删除后不可恢复。",
-                                            items: [`${ns}/${dname}`],
-                                            variant: "danger",
-                                            onConfirm: async () => {
-                                              setDeploymentRowBusyKey(menuKey);
-                                              try {
-                                                await deleteDeployment(effectiveClusterId, ns, dname);
-                                                trackUsage({
-                                                  event: "delete_deployment",
-                                                  resource: "deployment",
-                                                  target: `${ns}/${dname}`,
-                                                  ...usageScopeFields(),
-                                                });
-                                                setDeploymentItems((prev) =>
-                                                  prev.filter(
-                                                    (it) =>
-                                                      !(
-                                                        it.metadata?.name === dname &&
-                                                        (it.metadata?.namespace ?? "") === ns
-                                                      ),
+                                <DropdownMenuPortal
+                                  onClose={() => setDeploymentMenuOpenKey(null)}
+                                  triggerRef={deploymentMenuTriggerRef}
+                                  align="right"
+                                  surfaceStyle={{ padding: "4px 0", minWidth: 160 }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="wl-menu-item"
+                                    style={menuItemStyleForDropdown}
+                                    disabled={rowBusy}
+                                    onClick={() => {
+                                      setDeploymentMenuOpenKey(null);
+                                      setDeployScaleInput(String(d.spec?.replicas ?? 0));
+                                      setDeployScaleModal({
+                                        namespace: ns,
+                                        name: dname,
+                                        current: d.spec?.replicas ?? 0,
+                                        resource: "deployment",
+                                      });
+                                    }}
+                                  >
+                                    <span style={{ marginRight: 8 }}>⇅</span> Scale
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="wl-menu-item"
+                                    style={menuItemStyleForDropdown}
+                                    disabled={rowBusy || !effectiveClusterId}
+                                    onClick={() => {
+                                      setDeploymentMenuOpenKey(null);
+                                      if (!effectiveClusterId) return;
+                                      setActionConfirm({
+                                        title: "确认重启 1 个 Deployment？",
+                                        description: "将触发滚动更新，Pod 会按策略逐步重建。",
+                                        items: [`${ns}/${dname}`],
+                                        variant: "primary",
+                                        onConfirm: async () => {
+                                          setDeploymentRowBusyKey(menuKey);
+                                          try {
+                                            const data = await restartDeployment(effectiveClusterId, ns, dname);
+                                            trackUsage({
+                                              event: "restart_deployment",
+                                              resource: "deployment",
+                                              target: `${ns}/${dname}`,
+                                              ...usageScopeFields(),
+                                            });
+                                            setDeploymentItems((prev) => mergeDeploymentIntoList(prev, data));
+                                            setToastMessage("已触发重启");
+                                            setError(null);
+                                          } catch (err: any) {
+                                            setToastMessage(
+                                              err?.response?.data?.error ?? err?.message ?? "重启失败",
+                                            );
+                                            throw err;
+                                          } finally {
+                                            setDeploymentRowBusyKey(null);
+                                          }
+                                        },
+                                      });
+                                    }}
+                                  >
+                                    <span style={{ marginRight: 8 }}>↻</span> Restart
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="wl-menu-item"
+                                    style={menuItemStyleForDropdown}
+                                    disabled={rowBusy}
+                                    onClick={() => openEditDeploymentTab(d)}
+                                  >
+                                    <span style={{ marginRight: 8 }}>✎</span> Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="wl-menu-item wl-menu-item-danger"
+                                    style={menuItemStyleForDropdown}
+                                    disabled={rowBusy || !effectiveClusterId}
+                                    onClick={() => {
+                                      setDeploymentMenuOpenKey(null);
+                                      if (!effectiveClusterId) return;
+                                      setActionConfirm({
+                                        title: "确认删除 1 个 Deployment？",
+                                        description: "删除后不可恢复。",
+                                        items: [`${ns}/${dname}`],
+                                        variant: "danger",
+                                        onConfirm: async () => {
+                                          setDeploymentRowBusyKey(menuKey);
+                                          try {
+                                            await deleteDeployment(effectiveClusterId, ns, dname);
+                                            trackUsage({
+                                              event: "delete_deployment",
+                                              resource: "deployment",
+                                              target: `${ns}/${dname}`,
+                                              ...usageScopeFields(),
+                                            });
+                                            setDeploymentItems((prev) =>
+                                              prev.filter(
+                                                (it) =>
+                                                  !(
+                                                    it.metadata?.name === dname &&
+                                                    (it.metadata?.namespace ?? "") === ns
                                                   ),
-                                                );
-                                                setToastMessage("已删除 Deployment");
-                                                setError(null);
-                                              } catch (err: any) {
-                                                setToastMessage(
-                                                  err?.response?.data?.error ?? err?.message ?? "删除失败",
-                                                );
-                                                throw err;
-                                              } finally {
-                                                setDeploymentRowBusyKey(null);
-                                              }
-                                            },
-                                          });
-                                        }}
-                                      >
-                                        <span style={{ marginRight: 8 }}>🗑</span> Delete
-                                      </button>
-                                    </div>
-                                  </>
+                                              ),
+                                            );
+                                            setToastMessage("已删除 Deployment");
+                                            setError(null);
+                                          } catch (err: any) {
+                                            setToastMessage(
+                                              err?.response?.data?.error ?? err?.message ?? "删除失败",
+                                            );
+                                            throw err;
+                                          } finally {
+                                            setDeploymentRowBusyKey(null);
+                                          }
+                                        },
+                                      });
+                                    }}
+                                  >
+                                    <span style={{ marginRight: 8 }}>🗑</span> Delete
+                                  </button>
+                                </DropdownMenuPortal>
                                 )}
                               </div>
                             </td>
@@ -6082,7 +6010,7 @@ export const App: React.FC = () => {
                       width: stsTableTotalWidth,
                       minWidth: "100%",
                       borderCollapse: "collapse",
-                      backgroundColor: "#020617",
+                      backgroundColor: "var(--wl-bg-table)",
                       tableLayout: "fixed",
                     }}
                   >
@@ -6129,14 +6057,14 @@ export const App: React.FC = () => {
                     <tbody className="wl-table-body">
                       {statefulsetLoading && statefulsetItems.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             加载中…
                           </td>
                         </tr>
                       )}
                       {!statefulsetLoading && sortedStatefulSets.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             暂无 StatefulSet
                           </td>
                         </tr>
@@ -6173,21 +6101,21 @@ export const App: React.FC = () => {
                         const stsReasonsText = owned
                           .flatMap((p) => (p.healthReasons || []).map((r) => `${p.metadata.name}: ${r}`))
                           .join("；");
-                        let stsHealthBg = "rgba(22,163,74,0.15)";
-                        let stsHealthBorder = "rgba(22,163,74,0.6)";
-                        let stsHealthColor = "#bbf7d0";
+                        let stsHealthBg = "var(--wl-pill-success-bg)";
+                        let stsHealthBorder = "var(--wl-pill-success-border)";
+                        let stsHealthColor = "var(--wl-pill-success-text)";
                         if (stsHealthLabel === "关注") {
-                          stsHealthBg = "rgba(202,138,4,0.18)";
-                          stsHealthBorder = "rgba(234,179,8,0.7)";
-                          stsHealthColor = "#facc15";
+                          stsHealthBg = "var(--wl-pill-attention-bg)";
+                          stsHealthBorder = "var(--wl-pill-attention-border)";
+                          stsHealthColor = "var(--wl-pill-attention-text)";
                         } else if (stsHealthLabel === "警告") {
-                          stsHealthBg = "rgba(249,115,22,0.2)";
-                          stsHealthBorder = "rgba(249,115,22,0.75)";
-                          stsHealthColor = "#fed7aa";
+                          stsHealthBg = "var(--wl-pill-orange-bg)";
+                          stsHealthBorder = "var(--wl-pill-orange-border)";
+                          stsHealthColor = "var(--wl-pill-orange-text)";
                         } else if (stsHealthLabel === "严重") {
-                          stsHealthBg = "rgba(185,28,28,0.25)";
-                          stsHealthBorder = "rgba(248,113,113,0.85)";
-                          stsHealthColor = "#fecaca";
+                          stsHealthBg = "var(--wl-pill-danger-bg)";
+                          stsHealthBorder = "var(--wl-pill-danger-border)";
+                          stsHealthColor = "var(--wl-pill-danger-text)";
                         }
                         const childPodsSorted = sortStsPodsTroubleshootFirst(owned, sname);
                         const primaryAbnormalPod = findSmallestOrdinalAbnormalPod(owned, sname);
@@ -6225,7 +6153,7 @@ export const App: React.FC = () => {
                                         padding: "0 4px",
                                         border: "none",
                                         background: "none",
-                                        color: "#94a3b8",
+                                        color: "var(--wl-text-secondary)",
                                         cursor: "pointer",
                                         flexShrink: 0,
                                         fontSize: 12,
@@ -6237,6 +6165,7 @@ export const App: React.FC = () => {
                                     </button>
                                     <button
                                       type="button"
+                                      className="wl-table-hover-copy__truncate"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         openDescribeForStatefulSet(s);
@@ -6248,12 +6177,6 @@ export const App: React.FC = () => {
                                         background: "none",
                                         color: "inherit",
                                         cursor: "pointer",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                        whiteSpace: "nowrap",
-                                        minWidth: 0,
-                                        flex: "1 1 auto",
-                                        textAlign: "left",
                                       }}
                                     >
                                       {s.metadata.name}
@@ -6269,7 +6192,7 @@ export const App: React.FC = () => {
                                     title="复制 StatefulSet 名称"
                                     aria-label={`复制 StatefulSet 名称：${s.metadata.name}`}
                                   >
-                                    <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                    <CopyIcon />
                                   </button>
                                 </span>
                               </td>
@@ -6311,6 +6234,7 @@ export const App: React.FC = () => {
                               <td style={{ ...tdStyle, overflow: "visible" }} onClick={(e) => e.stopPropagation()}>
                                 <div style={{ position: "relative" }}>
                                   <button
+                                    ref={isMenuOpen ? statefulsetMenuTriggerRef : undefined}
                                     type="button"
                                     className="wl-table-menu-trigger"
                                     disabled={rowBusy || !effectiveClusterId}
@@ -6334,148 +6258,134 @@ export const App: React.FC = () => {
                                     ⋮
                                   </button>
                                   {isMenuOpen && (
-                                    <>
-                                      <div
-                                        style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                                        onClick={() => setStatefulsetMenuOpenKey(null)}
-                                        aria-hidden
-                                      />
-                                      <div
-                                        className="wl-table-dropdown-menu"
-                                        style={{
-                                          position: "absolute",
-                                          right: 0,
-                                          top: "100%",
-                                          marginTop: 4,
-                                          minWidth: 160,
-                                          zIndex: 41,
-                                          padding: "4px 0",
-                                        }}
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <button
-                                          type="button"
-                                          className="wl-menu-item"
-                                          style={menuItemStyleForDropdown}
-                                          disabled={rowBusy}
-                                          onClick={() => {
-                                            setStatefulsetMenuOpenKey(null);
-                                            setDeployScaleInput(String(s.spec?.replicas ?? 0));
-                                            setDeployScaleModal({
-                                              namespace: ns,
-                                              name: sname,
-                                              current: s.spec?.replicas ?? 0,
-                                              resource: "statefulset",
-                                            });
-                                          }}
-                                        >
-                                          <span style={{ marginRight: 8 }}>⇅</span> Scale
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="wl-menu-item"
-                                          style={menuItemStyleForDropdown}
-                                          disabled={rowBusy || !effectiveClusterId}
-                                          onClick={() => {
-                                            setStatefulsetMenuOpenKey(null);
-                                            if (!effectiveClusterId) return;
-                                            setActionConfirm({
-                                              title: "确认重启 1 个 StatefulSet？",
-                                              description: "将按策略滚动更新 Pod。",
-                                              items: [`${ns}/${sname}`],
-                                              variant: "primary",
-                                              onConfirm: async () => {
-                                                setStatefulsetRowBusyKey(menuKey);
-                                                try {
-                                                  const data = await restartStatefulSet(
-                                                    effectiveClusterId,
-                                                    ns,
-                                                    sname,
-                                                  );
-                                                  trackUsage({
-                                                    event: "restart_statefulset",
-                                                    resource: "statefulset",
-                                                    target: `${ns}/${sname}`,
-                                                    ...usageScopeFields(),
-                                                  });
-                                                  setStatefulsetItems((prev) =>
-                                                    mergeDeploymentIntoList(prev, data),
-                                                  );
-                                                  setToastMessage("已触发重启");
-                                                  setError(null);
-                                                } catch (err: any) {
-                                                  setToastMessage(
-                                                    err?.response?.data?.error ?? err?.message ?? "重启失败",
-                                                  );
-                                                  throw err;
-                                                } finally {
-                                                  setStatefulsetRowBusyKey(null);
-                                                }
-                                              },
-                                            });
-                                          }}
-                                        >
-                                          <span style={{ marginRight: 8 }}>↻</span> Restart
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="wl-menu-item"
-                                          style={menuItemStyleForDropdown}
-                                          disabled={rowBusy}
-                                          onClick={() => openEditStatefulSetTab(s)}
-                                        >
-                                          <span style={{ marginRight: 8 }}>✎</span> Edit
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="wl-menu-item wl-menu-item-danger"
-                                          style={menuItemStyleForDropdown}
-                                          disabled={rowBusy || !effectiveClusterId}
-                                          onClick={() => {
-                                            setStatefulsetMenuOpenKey(null);
-                                            if (!effectiveClusterId) return;
-                                            setActionConfirm({
-                                              title: "确认删除 1 个 StatefulSet？",
-                                              description: "删除后不可恢复。",
-                                              items: [`${ns}/${sname}`],
-                                              variant: "danger",
-                                              onConfirm: async () => {
-                                                setStatefulsetRowBusyKey(menuKey);
-                                                try {
-                                                  await deleteStatefulSet(effectiveClusterId, ns, sname);
-                                                  trackUsage({
-                                                    event: "delete_statefulset",
-                                                    resource: "statefulset",
-                                                    target: `${ns}/${sname}`,
-                                                    ...usageScopeFields(),
-                                                  });
-                                                  setStatefulsetItems((prev) =>
-                                                    prev.filter(
-                                                      (it) =>
-                                                        !(
-                                                          it.metadata?.name === sname &&
-                                                          (it.metadata?.namespace ?? "") === ns
-                                                        ),
+                                  <DropdownMenuPortal
+                                    onClose={() => setStatefulsetMenuOpenKey(null)}
+                                    triggerRef={statefulsetMenuTriggerRef}
+                                    align="right"
+                                    surfaceStyle={{ padding: "4px 0", minWidth: 160 }}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="wl-menu-item"
+                                      style={menuItemStyleForDropdown}
+                                      disabled={rowBusy}
+                                      onClick={() => {
+                                        setStatefulsetMenuOpenKey(null);
+                                        setDeployScaleInput(String(s.spec?.replicas ?? 0));
+                                        setDeployScaleModal({
+                                          namespace: ns,
+                                          name: sname,
+                                          current: s.spec?.replicas ?? 0,
+                                          resource: "statefulset",
+                                        });
+                                      }}
+                                    >
+                                      <span style={{ marginRight: 8 }}>⇅</span> Scale
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="wl-menu-item"
+                                      style={menuItemStyleForDropdown}
+                                      disabled={rowBusy || !effectiveClusterId}
+                                      onClick={() => {
+                                        setStatefulsetMenuOpenKey(null);
+                                        if (!effectiveClusterId) return;
+                                        setActionConfirm({
+                                          title: "确认重启 1 个 StatefulSet？",
+                                          description: "将按策略滚动更新 Pod。",
+                                          items: [`${ns}/${sname}`],
+                                          variant: "primary",
+                                          onConfirm: async () => {
+                                            setStatefulsetRowBusyKey(menuKey);
+                                            try {
+                                              const data = await restartStatefulSet(
+                                                effectiveClusterId,
+                                                ns,
+                                                sname,
+                                              );
+                                              trackUsage({
+                                                event: "restart_statefulset",
+                                                resource: "statefulset",
+                                                target: `${ns}/${sname}`,
+                                                ...usageScopeFields(),
+                                              });
+                                              setStatefulsetItems((prev) =>
+                                                mergeDeploymentIntoList(prev, data),
+                                              );
+                                              setToastMessage("已触发重启");
+                                              setError(null);
+                                            } catch (err: any) {
+                                              setToastMessage(
+                                                err?.response?.data?.error ?? err?.message ?? "重启失败",
+                                              );
+                                              throw err;
+                                            } finally {
+                                              setStatefulsetRowBusyKey(null);
+                                            }
+                                          },
+                                        });
+                                      }}
+                                    >
+                                      <span style={{ marginRight: 8 }}>↻</span> Restart
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="wl-menu-item"
+                                      style={menuItemStyleForDropdown}
+                                      disabled={rowBusy}
+                                      onClick={() => openEditStatefulSetTab(s)}
+                                    >
+                                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="wl-menu-item wl-menu-item-danger"
+                                      style={menuItemStyleForDropdown}
+                                      disabled={rowBusy || !effectiveClusterId}
+                                      onClick={() => {
+                                        setStatefulsetMenuOpenKey(null);
+                                        if (!effectiveClusterId) return;
+                                        setActionConfirm({
+                                          title: "确认删除 1 个 StatefulSet？",
+                                          description: "删除后不可恢复。",
+                                          items: [`${ns}/${sname}`],
+                                          variant: "danger",
+                                          onConfirm: async () => {
+                                            setStatefulsetRowBusyKey(menuKey);
+                                            try {
+                                              await deleteStatefulSet(effectiveClusterId, ns, sname);
+                                              trackUsage({
+                                                event: "delete_statefulset",
+                                                resource: "statefulset",
+                                                target: `${ns}/${sname}`,
+                                                ...usageScopeFields(),
+                                              });
+                                              setStatefulsetItems((prev) =>
+                                                prev.filter(
+                                                  (it) =>
+                                                    !(
+                                                      it.metadata?.name === sname &&
+                                                      (it.metadata?.namespace ?? "") === ns
                                                     ),
-                                                  );
-                                                  setToastMessage("已删除 StatefulSet");
-                                                  setError(null);
-                                                } catch (err: any) {
-                                                  setToastMessage(
-                                                    err?.response?.data?.error ?? err?.message ?? "删除失败",
-                                                  );
-                                                  throw err;
-                                                } finally {
-                                                  setStatefulsetRowBusyKey(null);
-                                                }
-                                              },
-                                            });
-                                          }}
-                                        >
-                                          <span style={{ marginRight: 8 }}>🗑</span> Delete
-                                        </button>
-                                      </div>
-                                    </>
+                                                ),
+                                              );
+                                              setToastMessage("已删除 StatefulSet");
+                                              setError(null);
+                                            } catch (err: any) {
+                                              setToastMessage(
+                                                err?.response?.data?.error ?? err?.message ?? "删除失败",
+                                              );
+                                              throw err;
+                                            } finally {
+                                              setStatefulsetRowBusyKey(null);
+                                            }
+                                          },
+                                        });
+                                      }}
+                                    >
+                                      <span style={{ marginRight: 8 }}>🗑</span> Delete
+                                    </button>
+                                  </DropdownMenuPortal>
                                   )}
                                 </div>
                               </td>
@@ -6487,16 +6397,16 @@ export const App: React.FC = () => {
                                   style={{
                                     ...tdStyle,
                                     padding: "8px 12px 12px",
-                                    backgroundColor: "#0f172a",
+                                    backgroundColor: "var(--wl-bg-elevated)",
                                     cursor: "default",
-                                    borderBottom: "1px solid #111827",
+                                    borderBottom: "1px solid var(--wl-border-table-row)",
                                   }}
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   <div
                                     style={{
                                       fontSize: 11,
-                                      color: "#94a3b8",
+                                      color: "var(--wl-text-secondary)",
                                       marginBottom: 8,
                                       fontWeight: 600,
                                     }}
@@ -6512,40 +6422,32 @@ export const App: React.FC = () => {
                                         border: "1px solid rgba(234,179,8,0.35)",
                                         backgroundColor: "rgba(234,179,8,0.08)",
                                         fontSize: 12,
-                                        color: "#e2e8f0",
+                                        color: "var(--wl-text-heading)",
                                         lineHeight: 1.5,
                                       }}
                                     >
                                       <div>{stsExpandSummary}</div>
-                                      <div style={{ marginTop: 6, fontSize: 11, color: "#64748b" }}>
+                                      <div style={{ marginTop: 6, fontSize: 11, color: "var(--wl-text-muted)" }}>
                                         Ordinal 顺序提示：建议先核对较小序号实例；下表已将异常实例置顶并按严重度排序。
                                       </div>
                                     </div>
                                   )}
-                                  <table
-                                    style={{
-                                      width: "100%",
-                                      borderCollapse: "collapse",
-                                      backgroundColor: "#020617",
-                                      tableLayout: "fixed",
-                                    }}
+                                  <SecondaryExpandTable
+                                    columns={STS_POD_EXPAND_COLUMNS}
+                                    columnWidths={stsPodExpandColumnWidths}
+                                    defaults={STS_POD_EXPAND_DEFAULTS}
+                                    beginResize={beginResizeStsPodExpand}
+                                    totalDataWidth={stsPodExpandTotalWidth}
                                   >
-                                    <thead>
-                                      <tr style={{ color: "#9ca3af", fontSize: 12, textAlign: "left" }}>
-                                        <th style={{ ...thStyle, width: "7%" }}>Ordinal</th>
-                                        <th style={{ ...thStyle, width: "18%" }}>Pod Name</th>
-                                        <th style={{ ...thStyle, width: "10%" }}>状态标签</th>
-                                        <th style={{ ...thStyle, width: "8%" }}>Ready</th>
-                                        <th style={{ ...thStyle, width: "7%" }}>Restarts</th>
-                                        <th style={{ ...thStyle, width: "14%" }}>PVC</th>
-                                        <th style={{ ...thStyle, width: "14%" }}>Node</th>
-                                        <th style={{ ...thStyle, width: "22%" }}>操作</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="wl-table-body">
                                       {childPodsSorted.length === 0 ? (
                                         <tr>
-                                          <td colSpan={8} style={{ ...tdStyle, color: "#64748b" }}>
+                                          <td
+                                            colSpan={STS_POD_EXPAND_KEYS.length}
+                                            style={{
+                                              ...secondaryExpandDataCellStyle(secondaryExpandTdBase),
+                                              color: "var(--wl-text-muted)",
+                                            }}
+                                          >
                                             暂无关联 Pod（等待 Pods 列表同步或副本为 0）
                                           </td>
                                         </tr>
@@ -6568,21 +6470,21 @@ export const App: React.FC = () => {
                                           const pMenuOpen = podMenuOpenKey === pMenuKey;
                                           const hl = p.healthLabel || "健康";
                                           const reasonsText = (p.healthReasons || []).join("；");
-                                          let hBg = "rgba(22,163,74,0.15)";
-                                          let hBr = "rgba(22,163,74,0.6)";
-                                          let hCol = "#bbf7d0";
+                                          let hBg = "var(--wl-pill-success-bg)";
+                                          let hBr = "var(--wl-pill-success-border)";
+                                          let hCol = "var(--wl-pill-success-text)";
                                           if (hl === "关注") {
-                                            hBg = "rgba(202,138,4,0.18)";
-                                            hBr = "rgba(234,179,8,0.7)";
-                                            hCol = "#facc15";
+                                            hBg = "var(--wl-pill-attention-bg)";
+                                            hBr = "var(--wl-pill-attention-border)";
+                                            hCol = "var(--wl-pill-attention-text)";
                                           } else if (hl === "警告") {
-                                            hBg = "rgba(249,115,22,0.2)";
-                                            hBr = "rgba(249,115,22,0.75)";
-                                            hCol = "#fed7aa";
+                                            hBg = "var(--wl-pill-orange-bg)";
+                                            hBr = "var(--wl-pill-orange-border)";
+                                            hCol = "var(--wl-pill-orange-text)";
                                           } else if (hl === "严重") {
-                                            hBg = "rgba(185,28,28,0.25)";
-                                            hBr = "rgba(248,113,113,0.85)";
-                                            hCol = "#fecaca";
+                                            hBg = "var(--wl-pill-danger-bg)";
+                                            hBr = "var(--wl-pill-danger-border)";
+                                            hCol = "var(--wl-pill-danger-text)";
                                           }
                                           const rowShell: React.CSSProperties = {
                                             backgroundColor: abnormalRow ? "rgba(248,113,113,0.06)" : undefined,
@@ -6592,10 +6494,11 @@ export const App: React.FC = () => {
                                                 ? "inset 3px 0 0 rgba(249,115,22,0.45)"
                                                 : undefined,
                                           };
+                                          const stsSubTd = secondaryExpandDataCellStyle(secondaryExpandTdBase);
                                           return (
                                             <tr key={p.metadata.uid} className="wl-table-row" style={rowShell}>
-                                              <td style={tdStyle}>
-                                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                              <td style={stsSubTd}>
+                                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                                                   <span>{ord ?? "—"}</span>
                                                   {isPrimaryAbnormal && (
                                                     <span
@@ -6604,9 +6507,9 @@ export const App: React.FC = () => {
                                                         fontWeight: 700,
                                                         padding: "1px 5px",
                                                         borderRadius: 4,
-                                                        backgroundColor: "rgba(234,179,8,0.2)",
-                                                        border: "1px solid rgba(250,204,21,0.55)",
-                                                        color: "#facc15",
+                                                        backgroundColor: "var(--wl-pill-attention-bg)",
+                                                        border: "1px solid var(--wl-pill-attention-border)",
+                                                        color: "var(--wl-pill-attention-text)",
                                                         flexShrink: 0,
                                                       }}
                                                       title="ordinal 最小的异常实例"
@@ -6616,24 +6519,19 @@ export const App: React.FC = () => {
                                                   )}
                                                 </span>
                                               </td>
-                                              <td style={{ ...tdStyle, overflow: "hidden" }}>
-                                                <span className="wl-table-hover-copy">
+                                              <td style={stsSubTd}>
+                                                <span className="wl-table-hover-copy wl-table-hover-copy--wrap" style={{ minWidth: 0, maxWidth: "100%" }}>
                                                   <span className="wl-table-hover-copy__main">
                                                     <button
                                                       type="button"
+                                                      className="wl-table-hover-copy__name-multiline"
                                                       onClick={() => openDescribeForPod(p)}
                                                       style={{
                                                         padding: 0,
                                                         border: "none",
                                                         background: "none",
-                                                        color: "#e5e7eb",
+                                                        color: "var(--wl-text-primary)",
                                                         cursor: "pointer",
-                                                        textAlign: "left",
-                                                        overflow: "hidden",
-                                                        textOverflow: "ellipsis",
-                                                        whiteSpace: "nowrap",
-                                                        minWidth: 0,
-                                                        flex: "1 1 auto",
                                                       }}
                                                       title={p.metadata.name}
                                                     >
@@ -6643,7 +6541,7 @@ export const App: React.FC = () => {
                                                       <span
                                                         style={{
                                                           fontSize: 10,
-                                                          color: "#64748b",
+                                                          color: "var(--wl-text-muted)",
                                                           flexShrink: 0,
                                                         }}
                                                       >
@@ -6658,11 +6556,11 @@ export const App: React.FC = () => {
                                                     title="复制 Pod 名称"
                                                     aria-label={`复制 Pod 名称：${p.metadata.name}`}
                                                   >
-                                                    <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                                    <CopyIcon />
                                                   </button>
                                                 </span>
                                               </td>
-                                              <td style={tdStyle}>
+                                              <td style={stsSubTd}>
                                                 <span
                                                   style={{
                                                     display: "inline-flex",
@@ -6678,10 +6576,10 @@ export const App: React.FC = () => {
                                                   {hl}
                                                 </span>
                                               </td>
-                                              <td style={tdStyle}>{podReadyColumn(p)}</td>
+                                              <td style={stsSubTd}>{podReadyColumn(p)}</td>
                                               <td
                                                 style={{
-                                                  ...tdStyle,
+                                                  ...stsSubTd,
                                                   color: highRestart ? "#fb923c" : undefined,
                                                   fontWeight: highRestart ? 600 : undefined,
                                                 }}
@@ -6689,26 +6587,16 @@ export const App: React.FC = () => {
                                               >
                                                 {restarts}
                                               </td>
-                                              <td
-                                                style={{
-                                                  ...tdStyle,
-                                                  overflow: "hidden",
-                                                  textOverflow: "ellipsis",
-                                                  whiteSpace: "nowrap",
-                                                }}
-                                                title={pvcTitle}
-                                              >
+                                              <td style={stsSubTd} title={pvcTitle}>
                                                 {pvcNames.length ? pvcNames.join(", ") : "—"}
                                               </td>
-                                              <td
-                                                style={{ ...tdStyle, overflow: "hidden", textOverflow: "ellipsis" }}
-                                                title={p.spec?.nodeName ?? "-"}
-                                              >
+                                              <td style={stsSubTd} title={p.spec?.nodeName ?? "-"}>
                                                 {p.spec?.nodeName ?? "-"}
                                               </td>
-                                              <td style={{ ...tdStyle, overflow: "visible" }}>
+                                              <td style={secondaryExpandActionsCellStyle(secondaryExpandTdBase)}>
                                                 <div style={{ position: "relative" }}>
                                                   <button
+                                                    ref={pMenuOpen ? podMenuTriggerRef : undefined}
                                                     type="button"
                                                     className="wl-table-menu-trigger"
                                                     onClick={() =>
@@ -6732,148 +6620,138 @@ export const App: React.FC = () => {
                                                     ⋮
                                                   </button>
                                                   {pMenuOpen && (
-                                                    <>
-                                                      <div
-                                                        style={{ position: "fixed", inset: 0, zIndex: 40 }}
+                                                  <DropdownMenuPortal
+                                                    onClose={() => {
+                                                      setPodMenuOpenKey(null);
+                                                      setPodMenuSubmenu(null);
+                                                    }}
+                                                    triggerRef={podMenuTriggerRef}
+                                                    align="right"
+                                                    repositionKey={podMenuSubmenu ?? ""}
+                                                    surfaceStyle={{
+                                                      padding: "4px 0",
+                                                      display: "flex",
+                                                      minWidth: 140,
+                                                    }}
+                                                  >
+                                                    <div
+                                                      style={{
+                                                        padding: "4px 0",
+                                                        borderRight: podMenuSubmenu ? "1px solid var(--wl-border-strong)" : undefined,
+                                                      }}
+                                                    >
+                                                      <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                          setPodMenuSubmenu((sub) =>
+                                                            sub === "shell" ? null : "shell",
+                                                          )
+                                                        }
+                                                        className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
+                                                        style={{
+                                                          ...menuItemStyleForDropdown,
+                                                          display: "flex",
+                                                          alignItems: "center",
+                                                          justifyContent: "space-between",
+                                                          width: "100%",
+                                                        }}
+                                                      >
+                                                        <span>
+                                                          <span style={{ marginRight: 8 }}>⌘</span> Shell
+                                                        </span>
+                                                        <span style={{ fontSize: 10 }}>▸</span>
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                          setPodMenuSubmenu((sub) =>
+                                                            sub === "logs" ? null : "logs",
+                                                          )
+                                                        }
+                                                        className={`wl-menu-item${podMenuSubmenu === "logs" ? " is-active" : ""}`}
+                                                        style={{
+                                                          ...menuItemStyleForDropdown,
+                                                          display: "flex",
+                                                          alignItems: "center",
+                                                          justifyContent: "space-between",
+                                                          width: "100%",
+                                                        }}
+                                                      >
+                                                        <span>
+                                                          <span style={{ marginRight: 8 }}>≡</span> Logs
+                                                        </span>
+                                                        <span style={{ fontSize: 10 }}>▸</span>
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => openEditTab(p)}
+                                                        className="wl-menu-item"
+                                                        style={menuItemStyleForDropdown}
+                                                      >
+                                                        <span style={{ marginRight: 8 }}>✎</span> Edit
+                                                      </button>
+                                                      <button
+                                                        type="button"
                                                         onClick={() => {
                                                           setPodMenuOpenKey(null);
                                                           setPodMenuSubmenu(null);
+                                                          if (!effectiveClusterId) return;
+                                                          const ns0 = p.metadata.namespace;
+                                                          const name0 = p.metadata.name;
+                                                          setActionConfirm({
+                                                            title: "确认删除 1 个 Pod？",
+                                                            description: "删除后 Pod 将终止并从集群移除。",
+                                                            items: [`${ns0}/${name0}`],
+                                                            variant: "danger",
+                                                            onConfirm: async () => {
+                                                              try {
+                                                                await deletePod(
+                                                                  effectiveClusterId,
+                                                                  ns0,
+                                                                  name0,
+                                                                );
+                                                                trackUsage({
+                                                                  event: "delete_pod",
+                                                                  resource: "pod",
+                                                                  target: `${ns0}/${name0}`,
+                                                                  ...usageScopeFields(),
+                                                                });
+                                                                setError(null);
+                                                              } catch (err: any) {
+                                                                setError(
+                                                                  err?.response?.data?.error ??
+                                                                    err?.message ??
+                                                                    "删除失败",
+                                                                );
+                                                                throw err;
+                                                              }
+                                                            },
+                                                          });
                                                         }}
-                                                        aria-hidden
-                                                      />
-                                                      <div
-                                                        className="wl-table-dropdown-menu"
-                                                        style={{
-                                                          position: "absolute",
-                                                          right: 0,
-                                                          top: "100%",
-                                                          marginTop: 4,
-                                                          minWidth: 140,
-                                                          zIndex: 41,
-                                                          padding: "4px 0",
-                                                          display: "flex",
-                                                        }}
-                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="wl-menu-item wl-menu-item-danger"
+                                                        style={menuItemStyleForDropdown}
                                                       >
-                                                        <div
-                                                          style={{
-                                                            padding: "4px 0",
-                                                            borderRight: podMenuSubmenu ? "1px solid #334155" : undefined,
-                                                          }}
-                                                        >
+                                                        <span style={{ marginRight: 8 }}>🗑</span> Delete
+                                                      </button>
+                                                    </div>
+                                                    {podMenuSubmenu && (
+                                                      <div style={{ minWidth: 100, padding: "4px 0" }}>
+                                                        {pContainers.map((c) => (
                                                           <button
+                                                            key={c}
                                                             type="button"
                                                             onClick={() =>
-                                                              setPodMenuSubmenu((sub) =>
-                                                                sub === "shell" ? null : "shell",
-                                                              )
+                                                              openPanelTab(podMenuSubmenu, p, c)
                                                             }
-                                                            className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
-                                                            style={{
-                                                              ...menuItemStyleForDropdown,
-                                                              display: "flex",
-                                                              alignItems: "center",
-                                                              justifyContent: "space-between",
-                                                              width: "100%",
-                                                            }}
-                                                          >
-                                                            <span>
-                                                              <span style={{ marginRight: 8 }}>⌘</span> Shell
-                                                            </span>
-                                                            <span style={{ fontSize: 10 }}>▸</span>
-                                                          </button>
-                                                          <button
-                                                            type="button"
-                                                            onClick={() =>
-                                                              setPodMenuSubmenu((sub) =>
-                                                                sub === "logs" ? null : "logs",
-                                                              )
-                                                            }
-                                                            className={`wl-menu-item${podMenuSubmenu === "logs" ? " is-active" : ""}`}
-                                                            style={{
-                                                              ...menuItemStyleForDropdown,
-                                                              display: "flex",
-                                                              alignItems: "center",
-                                                              justifyContent: "space-between",
-                                                              width: "100%",
-                                                            }}
-                                                          >
-                                                            <span>
-                                                              <span style={{ marginRight: 8 }}>≡</span> Logs
-                                                            </span>
-                                                            <span style={{ fontSize: 10 }}>▸</span>
-                                                          </button>
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => openEditTab(p)}
                                                             className="wl-menu-item"
                                                             style={menuItemStyleForDropdown}
                                                           >
-                                                            <span style={{ marginRight: 8 }}>✎</span> Edit
+                                                            {c}
                                                           </button>
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                              setPodMenuOpenKey(null);
-                                                              setPodMenuSubmenu(null);
-                                                              if (!effectiveClusterId) return;
-                                                              const ns0 = p.metadata.namespace;
-                                                              const name0 = p.metadata.name;
-                                                              setActionConfirm({
-                                                                title: "确认删除 1 个 Pod？",
-                                                                description: "删除后 Pod 将终止并从集群移除。",
-                                                                items: [`${ns0}/${name0}`],
-                                                                variant: "danger",
-                                                                onConfirm: async () => {
-                                                                  try {
-                                                                    await deletePod(
-                                                                      effectiveClusterId,
-                                                                      ns0,
-                                                                      name0,
-                                                                    );
-                                                                    trackUsage({
-                                                                      event: "delete_pod",
-                                                                      resource: "pod",
-                                                                      target: `${ns0}/${name0}`,
-                                                                      ...usageScopeFields(),
-                                                                    });
-                                                                    setError(null);
-                                                                  } catch (err: any) {
-                                                                    setError(
-                                                                      err?.response?.data?.error ??
-                                                                        err?.message ??
-                                                                        "删除失败",
-                                                                    );
-                                                                    throw err;
-                                                                  }
-                                                                },
-                                                              });
-                                                            }}
-                                                            className="wl-menu-item wl-menu-item-danger"
-                                                            style={menuItemStyleForDropdown}
-                                                          >
-                                                            <span style={{ marginRight: 8 }}>🗑</span> Delete
-                                                          </button>
-                                                        </div>
-                                                        {podMenuSubmenu && (
-                                                          <div style={{ minWidth: 100, padding: "4px 0" }}>
-                                                            {pContainers.map((c) => (
-                                                              <button
-                                                                key={c}
-                                                                type="button"
-                                                                onClick={() =>
-                                                                  openPanelTab(podMenuSubmenu, p, c)
-                                                                }
-                                                                className="wl-menu-item"
-                                                                style={menuItemStyleForDropdown}
-                                                              >
-                                                                {c}
-                                                              </button>
-                                                            ))}
-                                                          </div>
-                                                        )}
+                                                        ))}
                                                       </div>
-                                                    </>
+                                                    )}
+                                                  </DropdownMenuPortal>
                                                   )}
                                                 </div>
                                               </td>
@@ -6881,8 +6759,7 @@ export const App: React.FC = () => {
                                           );
                                         })
                                       )}
-                                    </tbody>
-                                  </table>
+                                  </SecondaryExpandTable>
                                 </td>
                               </tr>
                             )}
@@ -6899,7 +6776,7 @@ export const App: React.FC = () => {
                       width: ingressTableTotalWidth,
                       minWidth: "100%",
                       borderCollapse: "collapse",
-                      backgroundColor: "#020617",
+                      backgroundColor: "var(--wl-bg-table)",
                       tableLayout: "fixed",
                     }}
                   >
@@ -6943,14 +6820,14 @@ export const App: React.FC = () => {
                     <tbody className="wl-table-body">
                       {ingressLoading && ingressItems.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             加载中…
                           </td>
                         </tr>
                       )}
                       {!ingressLoading && sortedIngresses.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             暂无 Ingress
                           </td>
                         </tr>
@@ -7009,7 +6886,7 @@ export const App: React.FC = () => {
                                         padding: "0 4px",
                                         border: "none",
                                         background: "none",
-                                        color: "#94a3b8",
+                                        color: "var(--wl-text-secondary)",
                                         cursor: "pointer",
                                         flexShrink: 0,
                                         fontSize: 12,
@@ -7021,6 +6898,7 @@ export const App: React.FC = () => {
                                     </button>
                                     <button
                                       type="button"
+                                      className="wl-table-hover-copy__truncate"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         openDescribeForIngress(ing);
@@ -7032,12 +6910,6 @@ export const App: React.FC = () => {
                                         background: "none",
                                         color: "inherit",
                                         cursor: "pointer",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                        whiteSpace: "nowrap",
-                                        minWidth: 0,
-                                        flex: "1 1 auto",
-                                        textAlign: "left",
                                       }}
                                     >
                                       {iname}
@@ -7053,7 +6925,7 @@ export const App: React.FC = () => {
                                     title="复制 Ingress 名称"
                                     aria-label={`复制 Ingress 名称：${iname}`}
                                   >
-                                    <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                    <CopyIcon />
                                   </button>
                                 </span>
                               </td>
@@ -7072,21 +6944,21 @@ export const App: React.FC = () => {
                               <td style={baseCell} onClick={(e) => e.stopPropagation()}>
                                 {(() => {
                                   const hl = diag.label;
-                                  let ingHealthBg = "rgba(22,163,74,0.15)";
-                                  let ingHealthBorder = "rgba(22,163,74,0.6)";
-                                  let ingHealthColor = "#bbf7d0";
+                                  let ingHealthBg = "var(--wl-pill-success-bg)";
+                                  let ingHealthBorder = "var(--wl-pill-success-border)";
+                                  let ingHealthColor = "var(--wl-pill-success-text)";
                                   if (hl === "关注") {
-                                    ingHealthBg = "rgba(202,138,4,0.18)";
-                                    ingHealthBorder = "rgba(234,179,8,0.7)";
-                                    ingHealthColor = "#facc15";
+                                    ingHealthBg = "var(--wl-pill-attention-bg)";
+                                    ingHealthBorder = "var(--wl-pill-attention-border)";
+                                    ingHealthColor = "var(--wl-pill-attention-text)";
                                   } else if (hl === "警告") {
-                                    ingHealthBg = "rgba(249,115,22,0.2)";
-                                    ingHealthBorder = "rgba(249,115,22,0.75)";
-                                    ingHealthColor = "#fed7aa";
+                                    ingHealthBg = "var(--wl-pill-orange-bg)";
+                                    ingHealthBorder = "var(--wl-pill-orange-border)";
+                                    ingHealthColor = "var(--wl-pill-orange-text)";
                                   } else if (hl === "严重") {
-                                    ingHealthBg = "rgba(185,28,28,0.25)";
-                                    ingHealthBorder = "rgba(248,113,113,0.85)";
-                                    ingHealthColor = "#fecaca";
+                                    ingHealthBg = "var(--wl-pill-danger-bg)";
+                                    ingHealthBorder = "var(--wl-pill-danger-border)";
+                                    ingHealthColor = "var(--wl-pill-danger-text)";
                                   }
                                   return (
                                     <span
@@ -7116,7 +6988,7 @@ export const App: React.FC = () => {
                                   maxWidth: 0,
                                   lineHeight: 1.35,
                                   fontSize: 12,
-                                  color: diag.label === "健康" ? "#64748b" : "#e2e8f0",
+                                  color: diag.label === "健康" ? "var(--wl-text-muted)" : "var(--wl-text-heading)",
                                 }}
                                 title={diag.summary}
                               >
@@ -7128,6 +7000,7 @@ export const App: React.FC = () => {
                               <td style={{ ...tdStyle, overflow: "visible" }} onClick={(e) => e.stopPropagation()}>
                                 <div style={{ position: "relative" }}>
                                   <button
+                                    ref={isMenuOpen ? ingressMenuTriggerRef : undefined}
                                     type="button"
                                     className="wl-table-menu-trigger"
                                     disabled={rowBusy || !effectiveClusterId}
@@ -7149,84 +7022,70 @@ export const App: React.FC = () => {
                                     ⋮
                                   </button>
                                   {isMenuOpen && (
-                                    <>
-                                      <div
-                                        style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                                        onClick={() => setIngressMenuOpenKey(null)}
-                                        aria-hidden
-                                      />
-                                      <div
-                                        className="wl-table-dropdown-menu"
-                                        style={{
-                                          position: "absolute",
-                                          right: 0,
-                                          top: "100%",
-                                          marginTop: 4,
-                                          minWidth: 160,
-                                          zIndex: 41,
-                                          padding: "4px 0",
-                                        }}
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <button
-                                          type="button"
-                                          className="wl-menu-item"
-                                          style={menuItemStyleForDropdown}
-                                          disabled={rowBusy}
-                                          onClick={() => openEditIngressTab(ing)}
-                                        >
-                                          <span style={{ marginRight: 8 }}>✎</span> Edit
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="wl-menu-item wl-menu-item-danger"
-                                          style={menuItemStyleForDropdown}
-                                          disabled={rowBusy || !effectiveClusterId}
-                                          onClick={() => {
-                                            setIngressMenuOpenKey(null);
-                                            if (!effectiveClusterId) return;
-                                            setActionConfirm({
-                                              title: "确认删除 1 个 Ingress？",
-                                              description: "删除后不可恢复。",
-                                              items: [`${ns}/${iname}`],
-                                              variant: "danger",
-                                              onConfirm: async () => {
-                                                setIngressRowBusyKey(menuKey);
-                                                try {
-                                                  await deleteIngress(effectiveClusterId, ns, iname);
-                                                  trackUsage({
-                                                    event: "delete_ingress",
-                                                    resource: "ingress",
-                                                    target: `${ns}/${iname}`,
-                                                    ...usageScopeFields(),
-                                                  });
-                                                  setIngressItems((prev) =>
-                                                    prev.filter(
-                                                      (it) =>
-                                                        !(
-                                                          it.metadata?.name === iname &&
-                                                          (it.metadata?.namespace ?? "") === ns
-                                                        ),
+                                  <DropdownMenuPortal
+                                    onClose={() => setIngressMenuOpenKey(null)}
+                                    triggerRef={ingressMenuTriggerRef}
+                                    align="right"
+                                    surfaceStyle={{ padding: "4px 0", minWidth: 160 }}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="wl-menu-item"
+                                      style={menuItemStyleForDropdown}
+                                      disabled={rowBusy}
+                                      onClick={() => openEditIngressTab(ing)}
+                                    >
+                                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="wl-menu-item wl-menu-item-danger"
+                                      style={menuItemStyleForDropdown}
+                                      disabled={rowBusy || !effectiveClusterId}
+                                      onClick={() => {
+                                        setIngressMenuOpenKey(null);
+                                        if (!effectiveClusterId) return;
+                                        setActionConfirm({
+                                          title: "确认删除 1 个 Ingress？",
+                                          description: "删除后不可恢复。",
+                                          items: [`${ns}/${iname}`],
+                                          variant: "danger",
+                                          onConfirm: async () => {
+                                            setIngressRowBusyKey(menuKey);
+                                            try {
+                                              await deleteIngress(effectiveClusterId, ns, iname);
+                                              trackUsage({
+                                                event: "delete_ingress",
+                                                resource: "ingress",
+                                                target: `${ns}/${iname}`,
+                                                ...usageScopeFields(),
+                                              });
+                                              setIngressItems((prev) =>
+                                                prev.filter(
+                                                  (it) =>
+                                                    !(
+                                                      it.metadata?.name === iname &&
+                                                      (it.metadata?.namespace ?? "") === ns
                                                     ),
-                                                  );
-                                                  setToastMessage("已删除 Ingress");
-                                                  setError(null);
-                                                } catch (err: any) {
-                                                  setToastMessage(
-                                                    err?.response?.data?.error ?? err?.message ?? "删除失败",
-                                                  );
-                                                  throw err;
-                                                } finally {
-                                                  setIngressRowBusyKey(null);
-                                                }
-                                              },
-                                            });
-                                          }}
-                                        >
-                                          <span style={{ marginRight: 8 }}>🗑</span> Delete
-                                        </button>
-                                      </div>
-                                    </>
+                                                ),
+                                              );
+                                              setToastMessage("已删除 Ingress");
+                                              setError(null);
+                                            } catch (err: any) {
+                                              setToastMessage(
+                                                err?.response?.data?.error ?? err?.message ?? "删除失败",
+                                              );
+                                              throw err;
+                                            } finally {
+                                              setIngressRowBusyKey(null);
+                                            }
+                                          },
+                                        });
+                                      }}
+                                    >
+                                      <span style={{ marginRight: 8 }}>🗑</span> Delete
+                                    </button>
+                                  </DropdownMenuPortal>
                                   )}
                                 </div>
                               </td>
@@ -7238,16 +7097,16 @@ export const App: React.FC = () => {
                                   style={{
                                     ...tdStyle,
                                     padding: "8px 12px 12px",
-                                    backgroundColor: "#0f172a",
+                                    backgroundColor: "var(--wl-bg-elevated)",
                                     cursor: "default",
-                                    borderBottom: "1px solid #111827",
+                                    borderBottom: "1px solid var(--wl-border-table-row)",
                                   }}
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   <div
                                     style={{
                                       fontSize: 11,
-                                      color: "#94a3b8",
+                                      color: "var(--wl-text-secondary)",
                                       marginBottom: 8,
                                       fontWeight: 600,
                                     }}
@@ -7255,146 +7114,82 @@ export const App: React.FC = () => {
                                     规则排障（异常优先；TLS Secret 存在性未校验）
                                   </div>
                                   {expandRows.length === 0 ? (
-                                    <div style={{ fontSize: 12, color: "#64748b" }}>无规则行（无 path 且无 default backend）</div>
+                                    <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>无规则行（无 path 且无 default backend）</div>
                                   ) : (
-                                  <table
-                                    style={{
-                                      width: "100%",
-                                      borderCollapse: "collapse",
-                                      backgroundColor: "#020617",
-                                      tableLayout: "fixed",
-                                    }}
+                                  <SecondaryExpandTable
+                                    columns={INGRESS_RULE_EXPAND_COLUMNS}
+                                    columnWidths={ingressRuleColumnWidths}
+                                    defaults={INGRESS_RULE_EXPAND_DEFAULTS}
+                                    beginResize={beginResizeIngressRule}
+                                    totalDataWidth={ingressRuleExpandTotalWidth}
                                   >
-                                    <thead>
-                                      <tr>
-                                        {[
-                                          "Host",
-                                          "Path",
-                                          "Path Type",
-                                          "Backend Service",
-                                          "Port",
-                                          "TLS",
-                                          "状态",
-                                          "异常说明",
-                                          "联动",
-                                        ].map((h) => (
-                                          <th
-                                            key={h}
-                                            style={{
-                                              textAlign: "left",
-                                              padding: "6px 8px",
-                                              borderBottom: "1px solid #1f2937",
-                                              fontSize: 11,
-                                              color: "#94a3b8",
-                                            }}
-                                          >
-                                            {h}
-                                          </th>
-                                        ))}
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {expandRows.map((r, ri) => {
-                                        const rowShell: React.CSSProperties =
-                                          r.severityRank >= 3
-                                            ? { backgroundColor: "rgba(185,28,28,0.08)" }
-                                            : r.severityRank >= 2
-                                              ? { backgroundColor: "rgba(249,115,22,0.06)" }
-                                              : {};
-                                        const canLinkSvc =
-                                          r.serviceName &&
-                                          r.serviceName !== "—" &&
-                                          r.status !== "Service 不存在";
-                                        return (
-                                          <tr key={ri} className="wl-table-row" style={rowShell}>
-                                            <td
-                                              style={{
-                                                ...tdStyle,
-                                                fontSize: 12,
-                                                wordBreak: "break-word",
-                                                whiteSpace: "normal",
-                                              }}
-                                            >
-                                              {r.host}
-                                            </td>
-                                            <td
-                                              style={{
-                                                ...tdStyle,
-                                                fontSize: 12,
-                                                wordBreak: "break-all",
-                                                whiteSpace: "normal",
-                                              }}
-                                            >
-                                              {r.path}
-                                            </td>
-                                            <td style={{ ...tdStyle, fontSize: 12 }}>{r.pathType}</td>
-                                            <td
-                                              style={{
-                                                ...tdStyle,
-                                                fontSize: 12,
-                                                wordBreak: "break-word",
-                                                whiteSpace: "normal",
-                                              }}
-                                            >
-                                              {r.serviceName && r.serviceName !== "—" ? (
-                                                <ResourceNameWithCopy
-                                                  name={r.serviceName}
-                                                  onCopy={copyName}
-                                                  fontSize={12}
-                                                  copyButtonTitle="复制 Service 名称"
+                                    {expandRows.map((r, ri) => {
+                                      const rowShell: React.CSSProperties =
+                                        r.severityRank >= 3
+                                          ? { backgroundColor: "rgba(185,28,28,0.08)" }
+                                          : r.severityRank >= 2
+                                            ? { backgroundColor: "rgba(249,115,22,0.06)" }
+                                            : {};
+                                      const canLinkSvc =
+                                        r.serviceName &&
+                                        r.serviceName !== "—" &&
+                                        r.status !== "Service 不存在";
+                                      const dataTd = secondaryExpandDataCellStyle(secondaryExpandTdBase);
+                                      return (
+                                        <tr key={ri} className="wl-table-row" style={rowShell}>
+                                          <td style={dataTd} title={r.host}>
+                                            {r.host}
+                                          </td>
+                                          <td style={secondaryExpandBreakAllCellStyle(secondaryExpandTdBase)}>{r.path}</td>
+                                          <td style={dataTd}>{r.pathType}</td>
+                                          <td style={dataTd}>
+                                            {r.serviceName && r.serviceName !== "—" ? (
+                                              <ResourceNameWithCopy
+                                                name={r.serviceName}
+                                                onCopy={copyName}
+                                                fontSize={12}
+                                                copyButtonTitle="复制 Service 名称"
+                                              />
+                                            ) : (
+                                              r.serviceName ?? "—"
+                                            )}
+                                          </td>
+                                          <td style={dataTd}>{r.portDisplay}</td>
+                                          <td style={dataTd}>{r.tlsHint}</td>
+                                          <td style={{ ...dataTd, fontWeight: 600 }}>{r.status}</td>
+                                          <td style={{ ...dataTd, fontSize: 11, color: "var(--wl-text-secondary)" }}>{r.detail}</td>
+                                          <td style={secondaryExpandActionsCellStyle({ ...secondaryExpandTdBase, fontSize: 11 })}>
+                                            {canLinkSvc ? (
+                                              <div
+                                                style={{
+                                                  display: "flex",
+                                                  flexDirection: "column",
+                                                  gap: 4,
+                                                  alignItems: "flex-start",
+                                                  minWidth: 0,
+                                                }}
+                                              >
+                                                <ResourceJumpChip
+                                                  label="Services"
+                                                  compact
+                                                  onClick={() => jumpIngressToServices(r.serviceName)}
+                                                  title="打开 Services 列表并过滤此名称"
                                                 />
-                                              ) : (
-                                                r.serviceName ?? "—"
-                                              )}
-                                            </td>
-                                            <td style={{ ...tdStyle, fontSize: 12 }}>{r.portDisplay}</td>
-                                            <td style={{ ...tdStyle, fontSize: 12 }}>{r.tlsHint}</td>
-                                            <td style={{ ...tdStyle, fontSize: 12, fontWeight: 600 }}>
-                                              {r.status}
-                                            </td>
-                                            <td
-                                              style={{
-                                                ...tdStyle,
-                                                fontSize: 11,
-                                                color: "#94a3b8",
-                                                whiteSpace: "normal",
-                                                wordBreak: "break-word",
-                                              }}
-                                            >
-                                              {r.detail}
-                                            </td>
-                                            <td style={{ ...tdStyle, fontSize: 11 }}>
-                                              {canLinkSvc ? (
-                                                <div
-                                                  style={{
-                                                    display: "flex",
-                                                    flexDirection: "column",
-                                                    gap: 4,
-                                                    alignItems: "flex-start",
-                                                  }}
-                                                >
-                                                  <ResourceJumpChip
-                                                    label="Services"
-                                                    compact
-                                                    onClick={() => jumpIngressToServices(r.serviceName)}
-                                                    title="打开 Services 列表并过滤此名称"
-                                                  />
-                                                  <ResourceJumpChip
-                                                    label="Pods"
-                                                    compact
-                                                    onClick={() => jumpIngressToPods(r.serviceName)}
-                                                    title="打开 Pods 列表并过滤此名称"
-                                                  />
-                                                </div>
-                                              ) : (
-                                                "—"
-                                              )}
-                                            </td>
-                                          </tr>
-                                        );
-                                      })}
-                                    </tbody>
-                                  </table>
+                                                <ResourceJumpChip
+                                                  label="Pods"
+                                                  compact
+                                                  onClick={() => jumpIngressToPods(r.serviceName)}
+                                                  title="打开 Pods 列表并过滤此名称"
+                                                />
+                                              </div>
+                                            ) : (
+                                              "—"
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </SecondaryExpandTable>
                                   )}
                                 </td>
                               </tr>
@@ -7504,10 +7299,10 @@ export const App: React.FC = () => {
                           </p>
                           <p style={{ margin: "0 0 10px" }}>
                             如需使用此功能，请联系集群管理员为当前 kubeconfig
-                            授予相应的只读权限（例如对 <code style={{ color: "#cbd5e1" }}>nodes</code>{" "}
+                            授予相应的只读权限（例如对 <code style={{ color: "var(--wl-text-secondary)" }}>nodes</code>{" "}
                             资源的 list/get/watch）。
                           </p>
-                          <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>
+                          <p style={{ margin: 0, fontSize: 12, color: "var(--wl-text-muted)" }}>
                             Nodes 属于集群级资源，通常需要额外的 RBAC 配置。
                           </p>
                         </>
@@ -7611,8 +7406,8 @@ export const App: React.FC = () => {
               right: 0,
               bottom: 0,
               width: `${Math.round(describeWidthRatio * 100)}vw`,
-              backgroundColor: "#020617",
-              borderLeft: "1px solid #1e293b",
+              backgroundColor: "var(--wl-bg-table)",
+              borderLeft: "1px solid var(--wl-border-sidebar)",
               pointerEvents: "auto",
               display: "flex",
               flexDirection: "column",
@@ -7645,11 +7440,11 @@ export const App: React.FC = () => {
                 top: 0,
                 zIndex: 1,
                 padding: "10px 16px",
-                borderBottom: "1px solid #1e293b",
+                borderBottom: "1px solid var(--wl-border-sidebar)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                backgroundColor: "#020617",
+                backgroundColor: "var(--wl-bg-table)",
               }}
             >
               <div style={{ display: "flex", flexDirection: "column" }}>
@@ -7697,9 +7492,9 @@ export const App: React.FC = () => {
                   style={{
                     padding: "2px 6px",
                     borderRadius: 4,
-                    border: "1px solid #334155",
-                    backgroundColor: "#020617",
-                    color: "#e5e7eb",
+                    border: "1px solid var(--wl-border-strong)",
+                    backgroundColor: "var(--wl-bg-table)",
+                    color: "var(--wl-text-primary)",
                     cursor: "pointer",
                     fontSize: 12,
                   }}
@@ -7720,9 +7515,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "2px 6px",
                       borderRadius: 4,
-                      border: "1px solid #334155",
-                      backgroundColor: "#020617",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-strong)",
+                      backgroundColor: "var(--wl-bg-table)",
+                      color: "var(--wl-text-primary)",
                       cursor: describeLoading ? "not-allowed" : "pointer",
                       fontSize: 12,
                     }}
@@ -7738,9 +7533,9 @@ export const App: React.FC = () => {
                   style={{
                     padding: "4px 8px",
                     borderRadius: 4,
-                    border: "1px solid #334155",
-                    backgroundColor: "#1e293b",
-                    color: "#e5e7eb",
+                    border: "1px solid var(--wl-border-strong)",
+                    backgroundColor: "var(--wl-bg-control)",
+                    color: "var(--wl-text-primary)",
                     cursor: "pointer",
                     fontSize: 12,
                   }}
@@ -7760,7 +7555,7 @@ export const App: React.FC = () => {
               }}
             >
               {describeLoading && describeTarget.kind !== "event" && (
-                <div style={{ color: "#9ca3af" }}>加载 Describe 中…</div>
+                <div style={{ color: "var(--wl-text-label)" }}>加载 Describe 中…</div>
               )}
               {describeTarget.kind === "event" && (
                 <EventDescribeContent
@@ -7773,8 +7568,8 @@ export const App: React.FC = () => {
               {!describeLoading && describeTarget.kind === "pod" && describePodData && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   <section>
-                    <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>基本信息</h4>
-                    <div style={{ fontSize: 12, color: "#cbd5f5", lineHeight: 1.6 }}>
+                    <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "var(--wl-text-primary)" }}>基本信息</h4>
+                    <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.6 }}>
                       <div>Namespace：{describePodData.pod.metadata.namespace}</div>
                       <div>Name：{describePodData.pod.metadata.name}</div>
                       <div>
@@ -7788,24 +7583,24 @@ export const App: React.FC = () => {
 
                   {(describePodData.pod.metadata.labels || describePodData.pod.metadata.annotations) && (
                     <section>
-                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Labels & Annotations</h4>
+                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "var(--wl-text-primary)" }}>Labels & Annotations</h4>
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 12, lineHeight: 1.6 }}>
                         {describePodData.pod.metadata.labels && (
                           <div>
-                            <div style={{ marginBottom: 4, color: "#9ca3af" }}>Labels</div>
+                            <div style={{ marginBottom: 4, color: "var(--wl-text-label)" }}>Labels</div>
                             {Object.entries(describePodData.pod.metadata.labels).map(([k, v]) => (
                               <div key={k}>
-                                <span style={{ color: "#9ca3af" }}>{k}</span>: {v}
+                                <span style={{ color: "var(--wl-text-label)" }}>{k}</span>: {v}
                               </div>
                             ))}
                           </div>
                         )}
                         {describePodData.pod.metadata.annotations && (
                           <div>
-                            <div style={{ marginBottom: 4, color: "#9ca3af" }}>Annotations</div>
+                            <div style={{ marginBottom: 4, color: "var(--wl-text-label)" }}>Annotations</div>
                             {Object.entries(describePodData.pod.metadata.annotations).map(([k, v]) => (
                               <div key={k}>
-                                <span style={{ color: "#9ca3af" }}>{k}</span>: {v}
+                                <span style={{ color: "var(--wl-text-label)" }}>{k}</span>: {v}
                               </div>
                             ))}
                           </div>
@@ -7816,20 +7611,20 @@ export const App: React.FC = () => {
 
                   {describePodData.pod.spec?.containers && describePodData.pod.spec.containers.length > 0 && (
                     <section>
-                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Containers</h4>
+                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "var(--wl-text-primary)" }}>Containers</h4>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
                         {describePodData.pod.spec.containers.map((c) => (
                           <div
                             key={c.name}
                             style={{
-                              border: "1px solid #1f2937",
+                              border: "1px solid var(--wl-border-subtle)",
                               borderRadius: 6,
                               padding: 8,
-                              backgroundColor: "#020617",
+                              backgroundColor: "var(--wl-bg-table)",
                             }}
                           >
                             <div style={{ fontWeight: 600, marginBottom: 4 }}>{c.name}</div>
-                            <div style={{ color: "#cbd5f5", lineHeight: 1.6 }}>
+                            <div style={{ color: "var(--wl-text-secondary)", lineHeight: 1.6 }}>
                               <div>Image：{c.image ?? "-"}</div>
                               {c.ports && c.ports.length > 0 && (
                                 <div>
@@ -7933,24 +7728,12 @@ export const App: React.FC = () => {
 const btnStyle: React.CSSProperties = {
   padding: "4px 8px",
   borderRadius: 4,
-  border: "1px solid #1f2937",
-  backgroundColor: "#0f172a",
-  color: "#e5e7eb",
+  border: "1px solid var(--wl-border-subtle)",
+  backgroundColor: "var(--wl-bg-elevated)",
+  color: "var(--wl-text-primary)",
   cursor: "pointer",
   fontSize: 12,
   marginRight: 6,
-};
-
-const menuItemStyle: React.CSSProperties = {
-  display: "block",
-  width: "100%",
-  padding: "8px 12px",
-  border: "none",
-  backgroundColor: "transparent",
-  color: "#e2e8f0",
-  cursor: "pointer",
-  fontSize: 13,
-  textAlign: "left",
 };
 
 /** 三点菜单内按钮用此样式，不设 background/color，由 .wl-menu-item 的 CSS 控制悬停高亮 */

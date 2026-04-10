@@ -10,23 +10,23 @@ const pillBase: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-/** 与 Pods 列表「状态标签」列色系一致（健康 / 关注 / 警告 / 严重） */
+/** 与 Pods 列表「状态标签」列色系一致（健康 / 关注 / 警告 / 严重）；色值随主题 token 变化 */
 export function PodHealthPill({ label, title }: { label: string; title?: string }) {
-  let bg = "rgba(22,163,74,0.15)";
-  let border = "rgba(22,163,74,0.6)";
-  let color = "#bbf7d0";
+  let bg = "var(--wl-pill-success-bg)";
+  let border = "var(--wl-pill-success-border)";
+  let color = "var(--wl-pill-success-text)";
   if (label === "关注") {
-    bg = "rgba(202,138,4,0.18)";
-    border = "rgba(234,179,8,0.7)";
-    color = "#facc15";
+    bg = "var(--wl-pill-attention-bg)";
+    border = "var(--wl-pill-attention-border)";
+    color = "var(--wl-pill-attention-text)";
   } else if (label === "警告") {
-    bg = "rgba(249,115,22,0.2)";
-    border = "rgba(249,115,22,0.75)";
-    color = "#fed7aa";
+    bg = "var(--wl-pill-orange-bg)";
+    border = "var(--wl-pill-orange-border)";
+    color = "var(--wl-pill-orange-text)";
   } else if (label === "严重") {
-    bg = "rgba(185,28,28,0.25)";
-    border = "rgba(248,113,113,0.85)";
-    color = "#fecaca";
+    bg = "var(--wl-pill-danger-bg)";
+    border = "var(--wl-pill-danger-border)";
+    color = "var(--wl-pill-danger-text)";
   }
   return (
     <span
@@ -48,30 +48,66 @@ function podListStatusPillColors(text: string): { bg: string; border: string; co
   const raw = (text || "").trim();
   const t = raw.toLowerCase();
   if (raw === "" || raw === "-" || t === "unknown") {
-    return { bg: "rgba(100,116,139,0.2)", border: "rgba(148,163,184,0.55)", color: "#cbd5e1" };
+    return {
+      bg: "var(--wl-pill-neutral-bg)",
+      border: "var(--wl-pill-neutral-border)",
+      color: "var(--wl-pill-neutral-text)",
+    };
   }
   if (t === "running") {
-    return { bg: "rgba(22,163,74,0.15)", border: "rgba(22,163,74,0.6)", color: "#bbf7d0" };
+    return {
+      bg: "var(--wl-pill-success-bg)",
+      border: "var(--wl-pill-success-border)",
+      color: "var(--wl-pill-success-text)",
+    };
   }
   if (t === "pending") {
-    return { bg: "rgba(202,138,4,0.18)", border: "rgba(234,179,8,0.7)", color: "#facc15" };
+    return {
+      bg: "var(--wl-pill-attention-bg)",
+      border: "var(--wl-pill-attention-border)",
+      color: "var(--wl-pill-attention-text)",
+    };
   }
   if (t === "succeeded" || t === "completed" || t.includes("completed")) {
-    return { bg: "rgba(59,130,246,0.15)", border: "rgba(96,165,250,0.65)", color: "#bfdbfe" };
+    return {
+      bg: "var(--wl-pill-info-bg)",
+      border: "var(--wl-pill-info-border)",
+      color: "var(--wl-pill-info-text)",
+    };
   }
   if (t === "failed" || t.includes("failed") || t.includes("error") || t.includes("crash") || t.includes("backoff")) {
-    return { bg: "rgba(185,28,28,0.25)", border: "rgba(248,113,113,0.85)", color: "#fecaca" };
+    return {
+      bg: "var(--wl-pill-danger-bg)",
+      border: "var(--wl-pill-danger-border)",
+      color: "var(--wl-pill-danger-text)",
+    };
   }
   if (t.includes("terminat")) {
-    return { bg: "rgba(148,163,184,0.12)", border: "rgba(148,163,184,0.45)", color: "#cbd5e1" };
+    return {
+      bg: "var(--wl-pill-muted-bg)",
+      border: "var(--wl-pill-muted-border)",
+      color: "var(--wl-pill-muted-text)",
+    };
   }
   if (t.startsWith("init:") || t.includes("creating") || t.includes("waiting")) {
-    return { bg: "rgba(202,138,4,0.18)", border: "rgba(234,179,8,0.7)", color: "#facc15" };
+    return {
+      bg: "var(--wl-pill-attention-bg)",
+      border: "var(--wl-pill-attention-border)",
+      color: "var(--wl-pill-attention-text)",
+    };
   }
   if (t.includes("oom") || t.includes("kill")) {
-    return { bg: "rgba(185,28,28,0.25)", border: "rgba(248,113,113,0.85)", color: "#fecaca" };
+    return {
+      bg: "var(--wl-pill-danger-bg)",
+      border: "var(--wl-pill-danger-border)",
+      color: "var(--wl-pill-danger-text)",
+    };
   }
-  return { bg: "rgba(30,41,59,0.85)", border: "rgba(51,65,85,0.9)", color: "#e2e8f0" };
+  return {
+    bg: "var(--wl-pill-surface-bg)",
+    border: "var(--wl-pill-surface-border)",
+    color: "var(--wl-pill-surface-text)",
+  };
 }
 
 /**

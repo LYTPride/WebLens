@@ -1,4 +1,20 @@
-import React, { Fragment } from "react";
+import React, { Fragment, useRef } from "react";
+import { useResourceListColumnResize } from "../resourceList/useResourceListColumnResize";
+import {
+  SERVICE_EP_EXPAND_COLUMNS,
+  SERVICE_EP_EXPAND_DEFAULTS,
+  SERVICE_EP_EXPAND_KEYS,
+  SERVICE_PORT_EXPAND_COLUMNS,
+  SERVICE_PORT_EXPAND_DEFAULTS,
+  SERVICE_PORT_EXPAND_KEYS,
+  SECONDARY_EXPAND_MIN_COL_WIDTH,
+} from "../resourceList/secondaryExpandTableConfig";
+import {
+  SecondaryExpandTable,
+  secondaryExpandActionsCellStyle,
+  secondaryExpandDataCellStyle,
+  secondaryExpandTdBase,
+} from "./SecondaryExpandTable";
 import { ResizableTh } from "./ResizableTh";
 import { ResourceSortArrows } from "./ResourceSortArrows";
 import {
@@ -17,9 +33,10 @@ import {
 } from "../utils/serviceTable";
 import type { Pod } from "../api";
 import { formatAgeFromMetadata } from "../utils/k8sCreationTimestamp";
-import copyIcon from "../assets/icon-copy.png";
+import { CopyIcon } from "./icons/CopyIcon";
 import { ResourceJumpChip } from "./ResourceJumpChip";
 import { ResourceNameWithCopy } from "./ResourceNameWithCopy";
+import { DropdownMenuPortal } from "./DropdownMenuPortal";
 
 const SERVICE_COLUMN_KEYS = [
   "name",
@@ -72,14 +89,14 @@ const SERVICE_COLUMN_SORT: Partial<Record<(typeof SERVICE_COLUMN_KEYS)[number], 
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 12,
-  color: "#9ca3af",
+  color: "var(--wl-text-table-header)",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 13,
 };
 
@@ -88,8 +105,6 @@ const menuItemStyleForDropdown: React.CSSProperties = {
   width: "100%",
   padding: "8px 12px",
   border: "none",
-  background: "none",
-  color: "#e5e7eb",
   cursor: "pointer",
   fontSize: 13,
   textAlign: "left",
@@ -160,13 +175,33 @@ export function ServicesListTable({
   setError,
   deleteServiceApi,
 }: ServicesListTableProps) {
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const {
+    columnWidths: servicePortExpandWidths,
+    beginResize: beginResizeServicePortExpand,
+    totalDataWidth: servicePortExpandTotalWidth,
+  } = useResourceListColumnResize({
+    columnKeys: SERVICE_PORT_EXPAND_KEYS,
+    defaults: SERVICE_PORT_EXPAND_DEFAULTS,
+    minWidthForKey: () => SECONDARY_EXPAND_MIN_COL_WIDTH,
+  });
+  const {
+    columnWidths: serviceEpExpandWidths,
+    beginResize: beginResizeServiceEpExpand,
+    totalDataWidth: serviceEpExpandTotalWidth,
+  } = useResourceListColumnResize({
+    columnKeys: SERVICE_EP_EXPAND_KEYS,
+    defaults: SERVICE_EP_EXPAND_DEFAULTS,
+    minWidthForKey: () => SECONDARY_EXPAND_MIN_COL_WIDTH,
+  });
+  const svcSubTd = secondaryExpandDataCellStyle(secondaryExpandTdBase);
   return (
     <table
       style={{
         width: totalWidth,
         minWidth: "100%",
         borderCollapse: "collapse",
-        backgroundColor: "#020617",
+        backgroundColor: "var(--wl-bg-table)",
         tableLayout: "fixed",
       }}
     >
@@ -203,14 +238,14 @@ export function ServicesListTable({
       <tbody className="wl-table-body">
         {serviceLoading && sortedRows.length === 0 && (
           <tr className="wl-table-row">
-            <td colSpan={10} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+            <td colSpan={10} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
               加载中…
             </td>
           </tr>
         )}
         {!serviceLoading && sortedRows.length === 0 && (
           <tr className="wl-table-row">
-            <td colSpan={10} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+            <td colSpan={10} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
               暂无 Service
             </td>
           </tr>
@@ -269,7 +304,7 @@ export function ServicesListTable({
                           padding: "0 4px",
                           border: "none",
                           background: "none",
-                          color: "#94a3b8",
+                          color: "var(--wl-text-secondary)",
                           cursor: "pointer",
                           flexShrink: 0,
                           fontSize: 12,
@@ -281,6 +316,7 @@ export function ServicesListTable({
                       </button>
                       <button
                         type="button"
+                        className="wl-table-hover-copy__truncate"
                         onClick={(e) => {
                           e.stopPropagation();
                           openDescribe(svc);
@@ -292,12 +328,6 @@ export function ServicesListTable({
                           background: "none",
                           color: "inherit",
                           cursor: "pointer",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                          minWidth: 0,
-                          flex: "1 1 auto",
-                          textAlign: "left",
                         }}
                       >
                         {sname}
@@ -313,7 +343,7 @@ export function ServicesListTable({
                       title="复制 Service 名称"
                       aria-label={`复制 Service 名称：${sname}`}
                     >
-                      <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                      <CopyIcon />
                     </button>
                   </span>
                 </td>
@@ -341,21 +371,21 @@ export function ServicesListTable({
                 <td style={baseCell} onClick={(e) => e.stopPropagation()}>
                   {(() => {
                     const hl = diag.label;
-                    let bg = "rgba(22,163,74,0.15)";
-                    let border = "rgba(22,163,74,0.6)";
-                    let color = "#bbf7d0";
+                    let bg = "var(--wl-pill-success-bg)";
+                    let border = "var(--wl-pill-success-border)";
+                    let color = "var(--wl-pill-success-text)";
                     if (hl === "警告") {
-                      bg = "rgba(249,115,22,0.2)";
-                      border = "rgba(249,115,22,0.75)";
-                      color = "#fed7aa";
+                      bg = "var(--wl-pill-orange-bg)";
+                      border = "var(--wl-pill-orange-border)";
+                      color = "var(--wl-pill-orange-text)";
                     } else if (hl === "严重") {
-                      bg = "rgba(185,28,28,0.25)";
-                      border = "rgba(248,113,113,0.85)";
-                      color = "#fecaca";
+                      bg = "var(--wl-pill-danger-bg)";
+                      border = "var(--wl-pill-danger-border)";
+                      color = "var(--wl-pill-danger-text)";
                     } else if (hl === "特殊") {
-                      bg = "rgba(59,130,246,0.15)";
-                      border = "rgba(96,165,250,0.65)";
-                      color = "#bfdbfe";
+                      bg = "var(--wl-pill-info-bg)";
+                      border = "var(--wl-pill-info-border)";
+                      color = "var(--wl-pill-info-text)";
                     }
                     return (
                       <span
@@ -384,6 +414,7 @@ export function ServicesListTable({
                 <td style={{ ...tdStyle, overflow: "visible" }} onClick={(e) => e.stopPropagation()}>
                   <div style={{ position: "relative" }}>
                     <button
+                      ref={isMenuOpen ? menuTriggerRef : undefined}
                       type="button"
                       className="wl-table-menu-trigger"
                       disabled={rowBusy || !effectiveClusterId}
@@ -405,69 +436,55 @@ export function ServicesListTable({
                       ⋮
                     </button>
                     {isMenuOpen && (
-                      <>
-                        <div
-                          style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                          onClick={() => setMenuOpenKey(null)}
-                          aria-hidden
-                        />
-                        <div
-                          className="wl-table-dropdown-menu"
-                          style={{
-                            position: "absolute",
-                            right: 0,
-                            top: "100%",
-                            marginTop: 4,
-                            minWidth: 160,
-                            zIndex: 41,
-                            padding: "4px 0",
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="wl-menu-item"
-                            style={menuItemStyleForDropdown}
-                            disabled={rowBusy}
-                            onClick={() => openEditTab(svc)}
-                          >
-                            <span style={{ marginRight: 8 }}>✎</span> Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="wl-menu-item wl-menu-item-danger"
-                            style={menuItemStyleForDropdown}
-                            disabled={rowBusy || !effectiveClusterId}
-                            onClick={() => {
-                              setMenuOpenKey(null);
-                              if (!effectiveClusterId) return;
-                              setActionConfirm({
-                                title: "确认删除 1 个 Service？",
-                                description: "删除后不可恢复。",
-                                items: [`${ns}/${sname}`],
-                                variant: "danger",
-                                onConfirm: async () => {
-                                  setRowBusyKey(menuKey);
-                                  try {
-                                    await deleteServiceApi(effectiveClusterId, ns, sname);
-                                    onDeletedOne(ns, sname);
-                                    setToastMessage("已删除 Service");
-                                    setError(null);
-                                  } catch (err: unknown) {
-                                    const e = err as { response?: { data?: { error?: string } }; message?: string };
-                                    setToastMessage(e?.response?.data?.error ?? e?.message ?? "删除失败");
-                                    throw err;
-                                  } finally {
-                                    setRowBusyKey(null);
-                                  }
-                                },
-                              });
-                            }}
-                          >
-                            <span style={{ marginRight: 8 }}>🗑</span> Delete
-                          </button>
-                        </div>
-                      </>
+                    <DropdownMenuPortal
+                      onClose={() => setMenuOpenKey(null)}
+                      triggerRef={menuTriggerRef}
+                      align="right"
+                      surfaceStyle={{ padding: "4px 0", minWidth: 160 }}
+                    >
+                      <button
+                        type="button"
+                        className="wl-menu-item"
+                        style={menuItemStyleForDropdown}
+                        disabled={rowBusy}
+                        onClick={() => openEditTab(svc)}
+                      >
+                        <span style={{ marginRight: 8 }}>✎</span> Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="wl-menu-item wl-menu-item-danger"
+                        style={menuItemStyleForDropdown}
+                        disabled={rowBusy || !effectiveClusterId}
+                        onClick={() => {
+                          setMenuOpenKey(null);
+                          if (!effectiveClusterId) return;
+                          setActionConfirm({
+                            title: "确认删除 1 个 Service？",
+                            description: "删除后不可恢复。",
+                            items: [`${ns}/${sname}`],
+                            variant: "danger",
+                            onConfirm: async () => {
+                              setRowBusyKey(menuKey);
+                              try {
+                                await deleteServiceApi(effectiveClusterId, ns, sname);
+                                onDeletedOne(ns, sname);
+                                setToastMessage("已删除 Service");
+                                setError(null);
+                              } catch (err: unknown) {
+                                const e = err as { response?: { data?: { error?: string } }; message?: string };
+                                setToastMessage(e?.response?.data?.error ?? e?.message ?? "删除失败");
+                                throw err;
+                              } finally {
+                                setRowBusyKey(null);
+                              }
+                            },
+                          });
+                        }}
+                      >
+                        <span style={{ marginRight: 8 }}>🗑</span> Delete
+                      </button>
+                    </DropdownMenuPortal>
                     )}
                   </div>
                 </td>
@@ -479,148 +496,114 @@ export function ServicesListTable({
                     style={{
                       ...tdStyle,
                       padding: "8px 12px 12px",
-                      backgroundColor: "#0f172a",
+                      backgroundColor: "var(--wl-bg-expanded)",
                       cursor: "default",
-                      borderBottom: "1px solid #111827",
+                      borderBottom: "1px solid var(--wl-border-table-row)",
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8, fontWeight: 600 }}>
+                    <div style={{ fontSize: 11, color: "var(--wl-text-secondary)", marginBottom: 8, fontWeight: 600 }}>
                       端口与 Endpoints（{diag.summary}）
                     </div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>Ports</div>
-                    <table
-                      style={{
-                        width: "100%",
-                        borderCollapse: "collapse",
-                        backgroundColor: "#020617",
-                        marginBottom: 12,
-                      }}
-                    >
-                      <thead>
-                        <tr>
-                          {["Name", "Protocol", "Port", "TargetPort", "NodePort"].map((h) => (
-                            <th
-                              key={h}
-                              style={{
-                                textAlign: "left",
-                                padding: "6px 8px",
-                                borderBottom: "1px solid #1f2937",
-                                fontSize: 11,
-                                color: "#94a3b8",
-                              }}
-                            >
-                              {h}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", marginBottom: 6 }}>Ports</div>
+                    <div style={{ marginBottom: 12 }}>
+                      <SecondaryExpandTable
+                        columns={SERVICE_PORT_EXPAND_COLUMNS}
+                        columnWidths={servicePortExpandWidths}
+                        defaults={SERVICE_PORT_EXPAND_DEFAULTS}
+                        beginResize={beginResizeServicePortExpand}
+                        totalDataWidth={servicePortExpandTotalWidth}
+                      >
                         {portRows.length === 0 ? (
                           <tr>
-                            <td colSpan={5} style={{ ...tdStyle, fontSize: 12, color: "#64748b" }}>
+                            <td
+                              colSpan={SERVICE_PORT_EXPAND_KEYS.length}
+                              style={{ ...svcSubTd, color: "var(--wl-text-muted)" }}
+                            >
                               无端口
                             </td>
                           </tr>
                         ) : (
                           portRows.map((pr, i) => (
-                            <tr key={i}>
-                              <td style={tdStyle}>{pr.name}</td>
-                              <td style={tdStyle}>{pr.protocol}</td>
-                              <td style={tdStyle}>{pr.port}</td>
-                              <td style={tdStyle}>{pr.targetPort}</td>
-                              <td style={tdStyle}>{pr.nodePort}</td>
+                            <tr key={i} className="wl-table-row">
+                              <td style={svcSubTd}>{pr.name}</td>
+                              <td style={svcSubTd}>{pr.protocol}</td>
+                              <td style={svcSubTd}>{pr.port}</td>
+                              <td style={svcSubTd}>{pr.targetPort}</td>
+                              <td style={svcSubTd}>{pr.nodePort}</td>
                             </tr>
                           ))
                         )}
-                      </tbody>
-                    </table>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>
+                      </SecondaryExpandTable>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", marginBottom: 6 }}>
                       Endpoints / 关联后端
                       {epRows.length === 0 && (
                         <span style={{ color: "#f97316", marginLeft: 8, fontWeight: 600 }}>（0 条地址）</span>
                       )}
                     </div>
-                    <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "#020617" }}>
-                      <thead>
+                    <SecondaryExpandTable
+                      columns={SERVICE_EP_EXPAND_COLUMNS}
+                      columnWidths={serviceEpExpandWidths}
+                      defaults={SERVICE_EP_EXPAND_DEFAULTS}
+                      beginResize={beginResizeServiceEpExpand}
+                      totalDataWidth={serviceEpExpandTotalWidth}
+                    >
+                      {epRows.length === 0 ? (
                         <tr>
-                          {["IP", "Ports", "Ready", "Pod", "健康", "Node", "说明", "联动"].map((h) => (
-                            <th
-                              key={h}
-                              style={{
-                                textAlign: "left",
-                                padding: "6px 8px",
-                                borderBottom: "1px solid #1f2937",
-                                fontSize: 11,
-                                color: "#94a3b8",
-                              }}
-                            >
-                              {h}
-                            </th>
-                          ))}
+                          <td
+                            colSpan={SERVICE_EP_EXPAND_KEYS.length}
+                            style={{ ...svcSubTd, color: "var(--wl-text-muted)" }}
+                          >
+                            无 Endpoints 地址行
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {epRows.length === 0 ? (
-                          <tr>
-                            <td colSpan={8} style={{ ...tdStyle, fontSize: 12, color: "#64748b" }}>
-                              无 Endpoints 地址行
-                            </td>
-                          </tr>
-                        ) : (
-                          epRows.map((er, ri) => {
-                            const shell: React.CSSProperties =
-                              !er.ready
-                                ? { backgroundColor: "rgba(249,115,22,0.08)" }
-                                : er.podHealth && er.podHealth !== "健康"
-                                  ? { backgroundColor: "rgba(202,138,4,0.06)" }
-                                  : {};
-                            const canPod = er.podName && er.podName !== "—";
-                            return (
-                              <tr key={ri} style={shell}>
-                                <td style={{ ...tdStyle, fontSize: 12 }}>{er.ip}</td>
-                                <td style={{ ...tdStyle, fontSize: 11 }}>{er.ports}</td>
-                                <td style={{ ...tdStyle, fontSize: 12 }}>{er.ready ? "是" : "否"}</td>
-                                <td
-                                  style={{
-                                    ...tdStyle,
-                                    fontSize: 12,
-                                    wordBreak: "break-word",
-                                    whiteSpace: "normal",
-                                  }}
-                                >
-                                  {canPod ? (
-                                    <ResourceNameWithCopy
-                                      name={er.podName}
-                                      onCopy={copyName}
-                                      fontSize={12}
-                                      copyButtonTitle="复制 Pod 名称"
-                                    />
-                                  ) : (
-                                    er.podName
-                                  )}
-                                </td>
-                                <td style={{ ...tdStyle, fontSize: 12 }}>{er.podHealth}</td>
-                                <td style={{ ...tdStyle, fontSize: 11 }}>{er.node}</td>
-                                <td style={{ ...tdStyle, fontSize: 11, color: "#94a3b8" }}>{er.note || "—"}</td>
-                                <td style={{ ...tdStyle, fontSize: 11 }}>
-                                  {canPod ? (
-                                    <ResourceJumpChip
-                                      label="Pods"
-                                      compact
-                                      onClick={() => jumpToPods(er.podName)}
-                                      title="打开 Pods 列表并过滤"
-                                    />
-                                  ) : (
-                                    "—"
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
+                      ) : (
+                        epRows.map((er, ri) => {
+                          const shell: React.CSSProperties =
+                            !er.ready
+                              ? { backgroundColor: "rgba(249,115,22,0.08)" }
+                              : er.podHealth && er.podHealth !== "健康"
+                                ? { backgroundColor: "rgba(202,138,4,0.06)" }
+                                : {};
+                          const canPod = er.podName && er.podName !== "—";
+                          return (
+                            <tr key={ri} className="wl-table-row" style={shell}>
+                              <td style={svcSubTd}>{er.ip}</td>
+                              <td style={{ ...svcSubTd, fontSize: 11 }}>{er.ports}</td>
+                              <td style={svcSubTd}>{er.ready ? "是" : "否"}</td>
+                              <td style={svcSubTd}>
+                                {canPod ? (
+                                  <ResourceNameWithCopy
+                                    name={er.podName}
+                                    onCopy={copyName}
+                                    fontSize={12}
+                                    copyButtonTitle="复制 Pod 名称"
+                                  />
+                                ) : (
+                                  er.podName
+                                )}
+                              </td>
+                              <td style={svcSubTd}>{er.podHealth}</td>
+                              <td style={{ ...svcSubTd, fontSize: 11 }}>{er.node}</td>
+                              <td style={{ ...svcSubTd, fontSize: 11, color: "var(--wl-text-secondary)" }}>{er.note || "—"}</td>
+                              <td style={secondaryExpandActionsCellStyle({ ...secondaryExpandTdBase, fontSize: 11 })}>
+                                {canPod ? (
+                                  <ResourceJumpChip
+                                    label="Pods"
+                                    compact
+                                    onClick={() => jumpToPods(er.podName)}
+                                    title="打开 Pods 列表并过滤"
+                                  />
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </SecondaryExpandTable>
                   </td>
                 </tr>
               )}

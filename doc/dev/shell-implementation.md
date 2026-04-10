@@ -8,6 +8,7 @@
 
 - 组件：`PodShell.tsx`
 - 终端：xterm + fit addon
+- **主题同步**：终端 `background` / `foreground` 从 `document.documentElement` 上 CSS 变量读取（与 `--wl-describe-table-bg`、`--wl-text-heading` 等对齐）；应用 `ThemeContext` 的 `theme` 变化后 **双帧重应用** xterm 主题并 `refresh`，避免与 `data-theme` 更新时序竞态导致的 **深浅色反转残留**（例如深色进入后切浅色仍黑底）。
 - 输入输出：
   - `term.onData` -> WebSocket send
   - WebSocket message -> `term.write`

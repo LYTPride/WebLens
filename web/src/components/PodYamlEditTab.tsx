@@ -183,7 +183,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
 
   if (loading) {
     return (
-      <div style={{ padding: 24, color: "#94a3b8" }}>加载 YAML…</div>
+      <div style={{ padding: 24, color: "var(--wl-text-secondary)" }}>加载 YAML…</div>
     );
   }
 
@@ -197,7 +197,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         flex: 1,
         minWidth: 0,
         width: "100%",
-        backgroundColor: "#0f172a",
+        backgroundColor: "var(--wl-bg-elevated)",
       }}
     >
       <div
@@ -208,11 +208,11 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
           flexWrap: "wrap",
           gap: 12,
           padding: "8px 12px",
-          borderBottom: "1px solid #1e293b",
+          borderBottom: "1px solid var(--wl-border-sidebar)",
           flexShrink: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#94a3b8", fontSize: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, color: "var(--wl-text-secondary)", fontSize: 12 }}>
           <span>
             Kind:{" "}
             {yamlKind === "deployment"
@@ -244,15 +244,15 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
             inputStyle={{
               padding: "4px 8px",
               borderRadius: 4,
-              border: "1px solid #334155",
-              backgroundColor: "#020617",
-              color: "#e2e8f0",
+              border: "1px solid var(--wl-border-strong)",
+              backgroundColor: "var(--wl-bg-table)",
+              color: "var(--wl-text-heading)",
               fontSize: 12,
             }}
           />
           {keyword && (
             <>
-              <span style={{ fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: 12, color: "var(--wl-text-secondary)", whiteSpace: "nowrap" }}>
                 × {total > 0 ? `${safeIndex + 1}/${total}` : "0/0"}
               </span>
               <button
@@ -262,9 +262,9 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
                 style={{
                   padding: "2px 6px",
                   borderRadius: 4,
-                  border: "1px solid #334155",
-                  backgroundColor: "#1e293b",
-                  color: "#e2e8f0",
+                  border: "1px solid var(--wl-border-strong)",
+                  backgroundColor: "var(--wl-bg-control)",
+                  color: "var(--wl-text-heading)",
                   cursor: total > 0 ? "pointer" : "not-allowed",
                   fontSize: 12,
                   lineHeight: 1.2,
@@ -279,9 +279,9 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
                 style={{
                   padding: "2px 6px",
                   borderRadius: 4,
-                  border: "1px solid #334155",
-                  backgroundColor: "#1e293b",
-                  color: "#e2e8f0",
+                  border: "1px solid var(--wl-border-strong)",
+                  backgroundColor: "var(--wl-bg-control)",
+                  color: "var(--wl-text-heading)",
                   cursor: total > 0 ? "pointer" : "not-allowed",
                   fontSize: 12,
                   lineHeight: 1.2,
@@ -300,9 +300,9 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
             style={{
               padding: "6px 12px",
               borderRadius: 4,
-              border: "1px solid #334155",
+              border: "1px solid var(--wl-border-strong)",
               backgroundColor: "transparent",
-              color: "#94a3b8",
+              color: "var(--wl-text-secondary)",
               cursor: "pointer",
               fontSize: 11,
             }}
@@ -316,9 +316,9 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
             style={{
               padding: "6px 12px",
               borderRadius: 4,
-              border: "1px solid #334155",
-              backgroundColor: "#1e293b",
-              color: isDirty && !saving ? "#e2e8f0" : "#64748b",
+              border: "1px solid var(--wl-border-strong)",
+              backgroundColor: "var(--wl-bg-control)",
+              color: isDirty && !saving ? "var(--wl-text-heading)" : "var(--wl-text-muted)",
               cursor: isDirty && !saving ? "pointer" : "not-allowed",
               fontSize: 12,
             }}
@@ -333,8 +333,8 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               padding: "6px 12px",
               borderRadius: 4,
               border: "none",
-              backgroundColor: "#0d9488",
-              color: "#fff",
+              backgroundColor: "var(--wl-action-primary)",
+              color: "var(--wl-text-on-primary)",
               cursor: saving ? "not-allowed" : "pointer",
               fontSize: 12,
             }}

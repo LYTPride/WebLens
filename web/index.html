@@ -2,6 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (function () {
+        try {
+          var k = "weblens-theme";
+          var v = localStorage.getItem(k);
+          var t = "dark";
+          if (v === "light" || v === "dark") t = v;
+          else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches)
+            t = "light";
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
     <title>WebLens</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />

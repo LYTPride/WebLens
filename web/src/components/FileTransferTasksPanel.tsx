@@ -75,7 +75,7 @@ export function FileTransferTasksPanel({ tasks, defaultCollapsed = false, onDism
   return (
     <div style={panelWrap}>
       <button type="button" onClick={toggle} style={headerBtn} aria-expanded={!collapsed}>
-        <span style={{ fontWeight: 600, color: "#e2e8f0" }}>传输任务</span>
+        <span style={{ fontWeight: 600, color: "var(--wl-text-heading)" }}>传输任务</span>
         <span style={badge}>
           {tasks.length}
           {running > 0 ? ` · ${running} 进行中` : ""}
@@ -111,21 +111,21 @@ export function FileTransferTasksPanel({ tasks, defaultCollapsed = false, onDism
                   {t.status === "error" && "失败"}
                 </span>
                 {t.percent != null && t.status === "running" && pctLabel != null && (
-                  <span style={{ color: "#94a3b8", fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ color: "var(--wl-text-secondary)", fontVariantNumeric: "tabular-nums" }}>
                     {pctLabel}
                   </span>
                 )}
                 {t.percent != null && t.status === "running" && pctLabel == null && (
-                  <span style={{ color: "#94a3b8", fontVariantNumeric: "tabular-nums" }}>{t.percent}%</span>
+                  <span style={{ color: "var(--wl-text-secondary)", fontVariantNumeric: "tabular-nums" }}>{t.percent}%</span>
                 )}
                 {t.percent == null && t.status === "running" && (
-                  <span style={{ color: "#94a3b8" }}>{formatTransferBytes(t.loaded)}</span>
+                  <span style={{ color: "var(--wl-text-secondary)" }}>{formatTransferBytes(t.loaded)}</span>
                 )}
                 {t.status === "success" && t.total != null && t.total > 0 && (
-                  <span style={{ color: "#64748b" }}>共 {formatTransferBytes(t.total)}</span>
+                  <span style={{ color: "var(--wl-text-muted)" }}>共 {formatTransferBytes(t.total)}</span>
                 )}
                 {t.status === "success" && (t.total == null || t.total <= 0) && t.loaded > 0 && (
-                  <span style={{ color: "#64748b" }}>共 {formatTransferBytes(t.loaded)}</span>
+                  <span style={{ color: "var(--wl-text-muted)" }}>共 {formatTransferBytes(t.loaded)}</span>
                 )}
               </div>
               {t.percent != null && (
@@ -141,7 +141,7 @@ export function FileTransferTasksPanel({ tasks, defaultCollapsed = false, onDism
                             ? "#f87171"
                             : t.status === "success"
                               ? "#22c55e"
-                              : "#38bdf8",
+                              : "var(--wl-accent-sky)",
                     }}
                   />
                 </div>
@@ -155,7 +155,7 @@ export function FileTransferTasksPanel({ tasks, defaultCollapsed = false, onDism
                 <div
                   style={{
                     ...detailLine,
-                    color: t.status === "error" ? "#f87171" : "#64748b",
+                    color: t.status === "error" ? "#f87171" : "var(--wl-text-muted)",
                     whiteSpace: "pre-line",
                   }}
                 >
@@ -185,12 +185,12 @@ function kindTag(kind: TransferKind): React.CSSProperties {
 function statusStyle(s: TransferStatus): React.CSSProperties {
   if (s === "success") return { color: "#4ade80", fontSize: 11 };
   if (s === "error") return { color: "#f87171", fontSize: 11 };
-  return { color: "#38bdf8", fontSize: 11 };
+  return { color: "var(--wl-accent-sky)", fontSize: 11 };
 }
 
 const panelWrap: React.CSSProperties = {
-  borderBottom: "1px solid #0b1220",
-  backgroundColor: "#0a0f1a",
+  borderBottom: "1px solid var(--wl-border-table-row)",
+  backgroundColor: "var(--wl-bg-expanded)",
   flexShrink: 0,
 };
 
@@ -208,14 +208,14 @@ const headerBtn: React.CSSProperties = {
 };
 
 const badge: React.CSSProperties = {
-  color: "#94a3b8",
+  color: "var(--wl-text-secondary)",
   fontSize: 11,
   flex: 1,
   minWidth: 0,
 };
 
 const chevron: React.CSSProperties = {
-  color: "#64748b",
+  color: "var(--wl-text-muted)",
   fontSize: 12,
   flexShrink: 0,
 };
@@ -224,12 +224,12 @@ const listScroll: React.CSSProperties = {
   maxHeight: 140,
   overflowY: "auto",
   padding: "0 8px 8px",
-  borderTop: "1px solid #0f172a",
+  borderTop: "1px solid var(--wl-border-sidebar)",
 };
 
 const row: React.CSSProperties = {
   padding: "6px 4px",
-  borderBottom: "1px solid #0f172a",
+  borderBottom: "1px solid var(--wl-border-sidebar)",
 };
 const rowTop: React.CSSProperties = {
   display: "flex",
@@ -240,7 +240,7 @@ const rowTop: React.CSSProperties = {
 const nameSpan: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
-  color: "#e2e8f0",
+  color: "var(--wl-text-heading)",
   fontSize: 11,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -249,7 +249,7 @@ const nameSpan: React.CSSProperties = {
 const dismissBtn: React.CSSProperties = {
   border: "none",
   background: "transparent",
-  color: "#64748b",
+  color: "var(--wl-text-muted)",
   cursor: "pointer",
   fontSize: 16,
   lineHeight: 1,
@@ -267,7 +267,7 @@ const barTrack: React.CSSProperties = {
   position: "relative",
   height: 4,
   borderRadius: 2,
-  backgroundColor: "#1e293b",
+  backgroundColor: "var(--wl-bg-control)",
   marginTop: 6,
   overflow: "hidden",
 };
@@ -280,7 +280,7 @@ const indeterminateBar: React.CSSProperties = {
   height: "100%",
   width: "36%",
   borderRadius: 2,
-  backgroundColor: "#38bdf8",
+  backgroundColor: "var(--wl-accent-sky)",
   animation: "wl-transfer-slide 1.1s ease-in-out infinite",
 };
 

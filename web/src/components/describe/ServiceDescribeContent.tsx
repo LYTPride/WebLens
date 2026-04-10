@@ -7,7 +7,7 @@ import { ResourceNameWithCopy } from "../ResourceNameWithCopy";
 const sectionTitle: React.CSSProperties = {
   margin: "0 0 8px",
   fontSize: 13,
-  color: "#e5e7eb",
+  color: "var(--wl-text-primary)",
 };
 
 const tagStyle: React.CSSProperties = {
@@ -16,21 +16,21 @@ const tagStyle: React.CSSProperties = {
   padding: "2px 8px",
   borderRadius: 4,
   backgroundColor: "rgba(30,41,59,0.9)",
-  border: "1px solid #334155",
+  border: "1px solid var(--wl-border-strong)",
   fontSize: 11,
-  color: "#cbd5e1",
+  color: "var(--wl-text-secondary)",
   maxWidth: "100%",
   wordBreak: "break-all",
 };
 
 function KeyValueTags({ items }: { items: Record<string, string> | undefined }) {
-  if (!items || Object.keys(items).length === 0) return <span style={{ fontSize: 12, color: "#64748b" }}>—</span>;
+  if (!items || Object.keys(items).length === 0) return <span style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>—</span>;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 0 }}>
       {Object.entries(items).map(([k, v]) => (
         <span key={k} style={tagStyle} title={`${k}=${String(v)}`}>
-          <span style={{ color: "#94a3b8" }}>{k}</span>
-          <span style={{ color: "#64748b", margin: "0 4px" }}>=</span>
+          <span style={{ color: "var(--wl-text-secondary)" }}>{k}</span>
+          <span style={{ color: "var(--wl-text-muted)", margin: "0 4px" }}>=</span>
           {v == null ? "" : String(v)}
         </span>
       ))}
@@ -41,7 +41,7 @@ function KeyValueTags({ items }: { items: Record<string, string> | undefined }) 
 function CollapsibleAnnotations({ annotations }: { annotations: Record<string, string> | undefined }) {
   const [open, setOpen] = useState(false);
   if (!annotations || Object.keys(annotations).length === 0) {
-    return <span style={{ fontSize: 12, color: "#64748b" }}>—</span>;
+    return <span style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>—</span>;
   }
   const keys = Object.keys(annotations);
   const preview = keys.slice(0, 2);
@@ -54,9 +54,9 @@ function CollapsibleAnnotations({ annotations }: { annotations: Record<string, s
           padding: "2px 8px",
           marginBottom: 6,
           borderRadius: 4,
-          border: "1px solid #334155",
-          backgroundColor: "#0f172a",
-          color: "#94a3b8",
+          border: "1px solid var(--wl-border-strong)",
+          backgroundColor: "var(--wl-describe-section-bg)",
+          color: "var(--wl-text-secondary)",
           cursor: "pointer",
           fontSize: 11,
         }}
@@ -64,7 +64,7 @@ function CollapsibleAnnotations({ annotations }: { annotations: Record<string, s
         {open ? "收起 Annotations" : `展开 Annotations（${keys.length} 项）`}
       </button>
       {!open && (
-        <div style={{ fontSize: 11, color: "#64748b" }}>
+        <div style={{ fontSize: 11, color: "var(--wl-text-muted)" }}>
           {preview.map((k) => (
             <div key={k} style={{ marginBottom: 2 }}>
               {k}
@@ -81,15 +81,15 @@ function CollapsibleAnnotations({ annotations }: { annotations: Record<string, s
 const miniTh: React.CSSProperties = {
   textAlign: "left",
   padding: "6px 8px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 11,
-  color: "#94a3b8",
+  color: "var(--wl-text-secondary)",
 };
 const miniTd: React.CSSProperties = {
   padding: "6px 8px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 12,
-  color: "#e2e8f0",
+  color: "var(--wl-text-heading)",
   verticalAlign: "top",
   wordBreak: "break-word",
 };
@@ -112,7 +112,7 @@ export function ServiceDescribeContent({
   onCopyName,
 }: ServiceDescribeContentProps) {
   if (!view || typeof view !== "object") {
-    return <div style={{ fontSize: 12, color: "#94a3b8" }}>暂无 Describe 数据</div>;
+    return <div style={{ fontSize: 12, color: "var(--wl-text-secondary)" }}>暂无 Describe 数据</div>;
   }
 
   const noEndpoints = view.endpointReadyCount === 0 && view.endpointNotReadyCount === 0;
@@ -121,7 +121,7 @@ export function ServiceDescribeContent({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <section>
         <h4 style={sectionTitle}>基本信息</h4>
-        <div style={{ fontSize: 12, color: "#cbd5f5", lineHeight: 1.6 }}>
+        <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.6 }}>
           <div>Name：{view.name ?? "—"}</div>
           <div>Namespace：{view.namespace ?? "—"}</div>
           <div>Type：{view.type || "—"}</div>
@@ -134,11 +134,11 @@ export function ServiceDescribeContent({
           <div>存活时间：{ageLabel}</div>
         </div>
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Labels</div>
+          <div style={{ fontSize: 11, color: "var(--wl-text-secondary)", marginBottom: 4 }}>Labels</div>
           <KeyValueTags items={view.labels} />
         </div>
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Annotations</div>
+          <div style={{ fontSize: 11, color: "var(--wl-text-secondary)", marginBottom: 4 }}>Annotations</div>
           <CollapsibleAnnotations annotations={view.annotations} />
         </div>
       </section>
@@ -146,10 +146,10 @@ export function ServiceDescribeContent({
       <section>
         <h4 style={sectionTitle}>Ports</h4>
         {!view.ports?.length ? (
-          <div style={{ fontSize: 12, color: "#64748b" }}>无端口定义</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>无端口定义</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "#020617", minWidth: 480 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "var(--wl-describe-table-bg)", minWidth: 480 }}>
               <thead>
                 <tr>
                   <th style={miniTh}>Name</th>
@@ -178,7 +178,7 @@ export function ServiceDescribeContent({
       <section>
         <h4 style={sectionTitle}>Selector</h4>
         {!view.selector || Object.keys(view.selector).length === 0 ? (
-          <div style={{ fontSize: 12, color: "#64748b" }}>无 selector</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>无 selector</div>
         ) : (
           <KeyValueTags items={view.selector} />
         )}
@@ -186,7 +186,7 @@ export function ServiceDescribeContent({
 
       <section>
         <h4 style={sectionTitle}>Endpoints</h4>
-        <div style={{ fontSize: 12, color: "#cbd5f5", marginBottom: 8, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", marginBottom: 8, lineHeight: 1.5 }}>
           <div>
             Ready：{view.endpointReadyCount}，NotReady：{view.endpointNotReadyCount}
           </div>
@@ -197,10 +197,10 @@ export function ServiceDescribeContent({
           )}
         </div>
         {!view.endpointRows?.length && !noEndpoints ? (
-          <div style={{ fontSize: 12, color: "#64748b" }}>暂无地址行</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>暂无地址行</div>
         ) : view.endpointRows?.length ? (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "#020617", minWidth: 560 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "var(--wl-describe-table-bg)", minWidth: 560 }}>
               <thead>
                 <tr>
                   <th style={miniTh}>IP</th>
@@ -242,7 +242,7 @@ export function ServiceDescribeContent({
                     </td>
                     <td style={miniTd}>{r.podHealth || "—"}</td>
                     <td style={{ ...miniTd, fontSize: 11 }}>{r.nodeName || "—"}</td>
-                    <td style={{ ...miniTd, fontSize: 11, color: "#94a3b8" }}>{r.note || "—"}</td>
+                    <td style={{ ...miniTd, fontSize: 11, color: "var(--wl-text-secondary)" }}>{r.note || "—"}</td>
                     <td style={miniTd}>
                       {r.podName && onJumpPods ? (
                         <ResourceJumpChip
@@ -265,14 +265,14 @@ export function ServiceDescribeContent({
 
       <section>
         <h4 style={sectionTitle}>关联资源</h4>
-        <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: "var(--wl-text-secondary)", marginBottom: 8 }}>
           关联 Pods（selector 命中，健康标签与列表一致）
         </div>
         {!view.relatedPods?.length ? (
-          <div style={{ fontSize: 12, color: "#64748b" }}>无匹配 Pod 或当前无 selector</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>无匹配 Pod 或当前无 selector</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "#020617" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "var(--wl-describe-table-bg)" }}>
               <thead>
                 <tr>
                   <th style={miniTh}>Pod</th>
@@ -313,13 +313,13 @@ export function ServiceDescribeContent({
           </div>
         )}
 
-        <div style={{ fontSize: 11, color: "#94a3b8", margin: "12px 0 8px" }}>
+        <div style={{ fontSize: 11, color: "var(--wl-text-secondary)", margin: "12px 0 8px" }}>
           引用本 Service 的 Ingress（同命名空间扫描）
         </div>
         {!view.referencedByIngresses?.length ? (
-          <div style={{ fontSize: 12, color: "#64748b" }}>未发现引用（或列表规则未指向此 Service）</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>未发现引用（或列表规则未指向此 Service）</div>
         ) : (
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#e2e8f0", lineHeight: 1.6 }}>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--wl-text-heading)", lineHeight: 1.6 }}>
             {view.referencedByIngresses.map((ing, i) => (
               <li key={`${ing.ingressName}-${i}`} style={{ marginBottom: 6 }}>
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: "6px 8px" }}>
@@ -338,7 +338,7 @@ export function ServiceDescribeContent({
                     />
                   ) : null}
                 </div>
-                <span style={{ color: "#94a3b8", fontSize: 11, display: "block", marginTop: 2 }}>
+                <span style={{ color: "var(--wl-text-secondary)", fontSize: 11, display: "block", marginTop: 2 }}>
                   {ing.host} {ing.path}
                 </span>
               </li>
