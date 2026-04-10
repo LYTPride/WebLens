@@ -5,6 +5,8 @@ import type { ResourceKind } from "../api";
  * 后续恢复某资源时，仅改此处与侧栏配置即可。
  */
 export const V1_HIDDEN_VIEWS: ReadonlySet<ResourceKind> = new Set<ResourceKind>([
+  /** 暂不在 v1 侧栏暴露；逻辑与 API 保留，恢复时移出此集合并改 Sidebar 菜单即可 */
+  "nodes",
   "daemonsets",
   "jobs",
   "cronjobs",

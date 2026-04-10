@@ -72,8 +72,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   if (!open) return null;
 
-  const confirmBg =
-    variant === "primary" ? (locked ? "#334155" : "#0d9488") : locked ? "#334155" : "#b91c1c";
+  const confirmBg = variant === "primary"
+    ? locked
+      ? "var(--wl-action-primary-locked)"
+      : "var(--wl-action-primary)"
+    : locked
+      ? "var(--wl-action-primary-locked)"
+      : "var(--wl-action-danger)";
 
   return (
     <div
@@ -85,7 +90,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: "rgba(0,0,0,0.5)",
+        backgroundColor: "var(--wl-overlay-scrim)",
       }}
       onClick={() => {
         if (!locked) onClose();
@@ -100,31 +105,31 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           maxWidth: "92vw",
           padding: 20,
           borderRadius: 10,
-          border: "1px solid #334155",
-          backgroundColor: "#0f172a",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
+          border: "1px solid var(--wl-border-strong)",
+          backgroundColor: "var(--wl-bg-modal)",
+          boxShadow: "var(--wl-shadow-modal)",
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div id="wl-confirm-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, color: "#e2e8f0" }}>
+        <div id="wl-confirm-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, color: "var(--wl-text-heading)" }}>
           {title}
         </div>
         {description ? (
-          <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10, lineHeight: 1.5 }}>{description}</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", marginBottom: 10, lineHeight: 1.5 }}>{description}</div>
         ) : null}
         {items.length > 0 ? (
           <>
-            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>{listCaption}</div>
+            <div style={{ fontSize: 11, color: "var(--wl-text-muted)", marginBottom: 8 }}>{listCaption}</div>
             <div
               style={{
                 maxHeight: 220,
                 overflowY: "auto",
                 padding: "8px 10px",
                 borderRadius: 6,
-                border: "1px solid #1f2937",
-                backgroundColor: "#020617",
+                border: "1px solid var(--wl-border-subtle)",
+                backgroundColor: "var(--wl-bg-input)",
                 fontSize: 12,
-                color: "#cbd5e1",
+                color: "var(--wl-text-secondary)",
                 lineHeight: 1.5,
               }}
             >
@@ -132,7 +137,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 <div
                   key={`${line}-${i}`}
                   style={{
-                    borderBottom: i < items.length - 1 ? "1px solid #111827" : undefined,
+                    borderBottom: i < items.length - 1 ? "1px solid var(--wl-border-table-row)" : undefined,
                     padding: "4px 0",
                     wordBreak: "break-all",
                   }}
@@ -153,9 +158,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             style={{
               padding: "6px 14px",
               borderRadius: 6,
-              border: "1px solid #334155",
+              border: "1px solid var(--wl-border-strong)",
               backgroundColor: "transparent",
-              color: "#94a3b8",
+              color: "var(--wl-text-secondary)",
               cursor: locked ? "not-allowed" : "pointer",
               fontSize: 13,
             }}
@@ -171,7 +176,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               borderRadius: 6,
               border: "none",
               backgroundColor: confirmBg,
-              color: "#fff",
+              color: "var(--wl-text-on-primary)",
               cursor: locked ? "not-allowed" : "pointer",
               fontSize: 13,
             }}

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
 import { Z_INDEX } from "../constants/zLayers";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { useFloatingDropdownPosition } from "../hooks/useFloatingDropdownPosition";
@@ -15,6 +15,10 @@ export type SearchableDropdownPanelPortalProps = {
   panelStyle?: React.CSSProperties;
   /** 列表/关键字变化时重算位置 */
   repositionKey?: unknown;
+  /** 定位完成后再聚焦（避免首帧在视口外 visibility:hidden 导致 focus 失败） */
+  autoFocusInputRef?: RefObject<HTMLInputElement | null>;
+  /** 聚焦后若输入框已有内容则全选，便于直接替换关键字 */
+  autoFocusSelectAllIfNonEmpty?: boolean;
 };
 
 /**
@@ -27,8 +31,11 @@ export function SearchableDropdownPanelPortal({
   minWidthPx = 320,
   panelStyle: panelStyleProp,
   repositionKey,
+  autoFocusInputRef,
+  autoFocusSelectAllIfNonEmpty = false,
 }: SearchableDropdownPanelPortalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const hadLayoutRef = useRef(false);
   useEscapeToClose(onClose, true);
 
   const beforeMeasure = useCallback(
@@ -46,6 +53,34 @@ export function SearchableDropdownPanelPortal({
     beforeMeasure,
     contentKey: repositionKey,
   });
+
+  useLayoutEffect(() => {
+    if (!autoFocusInputRef) return;
+    const hasLayout = layout != null;
+    const prevHadLayout = hadLayoutRef.current;
+    hadLayoutRef.current = hasLayout;
+    const justPositioned = hasLayout && !prevHadLayout;
+    if (!justPositioned) return;
+    let cancelled = false;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      if (cancelled) return;
+      raf2 = requestAnimationFrame(() => {
+        if (cancelled) return;
+        const el = autoFocusInputRef.current;
+        if (!el) return;
+        el.focus({ preventScroll: true });
+        if (autoFocusSelectAllIfNonEmpty && el.value.length > 0) {
+          el.select();
+        }
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [layout, autoFocusInputRef, autoFocusSelectAllIfNonEmpty]);
 
   const positionedVisible =
     layout != null

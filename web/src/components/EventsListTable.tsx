@@ -54,14 +54,14 @@ const EVENT_COLUMN_SORT: Partial<Record<(typeof EVENT_COLUMN_KEYS)[number], Even
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 12,
-  color: "#9ca3af",
+  color: "var(--wl-text-table-header)",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 13,
 };
 
@@ -72,9 +72,9 @@ function typePillStyle(warning: boolean): React.CSSProperties {
       alignItems: "center",
       padding: "2px 10px",
       borderRadius: 999,
-      backgroundColor: "rgba(185,28,28,0.22)",
-      border: "1px solid rgba(248,113,113,0.85)",
-      color: "#fecaca",
+      backgroundColor: "var(--wl-pill-danger-bg)",
+      border: "1px solid var(--wl-pill-danger-border)",
+      color: "var(--wl-pill-danger-text)",
       fontSize: 11,
       fontWeight: 700,
       boxSizing: "border-box" as const,
@@ -85,9 +85,9 @@ function typePillStyle(warning: boolean): React.CSSProperties {
     alignItems: "center",
     padding: "2px 10px",
     borderRadius: 999,
-    backgroundColor: "rgba(30,41,59,0.85)",
-    border: "1px solid #475569",
-    color: "#94a3b8",
+    backgroundColor: "var(--wl-bg-control)",
+    border: "1px solid var(--wl-border-strong)",
+    color: "var(--wl-text-secondary)",
     fontSize: 11,
     fontWeight: 600,
     boxSizing: "border-box" as const,
@@ -165,7 +165,7 @@ export function EventsListTable({
         width: totalWidth,
         minWidth: "100%",
         borderCollapse: "collapse",
-        backgroundColor: "#020617",
+        backgroundColor: "var(--wl-bg-table)",
         tableLayout: "fixed",
       }}
     >
@@ -202,14 +202,14 @@ export function EventsListTable({
       <tbody className="wl-table-body">
           {eventsLoading && sortedRows.length === 0 && (
             <tr className="wl-table-row">
-              <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+              <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                 加载中…
               </td>
             </tr>
           )}
           {!eventsLoading && sortedRows.length === 0 && (
             <tr className="wl-table-row">
-              <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+              <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                 当前范围内暂无事件
               </td>
             </tr>
@@ -283,7 +283,7 @@ export function EventsListTable({
                 </td>
                 <td style={{ ...tdStyle, verticalAlign: "top" }}>{row.metadata?.namespace || "—"}</td>
                 <td style={{ ...tdStyle, verticalAlign: "top" }}>{buildEventSortStats(row).count}</td>
-                <td style={{ ...tdStyle, verticalAlign: "top", fontSize: 12, color: "#94a3b8" }}>
+                <td style={{ ...tdStyle, verticalAlign: "top", fontSize: 12, color: "var(--wl-text-secondary)" }}>
                   {formatLastSeenCell(row)}
                 </td>
                 <td style={{ ...tdStyle, verticalAlign: "top" }}>{age}</td>

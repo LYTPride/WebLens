@@ -8,7 +8,7 @@ import { ResourceNameWithCopy } from "../ResourceNameWithCopy";
 const sectionTitle: React.CSSProperties = {
   margin: "0 0 8px",
   fontSize: 13,
-  color: "#e5e7eb",
+  color: "var(--wl-text-primary)",
 };
 
 const tagStyle: React.CSSProperties = {
@@ -17,21 +17,21 @@ const tagStyle: React.CSSProperties = {
   padding: "2px 8px",
   borderRadius: 4,
   backgroundColor: "rgba(30,41,59,0.9)",
-  border: "1px solid #334155",
+  border: "1px solid var(--wl-border-strong)",
   fontSize: 11,
-  color: "#cbd5e1",
+  color: "var(--wl-text-secondary)",
   maxWidth: "100%",
   wordBreak: "break-all",
 };
 
 function KeyValueTags({ items }: { items: Record<string, string> | undefined }) {
-  if (!items || Object.keys(items).length === 0) return <span style={{ fontSize: 12, color: "#64748b" }}>—</span>;
+  if (!items || Object.keys(items).length === 0) return <span style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>—</span>;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 0 }}>
       {Object.entries(items).map(([k, v]) => (
         <span key={k} style={tagStyle} title={`${k}=${String(v)}`}>
-          <span style={{ color: "#94a3b8" }}>{k}</span>
-          <span style={{ color: "#64748b", margin: "0 4px" }}>=</span>
+          <span style={{ color: "var(--wl-text-secondary)" }}>{k}</span>
+          <span style={{ color: "var(--wl-text-muted)", margin: "0 4px" }}>=</span>
           {v == null ? "" : String(v)}
         </span>
       ))}
@@ -42,7 +42,7 @@ function KeyValueTags({ items }: { items: Record<string, string> | undefined }) 
 function CollapsibleAnnotations({ annotations }: { annotations: Record<string, string> | undefined }) {
   const [open, setOpen] = useState(false);
   if (!annotations || Object.keys(annotations).length === 0) {
-    return <span style={{ fontSize: 12, color: "#64748b" }}>—</span>;
+    return <span style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>—</span>;
   }
   const keys = Object.keys(annotations);
   const preview = keys.slice(0, 2);
@@ -55,9 +55,9 @@ function CollapsibleAnnotations({ annotations }: { annotations: Record<string, s
           padding: "2px 8px",
           marginBottom: 6,
           borderRadius: 4,
-          border: "1px solid #334155",
-          backgroundColor: "#0f172a",
-          color: "#94a3b8",
+          border: "1px solid var(--wl-border-strong)",
+          backgroundColor: "var(--wl-describe-section-bg)",
+          color: "var(--wl-text-secondary)",
           cursor: "pointer",
           fontSize: 11,
         }}
@@ -65,7 +65,7 @@ function CollapsibleAnnotations({ annotations }: { annotations: Record<string, s
         {open ? "收起 Annotations" : `展开 Annotations（${keys.length} 项）`}
       </button>
       {!open && (
-        <div style={{ fontSize: 11, color: "#64748b" }}>
+        <div style={{ fontSize: 11, color: "var(--wl-text-muted)" }}>
           {preview.map((k) => (
             <div key={k} style={{ marginBottom: 2 }}>
               {k}
@@ -82,35 +82,35 @@ function CollapsibleAnnotations({ annotations }: { annotations: Record<string, s
 const miniTh: React.CSSProperties = {
   textAlign: "left",
   padding: "6px 8px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 11,
-  color: "#94a3b8",
+  color: "var(--wl-text-secondary)",
 };
 const miniTd: React.CSSProperties = {
   padding: "6px 8px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 12,
-  color: "#e2e8f0",
+  color: "var(--wl-text-heading)",
   verticalAlign: "top",
   wordBreak: "break-word",
 };
 
 function trafficLabelPill(hl: IngressTrafficLabel): React.CSSProperties {
-  let bg = "rgba(22,163,74,0.15)";
-  let border = "rgba(22,163,74,0.6)";
-  let color = "#bbf7d0";
+  let bg = "var(--wl-pill-success-bg)";
+  let border = "var(--wl-pill-success-border)";
+  let color = "var(--wl-pill-success-text)";
   if (hl === "关注") {
-    bg = "rgba(202,138,4,0.18)";
-    border = "rgba(234,179,8,0.7)";
-    color = "#facc15";
+    bg = "var(--wl-pill-attention-bg)";
+    border = "var(--wl-pill-attention-border)";
+    color = "var(--wl-pill-attention-text)";
   } else if (hl === "警告") {
-    bg = "rgba(249,115,22,0.2)";
-    border = "rgba(249,115,22,0.75)";
-    color = "#fed7aa";
+    bg = "var(--wl-pill-orange-bg)";
+    border = "var(--wl-pill-orange-border)";
+    color = "var(--wl-pill-orange-text)";
   } else if (hl === "严重") {
-    bg = "rgba(185,28,28,0.25)";
-    border = "rgba(248,113,113,0.85)";
-    color = "#fecaca";
+    bg = "var(--wl-pill-danger-bg)";
+    border = "var(--wl-pill-danger-border)";
+    color = "var(--wl-pill-danger-text)";
   }
   return {
     display: "inline-flex",
@@ -150,7 +150,7 @@ export function IngressDescribeContent({
   onCopyName,
 }: IngressDescribeContentProps) {
   if (!view || typeof view !== "object") {
-    return <div style={{ fontSize: 12, color: "#94a3b8" }}>暂无 Describe 数据</div>;
+    return <div style={{ fontSize: 12, color: "var(--wl-text-secondary)" }}>暂无 Describe 数据</div>;
   }
   const rules = Array.isArray(view.rules) ? view.rules : [];
   const tlsList = Array.isArray(view.tls) ? view.tls : [];
@@ -169,25 +169,25 @@ export function IngressDescribeContent({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <section>
         <h4 style={sectionTitle}>基本信息</h4>
-        <div style={{ fontSize: 12, color: "#cbd5f5", lineHeight: 1.6 }}>
+        <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.6 }}>
           <div>Name：{view.name ?? "—"}</div>
           <div>Namespace：{view.namespace ?? "—"}</div>
           <div>Ingress Class：{view.ingressClassName || "—"}</div>
           <div>存活时间：{ageLabel}</div>
         </div>
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Labels</div>
+          <div style={{ fontSize: 11, color: "var(--wl-text-secondary)", marginBottom: 4 }}>Labels</div>
           <KeyValueTags items={view.labels} />
         </div>
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Annotations</div>
+          <div style={{ fontSize: 11, color: "var(--wl-text-secondary)", marginBottom: 4 }}>Annotations</div>
           <CollapsibleAnnotations annotations={view.annotations} />
         </div>
       </section>
 
       <section>
         <h4 style={sectionTitle}>规则摘要</h4>
-        <div style={{ fontSize: 12, color: "#cbd5f5", lineHeight: 1.6 }}>
+        <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.6 }}>
           <div>Hosts 数：{hostCount}</div>
           <div>Paths 数：{pathCount}</div>
           <div>Backends（去重 Service）：{troubleshoot?.backendServiceCount ?? "—"}</div>
@@ -198,14 +198,18 @@ export function IngressDescribeContent({
               <span style={trafficLabelPill(troubleshoot.label)} title={troubleshoot.summary}>
                 {troubleshoot.label}
               </span>
-              <span style={{ color: troubleshoot.label === "健康" ? "#64748b" : "#e2e8f0" }}>
+              <span
+                style={{
+                  color: troubleshoot.label === "健康" ? "var(--wl-text-muted)" : "var(--wl-text-heading)",
+                }}
+              >
                 {troubleshoot.label === "健康" ? "正常" : troubleshoot.summary}
               </span>
             </div>
           )}
         </div>
         {troubleshoot && (
-          <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 11, color: "var(--wl-text-muted)", marginTop: 8, lineHeight: 1.5 }}>
             检测范围：当前命名空间内 Service 列表与同作用域 Pod 缓存；未查询 Endpoints API；TLS Secret 存在性未校验。
           </div>
         )}
@@ -215,14 +219,14 @@ export function IngressDescribeContent({
         <h4 style={sectionTitle}>Rules</h4>
         {useDiagTable ? (
           <div style={{ overflowX: "auto" }}>
-            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: "var(--wl-text-secondary)", marginBottom: 6 }}>
               异常优先；与列表展开使用同一套诊断行。
             </div>
             <table
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                backgroundColor: "#020617",
+                backgroundColor: "var(--wl-describe-table-bg)",
                 minWidth: 560,
                 tableLayout: "fixed",
               }}
@@ -281,7 +285,7 @@ export function IngressDescribeContent({
                       <td style={miniTd}>{r.portDisplay}</td>
                       <td style={{ ...miniTd, fontSize: 11 }}>{r.tlsHint}</td>
                       <td style={{ ...miniTd, fontWeight: 600 }}>{r.status}</td>
-                      <td style={{ ...miniTd, fontSize: 11, color: "#94a3b8" }}>{r.detail}</td>
+                      <td style={{ ...miniTd, fontSize: 11, color: "var(--wl-text-secondary)" }}>{r.detail}</td>
                       <td style={miniTd}>
                         {canLinkSvc && onJumpPods ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
@@ -309,14 +313,14 @@ export function IngressDescribeContent({
             </table>
           </div>
         ) : rules.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#64748b" }}>暂无 HTTP 规则</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>暂无 HTTP 规则</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                backgroundColor: "#020617",
+                backgroundColor: "var(--wl-describe-table-bg)",
                 minWidth: 480,
               }}
             >
@@ -359,10 +363,10 @@ export function IngressDescribeContent({
       <section>
         <h4 style={sectionTitle}>TLS</h4>
         {!tlsList.length ? (
-          <div style={{ fontSize: 12, color: "#64748b" }}>未配置 TLS</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>未配置 TLS</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "#020617" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "var(--wl-describe-table-bg)" }}>
               <thead>
                 <tr>
                   <th style={miniTh}>Secret</th>
@@ -377,7 +381,7 @@ export function IngressDescribeContent({
                     <td style={miniTd}>
                       {Array.isArray(t?.hosts) && t.hosts.length ? t.hosts.join(", ") : "（未限定 / 依控制器）"}
                     </td>
-                    <td style={{ ...miniTd, fontSize: 11, color: "#94a3b8" }}>引用已配置（Secret 存在性未校验）</td>
+                    <td style={{ ...miniTd, fontSize: 11, color: "var(--wl-text-secondary)" }}>引用已配置（Secret 存在性未校验）</td>
                   </tr>
                 ))}
               </tbody>
@@ -385,7 +389,7 @@ export function IngressDescribeContent({
           </div>
         )}
         {tlsList.length > 0 && (
-          <div style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: "var(--wl-text-muted)", marginTop: 6 }}>
             当前版本不请求 Secret 资源；证书是否有效请在集群侧核对。
           </div>
         )}
@@ -394,11 +398,11 @@ export function IngressDescribeContent({
       <section>
         <h4 style={sectionTitle}>Default Backend</h4>
         {!view.defaultBackend ? (
-          <div style={{ fontSize: 12, color: "#64748b" }}>无</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>无</div>
         ) : (
-          <div style={{ fontSize: 12, color: "#cbd5f5", lineHeight: 1.6 }}>
+          <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.6 }}>
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 8 }}>
-              <span style={{ flexShrink: 0, color: "#94a3b8" }}>Service：</span>
+              <span style={{ flexShrink: 0, color: "var(--wl-text-secondary)" }}>Service：</span>
               {view.defaultBackend.serviceName ? (
                 <ResourceNameWithCopy
                   name={view.defaultBackend.serviceName}
@@ -418,7 +422,7 @@ export function IngressDescribeContent({
       {troubleshoot && (
         <section>
           <h4 style={sectionTitle}>后端状态摘要</h4>
-          <div style={{ fontSize: 12, color: "#cbd5f5", lineHeight: 1.7 }}>
+          <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.7 }}>
             <div>规则行数：{troubleshoot.ruleRows.length}</div>
             <div>异常规则数：{troubleshoot.badRuleCount}</div>
             <div>不存在的 Backend Service 数：{troubleshoot.missingServices.length}</div>

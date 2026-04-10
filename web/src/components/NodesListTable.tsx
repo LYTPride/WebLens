@@ -17,7 +17,7 @@ import {
 } from "../utils/nodeTable";
 import type { Pod } from "../api";
 import { formatAgeFromMetadata } from "../utils/k8sCreationTimestamp";
-import copyIcon from "../assets/icon-copy.png";
+import { CopyIcon } from "./icons/CopyIcon";
 import { DropdownMenuPortal } from "./DropdownMenuPortal";
 
 export const NODE_COLUMN_KEYS = [
@@ -70,14 +70,14 @@ const NODE_COLUMN_SORT: Partial<Record<(typeof NODE_COLUMN_KEYS)[number], NodeSo
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 12,
-  color: "#9ca3af",
+  color: "var(--wl-text-table-header)",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 13,
 };
 
@@ -92,21 +92,21 @@ const menuItemStyleForDropdown: React.CSSProperties = {
 };
 
 function nodeStatusPillStyle(pill: ReturnType<typeof deriveNodeStatusSummary>["pill"]) {
-  let bg = "rgba(22,163,74,0.15)";
-  let border = "rgba(22,163,74,0.6)";
-  let color = "#bbf7d0";
+  let bg = "var(--wl-pill-success-bg)";
+  let border = "var(--wl-pill-success-border)";
+  let color = "var(--wl-pill-success-text)";
   if (pill === "warn") {
-    bg = "rgba(202,138,4,0.18)";
-    border = "rgba(234,179,8,0.7)";
-    color = "#facc15";
+    bg = "var(--wl-pill-attention-bg)";
+    border = "var(--wl-pill-attention-border)";
+    color = "var(--wl-pill-attention-text)";
   } else if (pill === "danger") {
-    bg = "rgba(185,28,28,0.25)";
-    border = "rgba(248,113,113,0.85)";
-    color = "#fecaca";
+    bg = "var(--wl-pill-danger-bg)";
+    border = "var(--wl-pill-danger-border)";
+    color = "var(--wl-pill-danger-text)";
   } else if (pill === "neutral") {
-    bg = "rgba(100,116,139,0.2)";
-    border = "rgba(148,163,184,0.55)";
-    color = "#cbd5e1";
+    bg = "var(--wl-pill-neutral-bg)";
+    border = "var(--wl-pill-neutral-border)";
+    color = "var(--wl-pill-neutral-text)";
   }
   return {
     display: "inline-flex",
@@ -169,7 +169,7 @@ export function NodesListTable({
         width: totalWidth,
         minWidth: "100%",
         borderCollapse: "collapse",
-        backgroundColor: "#020617",
+        backgroundColor: "var(--wl-bg-table)",
         tableLayout: "fixed",
       }}
     >
@@ -206,14 +206,14 @@ export function NodesListTable({
       <tbody className="wl-table-body">
         {nodesLoading && sortedRows.length === 0 && (
           <tr className="wl-table-row">
-            <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+            <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
               加载中…
             </td>
           </tr>
         )}
         {!nodesLoading && sortedRows.length === 0 && (
           <tr className="wl-table-row">
-            <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+            <td colSpan={colCount} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
               暂无 Node
             </td>
           </tr>
@@ -241,6 +241,7 @@ export function NodesListTable({
                   <span className="wl-table-hover-copy__main">
                     <button
                       type="button"
+                      className="wl-table-hover-copy__truncate"
                       onClick={() => openDescribe(row)}
                       style={{
                         padding: 0,
@@ -249,12 +250,6 @@ export function NodesListTable({
                         background: "none",
                         color: "inherit",
                         cursor: "pointer",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        minWidth: 0,
-                        flex: "1 1 auto",
-                        textAlign: "left",
                       }}
                     >
                       {nname}
@@ -267,7 +262,7 @@ export function NodesListTable({
                     title="复制 Node 名称"
                     aria-label={`复制 Node 名称：${nname}`}
                   >
-                    <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                    <CopyIcon />
                   </button>
                 </span>
               </td>

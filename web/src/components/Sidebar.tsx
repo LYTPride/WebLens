@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useMemo } from "react";
 import type { ResourceKind } from "../api";
+import { V1_HIDDEN_VIEWS } from "../utils/v1HiddenViews";
 
 export const SIDEBAR_WIDTH = 220;
 
@@ -38,8 +39,8 @@ const sidebarStyle: React.CSSProperties = {
   flexShrink: 0,
   display: "flex",
   flexDirection: "column",
-  backgroundColor: "#0f172a",
-  borderRight: "1px solid #1e293b",
+  backgroundColor: "var(--wl-bg-sidebar)",
+  borderRight: "1px solid var(--wl-border-sidebar)",
   overflow: "hidden",
 };
 
@@ -52,7 +53,7 @@ const sidebarInnerStyle: React.CSSProperties = {
 const groupTitleStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
-  color: "#64748b",
+  color: "var(--wl-text-muted)",
   padding: "8px 16px",
   textTransform: "uppercase" as const,
 };
@@ -62,8 +63,8 @@ const itemStyle = (active: boolean): React.CSSProperties => ({
   width: "100%",
   padding: "8px 16px",
   fontSize: 13,
-  color: active ? "#38bdf8" : "#e2e8f0",
-  backgroundColor: active ? "#1e293b" : "transparent",
+  color: active ? "var(--wl-accent-sky)" : "var(--wl-text-heading)",
+  backgroundColor: active ? "var(--wl-bg-control)" : "transparent",
   border: "none",
   cursor: "pointer",
   textAlign: "left",
@@ -72,13 +73,27 @@ const itemStyle = (active: boolean): React.CSSProperties => ({
 interface SidebarProps {
   currentView: ResourceKind;
   onSelect: (view: ResourceKind) => void;
+  /** 贴在主壳左侧轨道内时去掉右侧分割线，由轨道统一承担 */
+  edge?: "standalone" | "rail";
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentView, onSelect }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentView, onSelect, edge = "standalone" }) => {
+  const navStyle: React.CSSProperties =
+    edge === "rail" ? { ...sidebarStyle, borderRight: "none" } : sidebarStyle;
+  const innerPad: React.CSSProperties =
+    edge === "rail" ? { ...sidebarInnerStyle, paddingRight: 14 } : sidebarInnerStyle;
+  const visibleMenu = useMemo(
+    () =>
+      MENU.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => !V1_HIDDEN_VIEWS.has(item.id)),
+      })).filter((g) => g.items.length > 0),
+    [],
+  );
   return (
-    <nav style={sidebarStyle}>
-      <div style={sidebarInnerStyle}>
-        {MENU.map((group) => (
+    <nav style={navStyle}>
+      <div style={innerPad}>
+        {visibleMenu.map((group) => (
           <div key={group.title}>
             <div style={groupTitleStyle}>{group.title}</div>
             {group.items.map((item) => (

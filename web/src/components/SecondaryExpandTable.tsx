@@ -10,16 +10,16 @@ export type SecondaryExpandColumnDef<K extends string = string> = {
 export const secondaryExpandThBase: React.CSSProperties = {
   textAlign: "left",
   padding: "6px 8px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 11,
-  color: "#94a3b8",
+  color: "var(--wl-secondary-expand-th)",
 };
 
 export const secondaryExpandTdBase: React.CSSProperties = {
   padding: "6px 8px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 12,
-  color: "#e5e7eb",
+  color: "var(--wl-secondary-expand-td-text)",
 };
 
 /**
@@ -93,7 +93,7 @@ export function SecondaryExpandTable<K extends string>({
           width: tableWidth,
           minWidth: "100%",
           borderCollapse: "collapse",
-          backgroundColor: "#020617",
+          backgroundColor: "var(--wl-bg-table)",
           tableLayout: "fixed",
         }}
       >
