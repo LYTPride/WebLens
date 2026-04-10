@@ -4,7 +4,7 @@ import type { K8sEvent } from "../../api";
 const sectionTitle: React.CSSProperties = {
   margin: "0 0 8px",
   fontSize: 13,
-  color: "#e5e7eb",
+  color: "var(--wl-text-primary)",
 };
 
 /**
@@ -14,7 +14,7 @@ export const DescribeEventsSection: React.FC<{ events: K8sEvent[] }> = ({ events
   return (
     <section>
       <h4 style={sectionTitle}>Events</h4>
-      {events.length === 0 && <div style={{ fontSize: 12, color: "#64748b" }}>暂无 Events</div>}
+      {events.length === 0 && <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>暂无 Events</div>}
       {events.length > 0 && (
         <div style={{ fontSize: 12, lineHeight: 1.6 }}>
           {events.map((ev) => {
@@ -35,17 +35,17 @@ export const DescribeEventsSection: React.FC<{ events: K8sEvent[] }> = ({ events
                   <span
                     style={{
                       fontWeight: isWarning ? 700 : 500,
-                      color: isWarning ? "#f97373" : "#e5e7eb",
+                      color: isWarning ? "#f97373" : "var(--wl-text-primary)",
                     }}
                   >
                     {ev.type ?? "-"} {ev.reason ?? ""}
                   </span>{" "}
-                  <span style={{ color: "#9ca3af" }}>
+                  <span style={{ color: "var(--wl-text-label)" }}>
                     {ev.lastTimestamp ?? ev.firstTimestamp ?? ""}
                     {typeof ev.count === "number" && ev.count > 1 ? ` ×${ev.count}` : ""}
                   </span>
                 </div>
-                <div style={{ whiteSpace: "pre-wrap", color: isWarning ? "#fecaca" : "#cbd5f5" }}>
+                <div style={{ whiteSpace: "pre-wrap", color: isWarning ? "#fecaca" : "var(--wl-text-secondary)" }}>
                   {ev.message}
                 </div>
               </div>

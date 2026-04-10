@@ -1,5 +1,5 @@
 import React from "react";
-import copyIcon from "../assets/icon-copy.png";
+import { CopyIcon } from "./icons/CopyIcon";
 
 export type ResourceNameWithCopyProps = {
   name: string;
@@ -35,7 +35,7 @@ export function ResourceNameWithCopy({
           title={copyButtonTitle}
           aria-label={`${copyButtonTitle}：${name}`}
         >
-          <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+          <CopyIcon size={15} />
         </button>
       </span>
     </div>

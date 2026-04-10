@@ -79,7 +79,7 @@ export const InputDialog: React.FC<InputDialogProps> = ({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: "rgba(0,0,0,0.5)",
+        backgroundColor: "var(--wl-overlay-scrim)",
       }}
       onClick={() => {
         if (!submitting) onClose();
@@ -94,16 +94,16 @@ export const InputDialog: React.FC<InputDialogProps> = ({
           maxWidth: "92vw",
           padding: 20,
           borderRadius: 10,
-          border: "1px solid #334155",
-          backgroundColor: "#0f172a",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
+          border: "1px solid var(--wl-border-strong)",
+          backgroundColor: "var(--wl-bg-modal)",
+          boxShadow: "var(--wl-shadow-modal)",
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div id="wl-input-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "#e2e8f0" }}>
+        <div id="wl-input-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--wl-text-heading)" }}>
           {title}
         </div>
-        {label ? <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>{label}</div> : null}
+        {label ? <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", marginBottom: 6 }}>{label}</div> : null}
         <input
           ref={inputRef}
           type="text"
@@ -116,9 +116,9 @@ export const InputDialog: React.FC<InputDialogProps> = ({
             boxSizing: "border-box",
             padding: "8px 10px",
             borderRadius: 6,
-            border: "1px solid #334155",
-            backgroundColor: "#020617",
-            color: "#e2e8f0",
+            border: "1px solid var(--wl-border-strong)",
+            backgroundColor: "var(--wl-bg-input)",
+            color: "var(--wl-text-heading)",
             fontSize: 13,
             marginBottom: 16,
           }}
@@ -131,9 +131,9 @@ export const InputDialog: React.FC<InputDialogProps> = ({
             style={{
               padding: "6px 14px",
               borderRadius: 6,
-              border: "1px solid #334155",
+              border: "1px solid var(--wl-border-strong)",
               backgroundColor: "transparent",
-              color: "#94a3b8",
+              color: "var(--wl-text-secondary)",
               cursor: submitting ? "not-allowed" : "pointer",
               fontSize: 13,
             }}
@@ -148,8 +148,8 @@ export const InputDialog: React.FC<InputDialogProps> = ({
               padding: "6px 14px",
               borderRadius: 6,
               border: "none",
-              backgroundColor: submitting ? "#334155" : "#0d9488",
-              color: "#fff",
+              backgroundColor: submitting ? "var(--wl-action-primary-locked)" : "var(--wl-action-primary)",
+              color: "var(--wl-text-on-primary)",
               cursor: submitting ? "not-allowed" : "pointer",
               fontSize: 13,
             }}

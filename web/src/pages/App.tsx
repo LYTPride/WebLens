@@ -45,6 +45,7 @@ import {
   type NodeDescribe,
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
+import { ThemeToggleButton } from "../components/ThemeToggleButton";
 import { ResourceTable, type Column } from "../components/ResourceTable";
 import { BottomPanel, type PanelTab } from "../components/BottomPanel";
 import { ResizableTh } from "../components/ResizableTh";
@@ -151,7 +152,6 @@ import {
 } from "../components/SearchableDropdownPrimitives";
 import { DropdownMenuPortal } from "../components/DropdownMenuPortal";
 import { SearchableDropdownPanelPortal } from "../components/SearchableDropdownPanelPortal";
-import { useFocusInputWhenOpen } from "../hooks/useFocusInputWhenOpen";
 import { DescribeEventsSection } from "../components/describe/DescribeEventsSection";
 import { DeploymentDescribeContent } from "../components/describe/DeploymentDescribeContent";
 import { StatefulSetDescribeContent } from "../components/describe/StatefulSetDescribeContent";
@@ -211,9 +211,13 @@ import {
   newServerClockSnapshot,
   type ServerClockSnapshot,
 } from "../utils/serverClock";
-import { normalizeSessionViewForV1, resolveInvolvedKindToListView } from "../utils/v1HiddenViews";
+import {
+  normalizeSessionViewForV1,
+  resolveInvolvedKindToListView,
+  V1_HIDDEN_VIEWS,
+} from "../utils/v1HiddenViews";
 import { trackUsage } from "../utils/usageAnalytics";
-import copyIcon from "../assets/icon-copy.png";
+import { CopyIcon } from "../components/icons/CopyIcon";
 
 const ALL_NAMESPACES = "";
 
@@ -512,9 +516,9 @@ function mergeDeploymentIntoList(items: K8sItem[], updated: unknown): K8sItem[] 
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderBottom: "1px solid #1f2937",
+  borderBottom: "1px solid var(--wl-border-table-header)",
   fontSize: 12,
-  color: "#9ca3af",
+  color: "var(--wl-text-table-header)",
 };
 
 /** 与 ResizableTh 默认 sticky 表头一致（定位、背景、底边），供首列勾选 th 使用，避免滚动时与表头脱节 */
@@ -522,14 +526,14 @@ const stickyHeaderThCheckbox: React.CSSProperties = {
   position: "sticky",
   top: 0,
   zIndex: 2,
-  backgroundColor: "#0f172a",
-  boxShadow: "0 1px 0 0 #1f2937",
+  backgroundColor: "var(--wl-bg-table-header)",
+  boxShadow: "0 1px 0 0 var(--wl-border-table-header)",
   boxSizing: "border-box",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
-  borderBottom: "1px solid #111827",
+  borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 13,
 };
 
@@ -599,7 +603,7 @@ function deploymentReplicasColumn(d: DeploymentRow): string {
 const DeploymentConditionsCell: React.FC<{ d: DeploymentRow }> = ({ d }) => {
   const conditions = d.status?.conditions ?? [];
   if (!conditions.length) {
-    return <span style={{ color: "#64748b" }}>-</span>;
+    return <span style={{ color: "var(--wl-text-muted)" }}>-</span>;
   }
   const priority = (t: string) => {
     if (t === "Available") return 0;
@@ -613,17 +617,17 @@ const DeploymentConditionsCell: React.FC<{ d: DeploymentRow }> = ({ d }) => {
       {sorted.map((c) => {
         const ok = c.status === "True";
         const failType = c.type === "ReplicaFailure";
-        let bg = "rgba(22,163,74,0.15)";
-        let border = "rgba(22,163,74,0.55)";
-        let color = "#6ee7b7";
+        let bg = "var(--wl-pill-success-bg)";
+        let border = "var(--wl-pill-success-border)";
+        let color = "var(--wl-pill-success-text)";
         if (failType || !ok) {
-          bg = "rgba(185,28,28,0.18)";
-          border = "rgba(248,113,113,0.65)";
-          color = "#fecaca";
+          bg = "var(--wl-pill-danger-bg)";
+          border = "var(--wl-pill-danger-border)";
+          color = "var(--wl-pill-danger-text)";
         } else if (c.type === "Progressing") {
-          bg = "rgba(6,182,212,0.12)";
-          border = "rgba(34,211,238,0.45)";
-          color = "#a5f3fc";
+          bg = "var(--wl-pill-info-bg)";
+          border = "var(--wl-pill-info-border)";
+          color = "var(--wl-pill-info-text)";
         }
         return (
           <span
@@ -715,6 +719,7 @@ export const App: React.FC = () => {
   const [configError, setConfigError] = useState<string | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
   const [platformMenuOpen, setPlatformMenuOpen] = useState(false);
+  const [platformGearSpinning, setPlatformGearSpinning] = useState(false);
   /** 集群作用域预设（cluster + namespace） */
   const [clusterCombos, setClusterCombos] = useState<ClusterCombo[]>([]);
   const [clusterCombosLoading, setClusterCombosLoading] = useState(false);
@@ -1041,9 +1046,6 @@ export const App: React.FC = () => {
       return next.size === prev.size ? prev : next;
     });
   }, [deploymentItems]);
-
-  useFocusInputWhenOpen(clusterDropdownOpen, clusterComboSearchRef, true);
-  useFocusInputWhenOpen(configClusterPickOpen, configClusterSearchRef, true);
 
   useEffect(() => {
     if (!configModalOpen) {
@@ -3696,10 +3698,17 @@ export const App: React.FC = () => {
 
   /** 任意视图下用于「跳转 Nodes」是否应禁用（缓存拒绝或 Nodes 页已判定拒绝） */
   const nodesNavBlockedGlobal = useMemo(() => {
+    if (V1_HIDDEN_VIEWS.has("nodes")) return true;
     if (!effectiveClusterId) return false;
     if (getResourceAccessDecision(effectiveClusterId, NODES_RESOURCE_KEY) === "denied") return true;
     return nodesAccessDenied;
   }, [effectiveClusterId, nodesAccessDenied]);
+
+  useEffect(() => {
+    if (V1_HIDDEN_VIEWS.has(currentView)) {
+      setCurrentView("events");
+    }
+  }, [currentView]);
 
   const statefulsetStsStatsByKey = useMemo(() => {
     const m = new Map<string, { owned: Pod[]; stats: ReturnType<typeof buildStatefulSetSortStats> }>();
@@ -3902,16 +3911,7 @@ export const App: React.FC = () => {
         return (
           <span className="wl-table-hover-copy">
             <span className="wl-table-hover-copy__main">
-              <span
-                style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  minWidth: 0,
-                  flex: "1 1 auto",
-                }}
-                title={name}
-              >
+              <span className="wl-table-hover-copy__truncate" title={name}>
                 {name}
               </span>
             </span>
@@ -3922,7 +3922,7 @@ export const App: React.FC = () => {
               title="复制名称"
               aria-label={`复制名称：${name}`}
             >
-              <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+              <CopyIcon />
             </button>
           </span>
         );
@@ -3938,8 +3938,8 @@ export const App: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        backgroundColor: "#111827",
-        color: "#e5e7eb",
+        backgroundColor: "var(--wl-bg-workspace)",
+        color: "var(--wl-text-primary)",
         fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
         position: "relative",
         pointerEvents: "auto",
@@ -3955,11 +3955,11 @@ export const App: React.FC = () => {
             transform: "translateX(-50%)",
             padding: "6px 14px",
             borderRadius: 999,
-            backgroundColor: "rgba(15,23,42,0.95)",
-            color: "#e5e7eb",
+            backgroundColor: "var(--wl-bg-toast)",
+            color: "var(--wl-text-primary)",
             fontSize: 12,
             zIndex: 200,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.45)",
+            boxShadow: "var(--wl-shadow-toast)",
             animation: "wl-toast-fadeout 3s ease-out forwards",
           }}
           onAnimationEnd={() => setToastMessage(null)}
@@ -3992,16 +3992,16 @@ export const App: React.FC = () => {
               maxWidth: "90vw",
               padding: 20,
               borderRadius: 10,
-              border: "1px solid #334155",
-              backgroundColor: "#0f172a",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
+              border: "1px solid var(--wl-border-strong)",
+              backgroundColor: "var(--wl-bg-elevated)",
+              boxShadow: "var(--wl-shadow-modal)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div id="deploy-scale-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "#e2e8f0" }}>
+            <div id="deploy-scale-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--wl-text-heading)" }}>
               调整副本数（{deployScaleModal.resource === "statefulset" ? "StatefulSet" : "Deployment"}）
             </div>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", marginBottom: 10 }}>
               {deployScaleModal.namespace}/{deployScaleModal.name} · 当前 {deployScaleModal.current}
             </div>
             <input
@@ -4015,9 +4015,9 @@ export const App: React.FC = () => {
                 width: "100%",
                 padding: "8px 10px",
                 borderRadius: 6,
-                border: "1px solid #334155",
-                backgroundColor: "#020617",
-                color: "#e5e7eb",
+                border: "1px solid var(--wl-border-strong)",
+                backgroundColor: "var(--wl-bg-table)",
+                color: "var(--wl-text-primary)",
                 fontSize: 14,
                 marginBottom: 16,
               }}
@@ -4032,9 +4032,9 @@ export const App: React.FC = () => {
                 style={{
                   padding: "6px 14px",
                   borderRadius: 6,
-                  border: "1px solid #334155",
+                  border: "1px solid var(--wl-border-strong)",
                   backgroundColor: "transparent",
-                  color: "#94a3b8",
+                  color: "var(--wl-text-secondary)",
                   cursor: deployScaleSaving ? "not-allowed" : "pointer",
                   fontSize: 13,
                 }}
@@ -4085,8 +4085,8 @@ export const App: React.FC = () => {
                   padding: "6px 14px",
                   borderRadius: 6,
                   border: "none",
-                  backgroundColor: deployScaleSaving ? "#334155" : "#0d9488",
-                  color: "#fff",
+                  backgroundColor: deployScaleSaving ? "var(--wl-action-primary-locked)" : "var(--wl-action-primary)",
+                  color: "var(--wl-text-on-primary)",
                   cursor: deployScaleSaving ? "not-allowed" : "pointer",
                   fontSize: 13,
                 }}
@@ -4140,7 +4140,8 @@ export const App: React.FC = () => {
       <header
         style={{
           flexShrink: 0,
-          borderBottom: "1px solid #1f2937",
+          borderBottom: "1px solid var(--wl-border-subtle)",
+          backgroundColor: "var(--wl-bg-elevated)",
           display: "flex",
           alignItems: "stretch",
           justifyContent: "space-between",
@@ -4154,14 +4155,16 @@ export const App: React.FC = () => {
             alignItems: "center",
             gap: 6,
             padding: "12px 20px",
+            flex: 1,
+            minWidth: 0,
           }}
         >
           <span
             style={{
               padding: "2px 8px",
               borderRadius: 999,
-              backgroundColor: "#f9fafb",
-              color: "#0f172a",
+              backgroundColor: "var(--wl-logo-badge-bg)",
+              color: "var(--wl-logo-badge-text)",
               fontSize: 14,
               fontWeight: 700,
               letterSpacing: 0.5,
@@ -4169,35 +4172,49 @@ export const App: React.FC = () => {
           >
             Web
           </span>
-          <span style={{ fontSize: 18, fontWeight: 600 }}>Lens</span>
+          <span style={{ fontSize: 18, fontWeight: 600, color: "var(--wl-text-heading)" }}>Lens</span>
         </div>
         <div
+          className="wl-header-tray"
           style={{
             position: "relative",
             display: "flex",
-            alignItems: "stretch",
+            alignItems: "center",
+            gap: 2,
             marginLeft: "auto",
             marginRight: 0,
-            backgroundColor: "#020617",
-            borderLeft: "1px solid #1f2937",
+            padding: "8px 12px",
           }}
         >
+          <ThemeToggleButton />
           <button
             ref={platformMenuTriggerRef}
             type="button"
-            onClick={() => setPlatformMenuOpen((o) => !o)}
-            style={{
-              padding: "0 18px",
-              borderRadius: 0,
-              border: "none",
-              backgroundColor: "transparent",
-              color: "#e5e7eb",
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 500,
+            className="wl-header-settings-action"
+            title="平台配置"
+            aria-label="平台配置"
+            onClick={() => {
+              setPlatformGearSpinning(true);
+              setPlatformMenuOpen((o) => !o);
             }}
+            onAnimationEnd={() => setPlatformGearSpinning(false)}
+            data-spinning={platformGearSpinning ? "true" : "false"}
           >
-            平台配置
+            <span className="wl-header-settings-action__icon" aria-hidden>
+              <svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 0 1 0 2.82 2 2 0 0 1-2.82 0l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 0 1-2.82 0 2 2 0 0 1 0-2.82l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 0 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 0 1 0-2.82 2 2 0 0 1 2.82 0l.06.06a1.7 1.7 0 0 0 1.87.34h0A1.7 1.7 0 0 0 10.03 3.1V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56h0a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 0 1 2.82 0 2 2 0 0 1 0 2.82l-.06.06a1.7 1.7 0 0 0-.34 1.87v0A1.7 1.7 0 0 0 20.97 10H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1z" />
+              </svg>
+            </span>
           </button>
           {platformMenuOpen && (
           <DropdownMenuPortal
@@ -4270,8 +4287,8 @@ export const App: React.FC = () => {
         >
           <div
             style={{
-              backgroundColor: "#0f172a",
-              border: "1px solid #1e293b",
+              backgroundColor: "var(--wl-bg-elevated)",
+              border: "1px solid var(--wl-border-sidebar)",
               borderRadius: 8,
               padding: 20,
               minWidth: 520,
@@ -4285,7 +4302,7 @@ export const App: React.FC = () => {
 
             {configActiveTab === "kubeconfig" && (
               <>
-                <label style={{ display: "block", fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
+                <label style={{ display: "block", fontSize: 13, color: "var(--wl-text-label)", marginBottom: 6 }}>
                   kubeconfig 存放目录（仅支持绝对路径）
                 </label>
                 <input
@@ -4298,9 +4315,9 @@ export const App: React.FC = () => {
                     boxSizing: "border-box",
                     padding: "8px 12px",
                     borderRadius: 6,
-                    border: "1px solid #1f2937",
-                    backgroundColor: "#020617",
-                    color: "#e5e7eb",
+                    border: "1px solid var(--wl-border-subtle)",
+                    backgroundColor: "var(--wl-bg-table)",
+                    color: "var(--wl-text-primary)",
                     fontSize: 13,
                     marginBottom: 12,
                   }}
@@ -4315,9 +4332,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "6px 14px",
                       borderRadius: 6,
-                      border: "1px solid #334155",
+                      border: "1px solid var(--wl-border-strong)",
                       backgroundColor: "transparent",
-                      color: "#e5e7eb",
+                      color: "var(--wl-text-primary)",
                       cursor: configSaving ? "not-allowed" : "pointer",
                       fontSize: 13,
                     }}
@@ -4354,9 +4371,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "6px 14px",
                       borderRadius: 6,
-                      border: "1px solid #334155",
-                      backgroundColor: "#1e293b",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-strong)",
+                      backgroundColor: "var(--wl-bg-control)",
+                      color: "var(--wl-text-primary)",
                       cursor: configSaving ? "not-allowed" : "pointer",
                       fontSize: 13,
                     }}
@@ -4369,20 +4386,20 @@ export const App: React.FC = () => {
 
             {configActiveTab === "combos" && (
               <>
-                <div style={{ marginBottom: 12, fontSize: 13, color: "#9ca3af" }}>
+                <div style={{ marginBottom: 12, fontSize: 13, color: "var(--wl-text-label)" }}>
                   通过预设「集群 + 命名空间」作用域，简化主界面切换操作。
                 </div>
                 <div
                   style={{
                     borderRadius: 8,
-                    border: "1px solid #1e293b",
+                    border: "1px solid var(--wl-border-sidebar)",
                     padding: 12,
                     marginBottom: 12,
-                    backgroundColor: "#020617",
+                    backgroundColor: "var(--wl-bg-table)",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13, color: "#9ca3af" }}>集群选择</span>
+                    <span style={{ fontSize: 13, color: "var(--wl-text-label)" }}>集群选择</span>
                     <div style={{ position: "relative" }}>
                       <button
                         ref={configClusterPickTriggerRef}
@@ -4391,9 +4408,9 @@ export const App: React.FC = () => {
                         style={{
                           padding: "6px 10px",
                           borderRadius: 6,
-                          border: "1px solid #1f2937",
-                          backgroundColor: "#0f172a",
-                          color: "#e5e7eb",
+                          border: "1px solid var(--wl-border-subtle)",
+                          backgroundColor: "var(--wl-bg-elevated)",
+                          color: "var(--wl-text-primary)",
                           fontSize: 13,
                           minWidth: 280,
                           maxWidth: 420,
@@ -4416,6 +4433,8 @@ export const App: React.FC = () => {
                         minWidthPx={360}
                         panelStyle={{ maxWidth: "min(92vw, 520px)" }}
                         repositionKey={`${configClusterSearchKeyword}:${configClusterPickFiltered.length}`}
+                        autoFocusInputRef={configClusterSearchRef}
+                        autoFocusSelectAllIfNonEmpty
                       >
                         <div style={WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE}>
                           <ClearableSearchInput
@@ -4429,13 +4448,13 @@ export const App: React.FC = () => {
                         </div>
                         <div style={WL_SEARCHABLE_DROPDOWN_SCROLL_PORTAL_STYLE}>
                           {clusters.length === 0 && (
-                            <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
+                            <div style={{ padding: 12, fontSize: 12, color: "var(--wl-text-label)" }}>
                               暂无集群，请先配置 kubeconfig 目录并刷新。
                             </div>
                           )}
                           {clusters.length > 0 &&
                             configClusterPickFiltered.length === 0 && (
-                              <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
+                              <div style={{ padding: 12, fontSize: 12, color: "var(--wl-text-label)" }}>
                                 无匹配的集群，请调整关键字或点击「刷新」更新列表。
                               </div>
                             )}
@@ -4466,16 +4485,16 @@ export const App: React.FC = () => {
                       style={{
                         padding: "6px 10px",
                         borderRadius: 6,
-                        border: "1px solid #1f2937",
-                        backgroundColor: reloading ? "#0b1220" : "#0f172a",
-                        color: "#e5e7eb",
+                        border: "1px solid var(--wl-border-subtle)",
+                        backgroundColor: reloading ? "var(--wl-bg-button-disabled)" : "var(--wl-bg-elevated)",
+                        color: "var(--wl-text-primary)",
                         cursor: reloading ? "not-allowed" : "pointer",
                         fontSize: 13,
                       }}
                     >
                       {reloading ? "刷新中..." : "刷新"}
                     </button>
-                    <span style={{ fontSize: 13, color: "#9ca3af" }}>命名空间</span>
+                    <span style={{ fontSize: 13, color: "var(--wl-text-label)" }}>命名空间</span>
                     <input
                       type="text"
                       value={comboNamespace}
@@ -4484,9 +4503,9 @@ export const App: React.FC = () => {
                       style={{
                         padding: "6px 10px",
                         borderRadius: 6,
-                        border: "1px solid #1f2937",
-                        backgroundColor: "#0f172a",
-                        color: "#e5e7eb",
+                        border: "1px solid var(--wl-border-subtle)",
+                        backgroundColor: "var(--wl-bg-elevated)",
+                        color: "var(--wl-text-primary)",
                         fontSize: 13,
                         minWidth: 180,
                       }}
@@ -4508,10 +4527,10 @@ export const App: React.FC = () => {
                       style={{
                         padding: "6px 10px",
                         borderRadius: 6,
-                        border: "1px solid #334155",
+                        border: "1px solid var(--wl-border-strong)",
                         backgroundColor:
-                          !comboClusterId || !comboNamespace.trim() ? "#020617" : "#1e293b",
-                        color: "#e5e7eb",
+                          !comboClusterId || !comboNamespace.trim() ? "var(--wl-bg-table)" : "var(--wl-bg-control)",
+                        color: "var(--wl-text-primary)",
                         cursor:
                           !comboClusterId || !comboNamespace.trim() ? "not-allowed" : "pointer",
                         fontSize: 13,
@@ -4520,13 +4539,13 @@ export const App: React.FC = () => {
                       添加
                     </button>
                   </div>
-                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                  <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>
                     集群不存在或命名空间无权限时，可先通过“测试”按钮验证。
                   </div>
                 </div>
 
                 <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                  <span style={{ fontSize: 13, color: "#9ca3af" }}>已添加作用域</span>
+                  <span style={{ fontSize: 13, color: "var(--wl-text-label)" }}>已添加作用域</span>
                   <ClearableSearchInput
                     value={comboSearchKeyword}
                     onChange={setComboSearchKeyword}
@@ -4535,9 +4554,9 @@ export const App: React.FC = () => {
                     inputStyle={{
                       padding: "4px 8px",
                       borderRadius: 6,
-                      border: "1px solid #1f2937",
-                      backgroundColor: "#020617",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-subtle)",
+                      backgroundColor: "var(--wl-bg-table)",
+                      color: "var(--wl-text-primary)",
                       fontSize: 12,
                     }}
                   />
@@ -4548,8 +4567,8 @@ export const App: React.FC = () => {
                     maxHeight: 260,
                     overflowY: "auto",
                     borderRadius: 6,
-                    border: "1px solid #1f2937",
-                    backgroundColor: "#020617",
+                    border: "1px solid var(--wl-border-subtle)",
+                    backgroundColor: "var(--wl-bg-table)",
                   }}
                 >
                   <table
@@ -4561,16 +4580,16 @@ export const App: React.FC = () => {
                   >
                     <thead>
                       <tr>
-                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           集群 kubeconfig
                         </th>
-                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           命名空间
                         </th>
-                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           别名
                         </th>
-                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "#020617" }}>
+                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           操作
                         </th>
                       </tr>
@@ -4609,7 +4628,7 @@ export const App: React.FC = () => {
                                   {cluster ? (
                                     <>
                                       <div>{cluster.name}</div>
-                                      <div style={{ fontSize: 11, color: "#64748b" }}>{fileName}</div>
+                                      <div style={{ fontSize: 11, color: "var(--wl-text-muted)" }}>{fileName}</div>
                                     </>
                                   ) : (
                                     <span style={{ color: "#f97373" }}>集群未找到：{combo.clusterId}</span>
@@ -4632,9 +4651,9 @@ export const App: React.FC = () => {
                                         flex: 1,
                                         padding: "4px 6px",
                                         borderRadius: 4,
-                                        border: "1px solid #1f2937",
-                                        backgroundColor: "#020617",
-                                        color: "#e5e7eb",
+                                        border: "1px solid var(--wl-border-subtle)",
+                                        backgroundColor: "var(--wl-bg-table)",
+                                        color: "var(--wl-text-primary)",
                                       }}
                                     />
                                     <button
@@ -4753,33 +4772,24 @@ export const App: React.FC = () => {
       )}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
-        {/* 左侧边栏：可折叠，收起后主工作区展宽 */}
-        <div style={{ display: "flex", flexDirection: "row", height: "100%" }}>
-          {!sidebarCollapsed && <Sidebar currentView={currentView} onSelect={setCurrentView} />}
+        {/* 左侧边栏：全宽导航 + 右缘中部绝对定位凸耳把手；收起时仅窄槽+工作区底，无整列侧栏色条 */}
+        <div
+          className="wl-sidebar-rail"
+          data-collapsed={sidebarCollapsed ? "true" : "false"}
+        >
+          <div className="wl-sidebar-rail__nav" aria-hidden={sidebarCollapsed}>
+            <Sidebar currentView={currentView} onSelect={setCurrentView} edge="rail" />
+          </div>
           <button
             type="button"
+            className="wl-sidebar-grip"
             onClick={() => setSidebarCollapsed((v) => !v)}
-            title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
-            style={{
-              width: 24,
-              minWidth: 24,
-              height: 64,
-              margin: "auto 0",
-              border: "none",
-              outline: "none",
-              backgroundColor: "#020617",
-              borderRight: "1px solid #1e293b",
-              color: "#e5e7eb",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 11,
-              borderRadius: 999,
-              boxShadow: "0 0 0 1px rgba(15,23,42,0.8)",
-            }}
+            aria-expanded={!sidebarCollapsed}
+            aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
           >
-            {sidebarCollapsed ? "▶" : "◀"}
+            <span className="wl-sidebar-grip__chevron" aria-hidden>
+              {"<"}
+            </span>
           </button>
         </div>
 
@@ -4821,7 +4831,7 @@ export const App: React.FC = () => {
                     flexWrap: "wrap",
                   }}
                 >
-                  <span style={{ fontSize: 14, color: "#9ca3af" }}>作用域选择：</span>
+                  <span style={{ fontSize: 14, color: "var(--wl-text-label)" }}>作用域选择：</span>
                   <div style={{ position: "relative" }}>
                     <button
                       ref={clusterScopeTriggerRef}
@@ -4830,9 +4840,9 @@ export const App: React.FC = () => {
                       style={{
                         padding: "6px 12px",
                         borderRadius: 6,
-                        border: "1px solid #1f2937",
-                        backgroundColor: "#0f172a",
-                        color: "#e5e7eb",
+                        border: "1px solid var(--wl-border-subtle)",
+                        backgroundColor: "var(--wl-bg-elevated)",
+                        color: "var(--wl-text-primary)",
                         fontSize: 13,
                         minWidth: 260,
                         textAlign: "left",
@@ -4857,6 +4867,8 @@ export const App: React.FC = () => {
                       minWidthPx={320}
                       panelStyle={{ maxWidth: "min(92vw, 520px)" }}
                       repositionKey={`${clusterSearchKeyword}:${clusterComboDropdownFiltered.length}`}
+                      autoFocusInputRef={clusterComboSearchRef}
+                      autoFocusSelectAllIfNonEmpty
                     >
                       <div style={WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE}>
                         <ClearableSearchInput
@@ -4870,12 +4882,12 @@ export const App: React.FC = () => {
                       </div>
                       <div style={WL_SEARCHABLE_DROPDOWN_SCROLL_PORTAL_STYLE}>
                         {clusterCombos.length === 0 && (
-                          <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
+                          <div style={{ padding: 12, fontSize: 12, color: "var(--wl-text-label)" }}>
                             暂未添加作用域，请先在右上角「平台配置 · 集群作用域设置」中添加。
                           </div>
                         )}
                         {clusterCombos.length > 0 && clusterComboDropdownFiltered.length === 0 && (
-                          <div style={{ padding: 12, fontSize: 12, color: "#9ca3af" }}>
+                          <div style={{ padding: 12, fontSize: 12, color: "var(--wl-text-label)" }}>
                             无匹配作用域，请调整关键字。
                           </div>
                         )}
@@ -4914,9 +4926,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "6px 12px",
                       borderRadius: 6,
-                      border: "1px solid #334155",
-                      backgroundColor: "#1e293b",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-strong)",
+                      backgroundColor: "var(--wl-bg-control)",
+                      color: "var(--wl-text-primary)",
                       cursor: !activeComboId ? "not-allowed" : "pointer",
                       fontSize: 13,
                     }}
@@ -4932,9 +4944,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "6px 10px",
                       borderRadius: 6,
-                      border: "1px solid #1f2937",
-                      backgroundColor: reloading ? "#0b1220" : "#0f172a",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-subtle)",
+                      backgroundColor: reloading ? "var(--wl-bg-button-disabled)" : "var(--wl-bg-elevated)",
+                      color: "var(--wl-text-primary)",
                       cursor: reloading ? "not-allowed" : "pointer",
                       fontSize: 13,
                     }}
@@ -4944,7 +4956,7 @@ export const App: React.FC = () => {
                   </button>
                 </div>
 
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: "var(--wl-text-muted)", marginBottom: 12 }}>
                   集群与命名空间 · 当前：
                   {effectiveComboId
                     ? (() => {
@@ -5052,9 +5064,9 @@ export const App: React.FC = () => {
                         style={{
                           padding: "4px 10px",
                           borderRadius: 6,
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
-                          color: "#e5e7eb",
+                          border: "1px solid var(--wl-border-strong)",
+                          backgroundColor: "var(--wl-bg-control)",
+                          color: "var(--wl-text-primary)",
                           cursor: "pointer",
                           fontSize: 12,
                         }}
@@ -5072,16 +5084,16 @@ export const App: React.FC = () => {
                           flexWrap: "wrap",
                           padding: "4px 10px",
                           borderRadius: 6,
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
+                          border: "1px solid var(--wl-border-strong)",
+                          backgroundColor: "var(--wl-bg-control)",
                           fontSize: 12,
-                          color: "#e2e8f0",
+                          color: "var(--wl-text-heading)",
                         }}
                       >
                         <span>
                           已选 {selectedPodKeys.size} 项
                           {podSelectedNotVisibleCount > 0 && (
-                            <span style={{ color: "#94a3b8" }}>
+                            <span style={{ color: "var(--wl-text-secondary)" }}>
                               {" "}
                               （其中 {podSelectedNotVisibleCount} 项当前未显示）
                             </span>
@@ -5114,9 +5126,9 @@ export const App: React.FC = () => {
                           style={{
                             padding: "3px 10px",
                             borderRadius: 4,
-                            border: "1px solid #334155",
+                            border: "1px solid var(--wl-border-strong)",
                             backgroundColor: "transparent",
-                            color: "#94a3b8",
+                            color: "var(--wl-text-secondary)",
                             cursor: "pointer",
                             fontSize: 11,
                           }}
@@ -5134,16 +5146,16 @@ export const App: React.FC = () => {
                           flexWrap: "wrap",
                           padding: "4px 10px",
                           borderRadius: 6,
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
+                          border: "1px solid var(--wl-border-strong)",
+                          backgroundColor: "var(--wl-bg-control)",
                           fontSize: 12,
-                          color: "#e2e8f0",
+                          color: "var(--wl-text-heading)",
                         }}
                       >
                         <span>
                           已选 {selectedDeploymentKeys.size} 项
                           {deploymentSelectedNotVisibleCount > 0 && (
-                            <span style={{ color: "#94a3b8" }}>
+                            <span style={{ color: "var(--wl-text-secondary)" }}>
                               {" "}
                               （其中 {deploymentSelectedNotVisibleCount} 项当前未显示）
                             </span>
@@ -5182,7 +5194,7 @@ export const App: React.FC = () => {
                           style={{
                             padding: "3px 10px",
                             borderRadius: 4,
-                            border: "1px solid #334155",
+                            border: "1px solid var(--wl-border-strong)",
                             backgroundColor: "rgba(13,148,136,0.25)",
                             color: "#99f6e4",
                             cursor: effectiveClusterId ? "pointer" : "not-allowed",
@@ -5197,9 +5209,9 @@ export const App: React.FC = () => {
                           style={{
                             padding: "3px 10px",
                             borderRadius: 4,
-                            border: "1px solid #334155",
+                            border: "1px solid var(--wl-border-strong)",
                             backgroundColor: "transparent",
-                            color: "#94a3b8",
+                            color: "var(--wl-text-secondary)",
                             cursor: "pointer",
                             fontSize: 11,
                           }}
@@ -5223,15 +5235,8 @@ export const App: React.FC = () => {
                         currentView === "events") &&
                       showServerClockSkewHint && (
                         <span
+                          className="wl-list-inline-warn-accent"
                           title={`本地与服务端时间偏差约 ${Math.abs(serverClockSkewMs)}ms`}
-                          style={{
-                            fontSize: 12,
-                            color: "#fbbf24",
-                            marginLeft: 12,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                          }}
                         >
                           <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>
                             ⏱
@@ -5240,18 +5245,7 @@ export const App: React.FC = () => {
                         </span>
                       )}
                     {!applyingSelection && currentView === "pods" && hasNonHealthyPods && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5259,18 +5253,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "statefulsets" && hasNonHealthyStatefulSets && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5278,18 +5261,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "ingresses" && hasNonHealthyIngresses && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5297,18 +5269,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "events" && hasWarningEvents && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5316,18 +5277,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "persistentvolumeclaims" && hasRiskyPvcs && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5335,18 +5285,7 @@ export const App: React.FC = () => {
                       </span>
                     )}
                     {!applyingSelection && currentView === "services" && hasRiskyServices && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          color: "#f87171",
-                          marginLeft: 12,
-                          fontWeight: 700,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          textShadow: "0 0 10px rgba(248,113,113,0.2)",
-                        }}
-                      >
+                      <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
                           ⚠
                         </span>
@@ -5374,9 +5313,9 @@ export const App: React.FC = () => {
                     inputStyle={{
                       padding: "4px 8px",
                       borderRadius: 6,
-                      border: "1px solid #1f2937",
-                      backgroundColor: "#020617",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-subtle)",
+                      backgroundColor: "var(--wl-bg-table)",
+                      color: "var(--wl-text-primary)",
                       fontSize: 12,
                     }}
                   />
@@ -5401,7 +5340,7 @@ export const App: React.FC = () => {
                       width: podTableTotalWidth,
                       minWidth: "100%",
                       borderCollapse: "collapse",
-                      backgroundColor: "#020617",
+                      backgroundColor: "var(--wl-bg-table)",
                       tableLayout: "fixed",
                     }}
                   >
@@ -5539,6 +5478,7 @@ export const App: React.FC = () => {
                                 <span className="wl-table-hover-copy__main">
                                   <button
                                     type="button"
+                                    className="wl-table-hover-copy__truncate"
                                     onClick={() => openDescribeForPod(p)}
                                     style={{
                                       padding: 0,
@@ -5547,12 +5487,6 @@ export const App: React.FC = () => {
                                       background: "none",
                                       color: "inherit",
                                       cursor: "pointer",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                      minWidth: 0,
-                                      flex: "1 1 auto",
-                                      textAlign: "left",
                                     }}
                                   >
                                     {p.metadata.name}
@@ -5565,7 +5499,7 @@ export const App: React.FC = () => {
                                   title="复制 Pod 名称"
                                   aria-label={`复制 Pod 名称：${p.metadata.name}`}
                                 >
-                                  <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                  <CopyIcon />
                                 </button>
                               </span>
                             </td>
@@ -5623,7 +5557,7 @@ export const App: React.FC = () => {
                                     minWidth: 140,
                                   }}
                                 >
-                                  <div style={{ padding: "4px 0", borderRight: podMenuSubmenu ? "1px solid #334155" : undefined }}>
+                                  <div style={{ padding: "4px 0", borderRight: podMenuSubmenu ? "1px solid var(--wl-border-strong)" : undefined }}>
                                     <button
                                       type="button"
                                       onClick={() => setPodMenuSubmenu((s) => (s === "shell" ? null : "shell"))}
@@ -5730,7 +5664,7 @@ export const App: React.FC = () => {
                       width: deployTableTotalWidth,
                       minWidth: "100%",
                       borderCollapse: "collapse",
-                      backgroundColor: "#020617",
+                      backgroundColor: "var(--wl-bg-table)",
                       tableLayout: "fixed",
                     }}
                   >
@@ -5808,14 +5742,14 @@ export const App: React.FC = () => {
                     <tbody className="wl-table-body">
                       {deploymentLoading && deploymentItems.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             加载中…
                           </td>
                         </tr>
                       )}
                       {!deploymentLoading && sortedDeployments.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             暂无 Deployment
                           </td>
                         </tr>
@@ -5871,6 +5805,7 @@ export const App: React.FC = () => {
                                 <span className="wl-table-hover-copy__main">
                                   <button
                                     type="button"
+                                    className="wl-table-hover-copy__truncate"
                                     onClick={() => openDescribeForDeployment(d)}
                                     style={{
                                       padding: 0,
@@ -5879,12 +5814,6 @@ export const App: React.FC = () => {
                                       background: "none",
                                       color: "inherit",
                                       cursor: "pointer",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                      minWidth: 0,
-                                      flex: "1 1 auto",
-                                      textAlign: "left",
                                     }}
                                   >
                                     {d.metadata.name}
@@ -5897,7 +5826,7 @@ export const App: React.FC = () => {
                                   title="复制 Deployment 名称"
                                   aria-label={`复制 Deployment 名称：${d.metadata.name}`}
                                 >
-                                  <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                  <CopyIcon />
                                 </button>
                               </span>
                             </td>
@@ -6081,7 +6010,7 @@ export const App: React.FC = () => {
                       width: stsTableTotalWidth,
                       minWidth: "100%",
                       borderCollapse: "collapse",
-                      backgroundColor: "#020617",
+                      backgroundColor: "var(--wl-bg-table)",
                       tableLayout: "fixed",
                     }}
                   >
@@ -6128,14 +6057,14 @@ export const App: React.FC = () => {
                     <tbody className="wl-table-body">
                       {statefulsetLoading && statefulsetItems.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             加载中…
                           </td>
                         </tr>
                       )}
                       {!statefulsetLoading && sortedStatefulSets.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             暂无 StatefulSet
                           </td>
                         </tr>
@@ -6172,21 +6101,21 @@ export const App: React.FC = () => {
                         const stsReasonsText = owned
                           .flatMap((p) => (p.healthReasons || []).map((r) => `${p.metadata.name}: ${r}`))
                           .join("；");
-                        let stsHealthBg = "rgba(22,163,74,0.15)";
-                        let stsHealthBorder = "rgba(22,163,74,0.6)";
-                        let stsHealthColor = "#bbf7d0";
+                        let stsHealthBg = "var(--wl-pill-success-bg)";
+                        let stsHealthBorder = "var(--wl-pill-success-border)";
+                        let stsHealthColor = "var(--wl-pill-success-text)";
                         if (stsHealthLabel === "关注") {
-                          stsHealthBg = "rgba(202,138,4,0.18)";
-                          stsHealthBorder = "rgba(234,179,8,0.7)";
-                          stsHealthColor = "#facc15";
+                          stsHealthBg = "var(--wl-pill-attention-bg)";
+                          stsHealthBorder = "var(--wl-pill-attention-border)";
+                          stsHealthColor = "var(--wl-pill-attention-text)";
                         } else if (stsHealthLabel === "警告") {
-                          stsHealthBg = "rgba(249,115,22,0.2)";
-                          stsHealthBorder = "rgba(249,115,22,0.75)";
-                          stsHealthColor = "#fed7aa";
+                          stsHealthBg = "var(--wl-pill-orange-bg)";
+                          stsHealthBorder = "var(--wl-pill-orange-border)";
+                          stsHealthColor = "var(--wl-pill-orange-text)";
                         } else if (stsHealthLabel === "严重") {
-                          stsHealthBg = "rgba(185,28,28,0.25)";
-                          stsHealthBorder = "rgba(248,113,113,0.85)";
-                          stsHealthColor = "#fecaca";
+                          stsHealthBg = "var(--wl-pill-danger-bg)";
+                          stsHealthBorder = "var(--wl-pill-danger-border)";
+                          stsHealthColor = "var(--wl-pill-danger-text)";
                         }
                         const childPodsSorted = sortStsPodsTroubleshootFirst(owned, sname);
                         const primaryAbnormalPod = findSmallestOrdinalAbnormalPod(owned, sname);
@@ -6224,7 +6153,7 @@ export const App: React.FC = () => {
                                         padding: "0 4px",
                                         border: "none",
                                         background: "none",
-                                        color: "#94a3b8",
+                                        color: "var(--wl-text-secondary)",
                                         cursor: "pointer",
                                         flexShrink: 0,
                                         fontSize: 12,
@@ -6236,6 +6165,7 @@ export const App: React.FC = () => {
                                     </button>
                                     <button
                                       type="button"
+                                      className="wl-table-hover-copy__truncate"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         openDescribeForStatefulSet(s);
@@ -6247,12 +6177,6 @@ export const App: React.FC = () => {
                                         background: "none",
                                         color: "inherit",
                                         cursor: "pointer",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                        whiteSpace: "nowrap",
-                                        minWidth: 0,
-                                        flex: "1 1 auto",
-                                        textAlign: "left",
                                       }}
                                     >
                                       {s.metadata.name}
@@ -6268,7 +6192,7 @@ export const App: React.FC = () => {
                                     title="复制 StatefulSet 名称"
                                     aria-label={`复制 StatefulSet 名称：${s.metadata.name}`}
                                   >
-                                    <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                    <CopyIcon />
                                   </button>
                                 </span>
                               </td>
@@ -6473,16 +6397,16 @@ export const App: React.FC = () => {
                                   style={{
                                     ...tdStyle,
                                     padding: "8px 12px 12px",
-                                    backgroundColor: "#0f172a",
+                                    backgroundColor: "var(--wl-bg-elevated)",
                                     cursor: "default",
-                                    borderBottom: "1px solid #111827",
+                                    borderBottom: "1px solid var(--wl-border-table-row)",
                                   }}
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   <div
                                     style={{
                                       fontSize: 11,
-                                      color: "#94a3b8",
+                                      color: "var(--wl-text-secondary)",
                                       marginBottom: 8,
                                       fontWeight: 600,
                                     }}
@@ -6498,12 +6422,12 @@ export const App: React.FC = () => {
                                         border: "1px solid rgba(234,179,8,0.35)",
                                         backgroundColor: "rgba(234,179,8,0.08)",
                                         fontSize: 12,
-                                        color: "#e2e8f0",
+                                        color: "var(--wl-text-heading)",
                                         lineHeight: 1.5,
                                       }}
                                     >
                                       <div>{stsExpandSummary}</div>
-                                      <div style={{ marginTop: 6, fontSize: 11, color: "#64748b" }}>
+                                      <div style={{ marginTop: 6, fontSize: 11, color: "var(--wl-text-muted)" }}>
                                         Ordinal 顺序提示：建议先核对较小序号实例；下表已将异常实例置顶并按严重度排序。
                                       </div>
                                     </div>
@@ -6521,7 +6445,7 @@ export const App: React.FC = () => {
                                             colSpan={STS_POD_EXPAND_KEYS.length}
                                             style={{
                                               ...secondaryExpandDataCellStyle(secondaryExpandTdBase),
-                                              color: "#64748b",
+                                              color: "var(--wl-text-muted)",
                                             }}
                                           >
                                             暂无关联 Pod（等待 Pods 列表同步或副本为 0）
@@ -6546,21 +6470,21 @@ export const App: React.FC = () => {
                                           const pMenuOpen = podMenuOpenKey === pMenuKey;
                                           const hl = p.healthLabel || "健康";
                                           const reasonsText = (p.healthReasons || []).join("；");
-                                          let hBg = "rgba(22,163,74,0.15)";
-                                          let hBr = "rgba(22,163,74,0.6)";
-                                          let hCol = "#bbf7d0";
+                                          let hBg = "var(--wl-pill-success-bg)";
+                                          let hBr = "var(--wl-pill-success-border)";
+                                          let hCol = "var(--wl-pill-success-text)";
                                           if (hl === "关注") {
-                                            hBg = "rgba(202,138,4,0.18)";
-                                            hBr = "rgba(234,179,8,0.7)";
-                                            hCol = "#facc15";
+                                            hBg = "var(--wl-pill-attention-bg)";
+                                            hBr = "var(--wl-pill-attention-border)";
+                                            hCol = "var(--wl-pill-attention-text)";
                                           } else if (hl === "警告") {
-                                            hBg = "rgba(249,115,22,0.2)";
-                                            hBr = "rgba(249,115,22,0.75)";
-                                            hCol = "#fed7aa";
+                                            hBg = "var(--wl-pill-orange-bg)";
+                                            hBr = "var(--wl-pill-orange-border)";
+                                            hCol = "var(--wl-pill-orange-text)";
                                           } else if (hl === "严重") {
-                                            hBg = "rgba(185,28,28,0.25)";
-                                            hBr = "rgba(248,113,113,0.85)";
-                                            hCol = "#fecaca";
+                                            hBg = "var(--wl-pill-danger-bg)";
+                                            hBr = "var(--wl-pill-danger-border)";
+                                            hCol = "var(--wl-pill-danger-text)";
                                           }
                                           const rowShell: React.CSSProperties = {
                                             backgroundColor: abnormalRow ? "rgba(248,113,113,0.06)" : undefined,
@@ -6583,9 +6507,9 @@ export const App: React.FC = () => {
                                                         fontWeight: 700,
                                                         padding: "1px 5px",
                                                         borderRadius: 4,
-                                                        backgroundColor: "rgba(234,179,8,0.2)",
-                                                        border: "1px solid rgba(250,204,21,0.55)",
-                                                        color: "#facc15",
+                                                        backgroundColor: "var(--wl-pill-attention-bg)",
+                                                        border: "1px solid var(--wl-pill-attention-border)",
+                                                        color: "var(--wl-pill-attention-text)",
                                                         flexShrink: 0,
                                                       }}
                                                       title="ordinal 最小的异常实例"
@@ -6596,26 +6520,18 @@ export const App: React.FC = () => {
                                                 </span>
                                               </td>
                                               <td style={stsSubTd}>
-                                                <span
-                                                  className="wl-table-hover-copy"
-                                                  style={{ minWidth: 0, width: "100%", flexWrap: "wrap" }}
-                                                >
-                                                  <span className="wl-table-hover-copy__main" style={{ flexWrap: "wrap", minWidth: 0 }}>
+                                                <span className="wl-table-hover-copy wl-table-hover-copy--wrap" style={{ minWidth: 0, maxWidth: "100%" }}>
+                                                  <span className="wl-table-hover-copy__main">
                                                     <button
                                                       type="button"
+                                                      className="wl-table-hover-copy__name-multiline"
                                                       onClick={() => openDescribeForPod(p)}
                                                       style={{
                                                         padding: 0,
                                                         border: "none",
                                                         background: "none",
-                                                        color: "#e5e7eb",
+                                                        color: "var(--wl-text-primary)",
                                                         cursor: "pointer",
-                                                        textAlign: "left",
-                                                        minWidth: 0,
-                                                        flex: "1 1 auto",
-                                                        whiteSpace: "normal",
-                                                        wordBreak: "break-word",
-                                                        overflowWrap: "break-word",
                                                       }}
                                                       title={p.metadata.name}
                                                     >
@@ -6625,7 +6541,7 @@ export const App: React.FC = () => {
                                                       <span
                                                         style={{
                                                           fontSize: 10,
-                                                          color: "#64748b",
+                                                          color: "var(--wl-text-muted)",
                                                           flexShrink: 0,
                                                         }}
                                                       >
@@ -6640,7 +6556,7 @@ export const App: React.FC = () => {
                                                     title="复制 Pod 名称"
                                                     aria-label={`复制 Pod 名称：${p.metadata.name}`}
                                                   >
-                                                    <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                                    <CopyIcon />
                                                   </button>
                                                 </span>
                                               </td>
@@ -6721,7 +6637,7 @@ export const App: React.FC = () => {
                                                     <div
                                                       style={{
                                                         padding: "4px 0",
-                                                        borderRight: podMenuSubmenu ? "1px solid #334155" : undefined,
+                                                        borderRight: podMenuSubmenu ? "1px solid var(--wl-border-strong)" : undefined,
                                                       }}
                                                     >
                                                       <button
@@ -6860,7 +6776,7 @@ export const App: React.FC = () => {
                       width: ingressTableTotalWidth,
                       minWidth: "100%",
                       borderCollapse: "collapse",
-                      backgroundColor: "#020617",
+                      backgroundColor: "var(--wl-bg-table)",
                       tableLayout: "fixed",
                     }}
                   >
@@ -6904,14 +6820,14 @@ export const App: React.FC = () => {
                     <tbody className="wl-table-body">
                       {ingressLoading && ingressItems.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             加载中…
                           </td>
                         </tr>
                       )}
                       {!ingressLoading && sortedIngresses.length === 0 && (
                         <tr className="wl-table-row">
-                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "#94a3b8" }}>
+                          <td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                             暂无 Ingress
                           </td>
                         </tr>
@@ -6970,7 +6886,7 @@ export const App: React.FC = () => {
                                         padding: "0 4px",
                                         border: "none",
                                         background: "none",
-                                        color: "#94a3b8",
+                                        color: "var(--wl-text-secondary)",
                                         cursor: "pointer",
                                         flexShrink: 0,
                                         fontSize: 12,
@@ -6982,6 +6898,7 @@ export const App: React.FC = () => {
                                     </button>
                                     <button
                                       type="button"
+                                      className="wl-table-hover-copy__truncate"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         openDescribeForIngress(ing);
@@ -6993,12 +6910,6 @@ export const App: React.FC = () => {
                                         background: "none",
                                         color: "inherit",
                                         cursor: "pointer",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                        whiteSpace: "nowrap",
-                                        minWidth: 0,
-                                        flex: "1 1 auto",
-                                        textAlign: "left",
                                       }}
                                     >
                                       {iname}
@@ -7014,7 +6925,7 @@ export const App: React.FC = () => {
                                     title="复制 Ingress 名称"
                                     aria-label={`复制 Ingress 名称：${iname}`}
                                   >
-                                    <img src={copyIcon} alt="" style={{ height: 14, width: "auto", display: "block" }} />
+                                    <CopyIcon />
                                   </button>
                                 </span>
                               </td>
@@ -7033,21 +6944,21 @@ export const App: React.FC = () => {
                               <td style={baseCell} onClick={(e) => e.stopPropagation()}>
                                 {(() => {
                                   const hl = diag.label;
-                                  let ingHealthBg = "rgba(22,163,74,0.15)";
-                                  let ingHealthBorder = "rgba(22,163,74,0.6)";
-                                  let ingHealthColor = "#bbf7d0";
+                                  let ingHealthBg = "var(--wl-pill-success-bg)";
+                                  let ingHealthBorder = "var(--wl-pill-success-border)";
+                                  let ingHealthColor = "var(--wl-pill-success-text)";
                                   if (hl === "关注") {
-                                    ingHealthBg = "rgba(202,138,4,0.18)";
-                                    ingHealthBorder = "rgba(234,179,8,0.7)";
-                                    ingHealthColor = "#facc15";
+                                    ingHealthBg = "var(--wl-pill-attention-bg)";
+                                    ingHealthBorder = "var(--wl-pill-attention-border)";
+                                    ingHealthColor = "var(--wl-pill-attention-text)";
                                   } else if (hl === "警告") {
-                                    ingHealthBg = "rgba(249,115,22,0.2)";
-                                    ingHealthBorder = "rgba(249,115,22,0.75)";
-                                    ingHealthColor = "#fed7aa";
+                                    ingHealthBg = "var(--wl-pill-orange-bg)";
+                                    ingHealthBorder = "var(--wl-pill-orange-border)";
+                                    ingHealthColor = "var(--wl-pill-orange-text)";
                                   } else if (hl === "严重") {
-                                    ingHealthBg = "rgba(185,28,28,0.25)";
-                                    ingHealthBorder = "rgba(248,113,113,0.85)";
-                                    ingHealthColor = "#fecaca";
+                                    ingHealthBg = "var(--wl-pill-danger-bg)";
+                                    ingHealthBorder = "var(--wl-pill-danger-border)";
+                                    ingHealthColor = "var(--wl-pill-danger-text)";
                                   }
                                   return (
                                     <span
@@ -7077,7 +6988,7 @@ export const App: React.FC = () => {
                                   maxWidth: 0,
                                   lineHeight: 1.35,
                                   fontSize: 12,
-                                  color: diag.label === "健康" ? "#64748b" : "#e2e8f0",
+                                  color: diag.label === "健康" ? "var(--wl-text-muted)" : "var(--wl-text-heading)",
                                 }}
                                 title={diag.summary}
                               >
@@ -7186,16 +7097,16 @@ export const App: React.FC = () => {
                                   style={{
                                     ...tdStyle,
                                     padding: "8px 12px 12px",
-                                    backgroundColor: "#0f172a",
+                                    backgroundColor: "var(--wl-bg-elevated)",
                                     cursor: "default",
-                                    borderBottom: "1px solid #111827",
+                                    borderBottom: "1px solid var(--wl-border-table-row)",
                                   }}
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   <div
                                     style={{
                                       fontSize: 11,
-                                      color: "#94a3b8",
+                                      color: "var(--wl-text-secondary)",
                                       marginBottom: 8,
                                       fontWeight: 600,
                                     }}
@@ -7203,7 +7114,7 @@ export const App: React.FC = () => {
                                     规则排障（异常优先；TLS Secret 存在性未校验）
                                   </div>
                                   {expandRows.length === 0 ? (
-                                    <div style={{ fontSize: 12, color: "#64748b" }}>无规则行（无 path 且无 default backend）</div>
+                                    <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>无规则行（无 path 且无 default backend）</div>
                                   ) : (
                                   <SecondaryExpandTable
                                     columns={INGRESS_RULE_EXPAND_COLUMNS}
@@ -7246,7 +7157,7 @@ export const App: React.FC = () => {
                                           <td style={dataTd}>{r.portDisplay}</td>
                                           <td style={dataTd}>{r.tlsHint}</td>
                                           <td style={{ ...dataTd, fontWeight: 600 }}>{r.status}</td>
-                                          <td style={{ ...dataTd, fontSize: 11, color: "#94a3b8" }}>{r.detail}</td>
+                                          <td style={{ ...dataTd, fontSize: 11, color: "var(--wl-text-secondary)" }}>{r.detail}</td>
                                           <td style={secondaryExpandActionsCellStyle({ ...secondaryExpandTdBase, fontSize: 11 })}>
                                             {canLinkSvc ? (
                                               <div
@@ -7388,10 +7299,10 @@ export const App: React.FC = () => {
                           </p>
                           <p style={{ margin: "0 0 10px" }}>
                             如需使用此功能，请联系集群管理员为当前 kubeconfig
-                            授予相应的只读权限（例如对 <code style={{ color: "#cbd5e1" }}>nodes</code>{" "}
+                            授予相应的只读权限（例如对 <code style={{ color: "var(--wl-text-secondary)" }}>nodes</code>{" "}
                             资源的 list/get/watch）。
                           </p>
-                          <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>
+                          <p style={{ margin: 0, fontSize: 12, color: "var(--wl-text-muted)" }}>
                             Nodes 属于集群级资源，通常需要额外的 RBAC 配置。
                           </p>
                         </>
@@ -7495,8 +7406,8 @@ export const App: React.FC = () => {
               right: 0,
               bottom: 0,
               width: `${Math.round(describeWidthRatio * 100)}vw`,
-              backgroundColor: "#020617",
-              borderLeft: "1px solid #1e293b",
+              backgroundColor: "var(--wl-bg-table)",
+              borderLeft: "1px solid var(--wl-border-sidebar)",
               pointerEvents: "auto",
               display: "flex",
               flexDirection: "column",
@@ -7529,11 +7440,11 @@ export const App: React.FC = () => {
                 top: 0,
                 zIndex: 1,
                 padding: "10px 16px",
-                borderBottom: "1px solid #1e293b",
+                borderBottom: "1px solid var(--wl-border-sidebar)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                backgroundColor: "#020617",
+                backgroundColor: "var(--wl-bg-table)",
               }}
             >
               <div style={{ display: "flex", flexDirection: "column" }}>
@@ -7581,9 +7492,9 @@ export const App: React.FC = () => {
                   style={{
                     padding: "2px 6px",
                     borderRadius: 4,
-                    border: "1px solid #334155",
-                    backgroundColor: "#020617",
-                    color: "#e5e7eb",
+                    border: "1px solid var(--wl-border-strong)",
+                    backgroundColor: "var(--wl-bg-table)",
+                    color: "var(--wl-text-primary)",
                     cursor: "pointer",
                     fontSize: 12,
                   }}
@@ -7604,9 +7515,9 @@ export const App: React.FC = () => {
                     style={{
                       padding: "2px 6px",
                       borderRadius: 4,
-                      border: "1px solid #334155",
-                      backgroundColor: "#020617",
-                      color: "#e5e7eb",
+                      border: "1px solid var(--wl-border-strong)",
+                      backgroundColor: "var(--wl-bg-table)",
+                      color: "var(--wl-text-primary)",
                       cursor: describeLoading ? "not-allowed" : "pointer",
                       fontSize: 12,
                     }}
@@ -7622,9 +7533,9 @@ export const App: React.FC = () => {
                   style={{
                     padding: "4px 8px",
                     borderRadius: 4,
-                    border: "1px solid #334155",
-                    backgroundColor: "#1e293b",
-                    color: "#e5e7eb",
+                    border: "1px solid var(--wl-border-strong)",
+                    backgroundColor: "var(--wl-bg-control)",
+                    color: "var(--wl-text-primary)",
                     cursor: "pointer",
                     fontSize: 12,
                   }}
@@ -7644,7 +7555,7 @@ export const App: React.FC = () => {
               }}
             >
               {describeLoading && describeTarget.kind !== "event" && (
-                <div style={{ color: "#9ca3af" }}>加载 Describe 中…</div>
+                <div style={{ color: "var(--wl-text-label)" }}>加载 Describe 中…</div>
               )}
               {describeTarget.kind === "event" && (
                 <EventDescribeContent
@@ -7657,8 +7568,8 @@ export const App: React.FC = () => {
               {!describeLoading && describeTarget.kind === "pod" && describePodData && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   <section>
-                    <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>基本信息</h4>
-                    <div style={{ fontSize: 12, color: "#cbd5f5", lineHeight: 1.6 }}>
+                    <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "var(--wl-text-primary)" }}>基本信息</h4>
+                    <div style={{ fontSize: 12, color: "var(--wl-text-secondary)", lineHeight: 1.6 }}>
                       <div>Namespace：{describePodData.pod.metadata.namespace}</div>
                       <div>Name：{describePodData.pod.metadata.name}</div>
                       <div>
@@ -7672,24 +7583,24 @@ export const App: React.FC = () => {
 
                   {(describePodData.pod.metadata.labels || describePodData.pod.metadata.annotations) && (
                     <section>
-                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Labels & Annotations</h4>
+                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "var(--wl-text-primary)" }}>Labels & Annotations</h4>
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 12, lineHeight: 1.6 }}>
                         {describePodData.pod.metadata.labels && (
                           <div>
-                            <div style={{ marginBottom: 4, color: "#9ca3af" }}>Labels</div>
+                            <div style={{ marginBottom: 4, color: "var(--wl-text-label)" }}>Labels</div>
                             {Object.entries(describePodData.pod.metadata.labels).map(([k, v]) => (
                               <div key={k}>
-                                <span style={{ color: "#9ca3af" }}>{k}</span>: {v}
+                                <span style={{ color: "var(--wl-text-label)" }}>{k}</span>: {v}
                               </div>
                             ))}
                           </div>
                         )}
                         {describePodData.pod.metadata.annotations && (
                           <div>
-                            <div style={{ marginBottom: 4, color: "#9ca3af" }}>Annotations</div>
+                            <div style={{ marginBottom: 4, color: "var(--wl-text-label)" }}>Annotations</div>
                             {Object.entries(describePodData.pod.metadata.annotations).map(([k, v]) => (
                               <div key={k}>
-                                <span style={{ color: "#9ca3af" }}>{k}</span>: {v}
+                                <span style={{ color: "var(--wl-text-label)" }}>{k}</span>: {v}
                               </div>
                             ))}
                           </div>
@@ -7700,20 +7611,20 @@ export const App: React.FC = () => {
 
                   {describePodData.pod.spec?.containers && describePodData.pod.spec.containers.length > 0 && (
                     <section>
-                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#e5e7eb" }}>Containers</h4>
+                      <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "var(--wl-text-primary)" }}>Containers</h4>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
                         {describePodData.pod.spec.containers.map((c) => (
                           <div
                             key={c.name}
                             style={{
-                              border: "1px solid #1f2937",
+                              border: "1px solid var(--wl-border-subtle)",
                               borderRadius: 6,
                               padding: 8,
-                              backgroundColor: "#020617",
+                              backgroundColor: "var(--wl-bg-table)",
                             }}
                           >
                             <div style={{ fontWeight: 600, marginBottom: 4 }}>{c.name}</div>
-                            <div style={{ color: "#cbd5f5", lineHeight: 1.6 }}>
+                            <div style={{ color: "var(--wl-text-secondary)", lineHeight: 1.6 }}>
                               <div>Image：{c.image ?? "-"}</div>
                               {c.ports && c.ports.length > 0 && (
                                 <div>
@@ -7817,9 +7728,9 @@ export const App: React.FC = () => {
 const btnStyle: React.CSSProperties = {
   padding: "4px 8px",
   borderRadius: 4,
-  border: "1px solid #1f2937",
-  backgroundColor: "#0f172a",
-  color: "#e5e7eb",
+  border: "1px solid var(--wl-border-subtle)",
+  backgroundColor: "var(--wl-bg-elevated)",
+  color: "var(--wl-text-primary)",
   cursor: "pointer",
   fontSize: 12,
   marginRight: 6,

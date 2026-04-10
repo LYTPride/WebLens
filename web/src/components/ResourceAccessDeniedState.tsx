@@ -5,16 +5,16 @@ const cardStyle: React.CSSProperties = {
   margin: "48px auto",
   padding: "28px 24px",
   borderRadius: 12,
-  border: "1px solid #334155",
-  backgroundColor: "rgba(15,23,42,0.95)",
-  boxShadow: "0 12px 40px rgba(0,0,0,0.35)",
+  border: "1px solid var(--wl-border-strong)",
+  backgroundColor: "var(--wl-access-denied-card-bg)",
+  boxShadow: "var(--wl-access-denied-card-shadow)",
 };
 
 const titleStyle: React.CSSProperties = {
   margin: "0 0 12px",
   fontSize: 16,
   fontWeight: 700,
-  color: "#e2e8f0",
+  color: "var(--wl-text-heading)",
   display: "flex",
   alignItems: "center",
   gap: 10,
@@ -24,7 +24,7 @@ const bodyStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
   lineHeight: 1.65,
-  color: "#94a3b8",
+  color: "var(--wl-text-secondary)",
 };
 
 export type ResourceAccessDeniedStateProps = {
@@ -56,7 +56,7 @@ export function ResourceAccessDeniedState({
         </span>
         {title}
         {resourceLabel ? (
-          <span style={{ fontSize: 12, fontWeight: 500, color: "#64748b" }}>({resourceLabel})</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: "var(--wl-text-muted)" }}>({resourceLabel})</span>
         ) : null}
       </h3>
       <div style={bodyStyle}>{description}</div>
@@ -68,9 +68,9 @@ export function ResourceAccessDeniedState({
             style={{
               padding: "4px 10px",
               borderRadius: 6,
-              border: "1px solid #475569",
-              backgroundColor: "#0f172a",
-              color: "#94a3b8",
+              border: "1px solid var(--wl-border-strong)",
+              backgroundColor: "var(--wl-bg-elevated)",
+              color: "var(--wl-text-secondary)",
               cursor: "pointer",
               fontSize: 12,
             }}
@@ -83,10 +83,10 @@ export function ResourceAccessDeniedState({
                 marginTop: 10,
                 padding: 10,
                 borderRadius: 6,
-                backgroundColor: "#020617",
-                border: "1px solid #1e293b",
+                backgroundColor: "var(--wl-bg-table)",
+                border: "1px solid var(--wl-border-sidebar)",
                 fontSize: 11,
-                color: "#cbd5e1",
+                color: "var(--wl-text-secondary)",
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
                 maxHeight: 200,

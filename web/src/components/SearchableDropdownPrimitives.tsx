@@ -5,9 +5,9 @@ import type { ClusterSummary } from "../api";
 export const WL_SEARCHABLE_DROPDOWN_INPUT_STYLE: React.CSSProperties = {
   padding: "6px 10px",
   borderRadius: 6,
-  border: "1px solid #1f2937",
-  backgroundColor: "#020617",
-  color: "#e5e7eb",
+  border: "1px solid var(--wl-border-subtle)",
+  backgroundColor: "var(--wl-bg-input)",
+  color: "var(--wl-text-primary)",
   fontSize: 13,
 };
 
@@ -19,10 +19,10 @@ export const WL_SEARCHABLE_DROPDOWN_PANEL_STYLE: React.CSSProperties = {
   marginTop: 4,
   minWidth: 320,
   maxHeight: 320,
-  backgroundColor: "#0f172a",
-  border: "1px solid #1e293b",
+  backgroundColor: "var(--wl-menu-search-bg)",
+  border: "1px solid var(--wl-menu-search-border)",
   borderRadius: 8,
-  boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+  boxShadow: "var(--wl-shadow-dropdown)",
   zIndex: 41,
   overflow: "hidden",
   display: "flex",
@@ -85,7 +85,7 @@ export function SearchableDropdownTwoColumnRow({
         padding: "8px 12px",
         textAlign: "left",
         border: "none",
-        borderBottom: borderBottom ? "1px solid #1e293b" : undefined,
+        borderBottom: borderBottom ? "1px solid var(--wl-border-strong)" : undefined,
         cursor: "pointer",
       }}
     >
@@ -100,7 +100,7 @@ export function SearchableDropdownTwoColumnRow({
         <span
           style={{
             fontSize: 13,
-            color: selected ? "#38bdf8" : "#e2e8f0",
+            color: selected ? "var(--wl-accent-sky)" : "var(--wl-text-heading)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -109,13 +109,13 @@ export function SearchableDropdownTwoColumnRow({
         >
           {left}
         </span>
-        <span style={{ color: "#475569", fontSize: 12, userSelect: "none" }} aria-hidden>
+        <span style={{ color: "var(--wl-text-muted)", fontSize: 12, userSelect: "none" }} aria-hidden>
           ·
         </span>
         <span
           style={{
             fontSize: 12,
-            color: selected ? "#7dd3fc" : "#94a3b8",
+            color: selected ? "var(--wl-accent-sky-muted)" : "var(--wl-text-secondary)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",

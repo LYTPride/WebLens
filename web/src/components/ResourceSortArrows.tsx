@@ -9,7 +9,7 @@ const arrowBtnBase: React.CSSProperties = {
   cursor: "pointer",
   lineHeight: 0.85,
   fontSize: 9,
-  color: "#64748b",
+  color: "var(--wl-text-muted)",
 };
 
 export interface ResourceSortArrowsProps {
@@ -39,7 +39,7 @@ export const ResourceSortArrows: React.FC<ResourceSortArrowsProps> = ({
       }}
       style={{
         ...arrowBtnBase,
-        color: activeDirection === "asc" ? "#38bdf8" : "#64748b",
+        color: activeDirection === "asc" ? "var(--wl-accent-sky)" : "var(--wl-text-muted)",
       }}
     >
       ▲
@@ -53,7 +53,7 @@ export const ResourceSortArrows: React.FC<ResourceSortArrowsProps> = ({
       }}
       style={{
         ...arrowBtnBase,
-        color: activeDirection === "desc" ? "#38bdf8" : "#64748b",
+        color: activeDirection === "desc" ? "var(--wl-accent-sky)" : "var(--wl-text-muted)",
       }}
     >
       ▼

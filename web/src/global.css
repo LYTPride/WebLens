@@ -15,8 +15,8 @@ body,
 }
 
 body {
-  background-color: #020617;
-  color: #e5e7eb;
+  background-color: var(--wl-bg-page);
+  color: var(--wl-text-primary);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
@@ -38,7 +38,7 @@ body {
 /* Dark, slim scrollbars to match overall UI */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #4b5563 #020617;
+  scrollbar-color: var(--wl-scrollbar-thumb) var(--wl-scrollbar-track);
 }
 
 *::-webkit-scrollbar {
@@ -47,16 +47,16 @@ body {
 }
 
 *::-webkit-scrollbar-track {
-  background: #020617;
+  background: var(--wl-scrollbar-track);
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: #4b5563;
+  background-color: var(--wl-scrollbar-thumb);
   border-radius: 999px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: #6b7280;
+  background-color: var(--wl-scrollbar-thumb-hover);
 }
 
 /* 底栏标签横向滚动：略矮横条 + 内联 padding-bottom，减少悬停/拖动 thumb 盖住标题 */
@@ -67,37 +67,37 @@ body {
 /* 三点菜单：一级与二级菜单行高亮（背景仅由 class 控制，避免被内联覆盖） */
 .wl-menu-item {
   background-color: transparent;
-  color: #e2e8f0;
+  color: var(--wl-text-menu);
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 /* 当前展开子菜单的一级项（Shell/Logs）弱高亮 */
 .wl-menu-item.is-active {
-  background-color: #0f172a;
+  background-color: var(--wl-menu-item-active);
 }
 
 /* 激活项在 hover 时仍使用统一悬浮底，避免与 is-active 底色“无反馈” */
 .wl-menu-item.is-active:hover {
-  background-color: #334155;
-  color: #e2e8f0;
+  background-color: var(--wl-menu-item-hover);
+  color: var(--wl-text-menu);
 }
 
-/* 鼠标悬停：深色主题下的高亮 */
+/* 鼠标悬停 */
 .wl-menu-item:hover {
-  background-color: #334155;
-  color: #e2e8f0;
+  background-color: var(--wl-menu-item-hover);
+  color: var(--wl-text-menu);
 }
 
-/* Delete 项默认红色，悬停时与其它项一致 */
+/* Delete 项：语义色固定 */
 .wl-menu-item.wl-menu-item-danger {
-  color: #f97373;
+  color: var(--wl-menu-danger-text);
 }
 .wl-menu-item.wl-menu-item-danger:hover {
-  background-color: #334155;
-  color: #fecaca;
+  background-color: var(--wl-menu-item-hover);
+  color: var(--wl-menu-danger-hover-text);
 }
 .wl-menu-item.wl-menu-item-danger.is-active:hover {
-  color: #fecaca;
+  color: var(--wl-menu-danger-hover-text);
 }
 
 .wl-menu-item:disabled {
@@ -111,18 +111,18 @@ body {
 }
 
 .wl-menu-item.wl-menu-item-danger:disabled:hover {
-  color: #f97373;
+  color: var(--wl-menu-danger-text);
 }
 
 /* 资源列表 sticky 表头（Pods / Deployments / StatefulSet 等复用 .wl-table-sticky-head） */
 th.wl-table-sticky-head:hover {
-  background-color: #1e293b !important;
+  background-color: var(--wl-bg-table-header-hover) !important;
 }
 
 th.wl-table-sticky-head input[type="checkbox"] {
   cursor: pointer;
   vertical-align: middle;
-  accent-color: #0d9488;
+  accent-color: var(--wl-checkbox-accent);
 }
 
 /* 列表行悬停（Pods / Deployments 共用） */
@@ -130,22 +130,22 @@ th.wl-table-sticky-head input[type="checkbox"] {
   transition: background-color 0.12s ease;
 }
 .wl-table-body tr.wl-table-row:hover {
-  background-color: #0f172a;
+  background-color: var(--wl-bg-row-hover);
 }
 
 /* 排序启用且 watch 导致该行在排序结果中 index 变化时的短暂提示（与 hover 错开，hover 优先） */
 @keyframes wl-row-sort-move-pulse {
   0% {
-    box-shadow: inset 0 0 0 0 rgba(56, 189, 248, 0);
+    box-shadow: inset 0 0 0 0 transparent;
     background-color: transparent;
   }
   20% {
-    box-shadow: inset 3px 0 0 0 rgba(56, 189, 248, 0.55);
-    background-color: rgba(56, 189, 248, 0.09);
+    box-shadow: inset 3px 0 0 0 var(--wl-sort-pulse-line);
+    background-color: var(--wl-sort-pulse-bg);
   }
   100% {
-    box-shadow: inset 3px 0 0 0 rgba(56, 189, 248, 0);
-    background-color: rgba(56, 189, 248, 0);
+    box-shadow: inset 3px 0 0 0 transparent;
+    background-color: transparent;
   }
 }
 
@@ -156,18 +156,19 @@ th.wl-table-sticky-head input[type="checkbox"] {
 .wl-table-body tr.wl-table-row.wl-row-sort-position-changed:hover {
   animation: none;
   box-shadow: none;
-  background-color: #0f172a;
+  background-color: var(--wl-sort-pulse-row-hover);
 }
 
 /* Shell 右侧文件管理：首次自动展开时标题区轻量引导（约 1.5s 淡入淡出，不闪烁） */
 @keyframes wl-file-panel-header-intro {
   0% {
-    background-color: rgba(56, 189, 248, 0.06);
-    box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.28);
+    background-color: var(--wl-file-intro-bg);
+    box-shadow: inset 0 0 0 1px var(--wl-file-intro-line);
   }
   25% {
-    background-color: rgba(56, 189, 248, 0.11);
-    box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.38);
+    background-color: var(--wl-file-intro-bg);
+    box-shadow: inset 0 0 0 1px var(--wl-file-intro-line);
+    filter: brightness(1.08);
   }
   100% {
     background-color: transparent;
@@ -183,24 +184,24 @@ th.wl-table-sticky-head input[type="checkbox"] {
 /* 三点按钮：Pods / Deployments 统一（保留旧 class 别名） */
 .wl-pod-menu-trigger,
 .wl-table-menu-trigger {
-  background-color: #1e293b;
-  color: #9ca3af;
+  background-color: var(--wl-bg-control);
+  color: var(--wl-text-table-header);
   transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-  border: 1px solid #1f2937;
+  border: 1px solid var(--wl-border-subtle);
 }
 .wl-pod-menu-trigger:hover,
 .wl-table-menu-trigger:hover {
-  background-color: #334155;
-  color: #e2e8f0;
-  border-color: #475569;
+  background-color: var(--wl-menu-item-hover);
+  color: var(--wl-text-heading);
+  border-color: var(--wl-border-strong);
 }
 .wl-pod-menu-trigger:active,
 .wl-table-menu-trigger:active {
-  background-color: #1e293b;
+  background-color: var(--wl-bg-control);
 }
 .wl-table-menu-trigger:focus-visible,
 .wl-pod-menu-trigger:focus-visible {
-  outline: 2px solid #38bdf8;
+  outline: 2px solid var(--wl-accent-sky);
   outline-offset: 2px;
 }
 
@@ -213,39 +214,39 @@ th.wl-table-sticky-head input[type="checkbox"] {
 /* Portal 统一下拉容器（与历史 class 并存；色值与 z-index 分层见 web/src/constants/zLayers.ts） */
 .wl-table-dropdown-menu,
 .wl-dropdown-surface--menu {
-  background-color: #1e293b;
-  border: 1px solid #334155;
+  background-color: var(--wl-menu-surface);
+  border: 1px solid var(--wl-menu-border);
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--wl-shadow-dropdown);
 }
 
 .wl-searchable-dropdown-panel,
 .wl-dropdown-surface--searchable {
-  background-color: #0f172a;
-  border: 1px solid #1e293b;
+  background-color: var(--wl-menu-search-bg);
+  border: 1px solid var(--wl-menu-search-border);
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--wl-shadow-dropdown);
   box-sizing: border-box;
 }
 
 /* 可搜索下拉双列行：与 .wl-menu-item 统一的 hover 反馈 */
 .wl-searchable-dropdown-row {
   background-color: transparent;
-  color: #e2e8f0;
+  color: var(--wl-text-menu);
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .wl-searchable-dropdown-row:hover {
-  background-color: #334155;
-  color: #e2e8f0;
+  background-color: var(--wl-menu-item-hover);
+  color: var(--wl-text-menu);
 }
 
 .wl-searchable-dropdown-row.wl-searchable-dropdown-row--selected {
-  background-color: #1e293b;
+  background-color: var(--wl-bg-control);
 }
 
 .wl-searchable-dropdown-row.wl-searchable-dropdown-row--selected:hover {
-  background-color: #334155;
+  background-color: var(--wl-menu-item-hover);
 }
 
 /* 跨资源联动入口（Ingress / Services / 后续资源页复用）：轻量胶囊，非主按钮、非默认超链接 */
@@ -261,9 +262,9 @@ th.wl-table-sticky-head input[type="checkbox"] {
   font-size: 12px;
   font-weight: 500;
   line-height: 1.25;
-  color: #7dd3fc;
-  background-color: rgba(56, 189, 248, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: var(--wl-jump-text);
+  background-color: var(--wl-jump-bg);
+  border: 1px solid var(--wl-jump-border);
   border-radius: 999px;
   cursor: pointer;
   text-decoration: none;
@@ -272,18 +273,19 @@ th.wl-table-sticky-head input[type="checkbox"] {
 }
 
 .wl-resource-jump:hover {
-  background-color: rgba(56, 189, 248, 0.16);
-  border-color: rgba(56, 189, 248, 0.55);
-  color: #bae6fd;
+  background-color: var(--wl-jump-hover-bg);
+  border-color: var(--wl-jump-hover-border);
+  color: var(--wl-jump-hover-text);
 }
 
 .wl-resource-jump:active {
-  background-color: rgba(56, 189, 248, 0.24);
-  border-color: rgba(56, 189, 248, 0.65);
+  background-color: var(--wl-jump-hover-bg);
+  border-color: var(--wl-jump-hover-border);
+  filter: brightness(1.05);
 }
 
 .wl-resource-jump:focus-visible {
-  outline: 2px solid #38bdf8;
+  outline: 2px solid var(--wl-accent-sky);
   outline-offset: 2px;
 }
 
@@ -317,13 +319,13 @@ th.wl-table-sticky-head input[type="checkbox"] {
 }
 
 .wl-resource-name-with-copy__text {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
   word-break: break-word;
   overflow-wrap: anywhere;
   line-height: 1.45;
-  color: #e2e8f0;
+  color: var(--wl-resource-name-text);
   font-weight: 500;
 }
 
@@ -350,9 +352,9 @@ th.wl-table-sticky-head input[type="checkbox"] {
   justify-content: center;
   line-height: 0;
   border-radius: 4px;
-  color: inherit;
+  color: var(--wl-copy-icon);
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.12s ease, color 0.12s ease, background-color 0.12s ease;
 }
 
 .wl-resource-name-with-copy:hover .wl-resource-name-with-copy__copy,
@@ -361,36 +363,80 @@ th.wl-table-sticky-head input[type="checkbox"] {
 }
 
 .wl-resource-name-with-copy__copy:hover {
-  background-color: rgba(148, 163, 184, 0.12);
+  background-color: var(--wl-copy-hover-bg);
+  color: var(--wl-copy-icon-hover);
 }
 
 .wl-resource-name-with-copy__copy:focus-visible {
-  outline: 2px solid #38bdf8;
+  outline: 2px solid var(--wl-accent-sky);
   outline-offset: 2px;
   opacity: 1;
 }
 
 /**
  * 列表 / 展开行：资源名单元格内「名称 + 复制 icon」
- * 默认隐藏 icon，悬停名称区域（整格）或聚焦时显示；右侧预留 22px 避免抖动
+ * 默认隐藏 icon，悬停名称区域（整格）或聚焦时显示；预留 22px 槽位减轻显隐抖动。
+ * __main 使用 flex:0 1 auto，避免短名称时复制按钮被推到单元格远端；长名称时在 max-width 内省略。
  */
 .wl-table-hover-copy {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  max-width: 100%;
   width: 100%;
+  max-width: 100%;
   min-width: 0;
-  gap: 4px;
+  gap: 2px;
   box-sizing: border-box;
+  vertical-align: middle;
 }
 
 .wl-table-hover-copy__main {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: calc(100% - 24px);
   display: inline-flex;
   align-items: center;
   gap: 6px;
   overflow: hidden;
+}
+
+.wl-table-hover-copy--wrap {
+  align-items: flex-start;
+}
+
+.wl-table-hover-copy--wrap .wl-table-hover-copy__main {
+  flex-wrap: wrap;
+}
+
+.wl-table-hover-copy--wrap .wl-table-hover-copy__btn {
+  margin-top: 1px;
+}
+
+/* STS 等展开行：名称多行换行，复制仍跟整块名称区右侧/下一行对齐 */
+.wl-table-hover-copy__main > button.wl-table-hover-copy__name-multiline {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  overflow: visible;
+  text-align: left;
+}
+
+/* 名称区单按钮/单标签截断：在受限的 __main 内占满剩余宽度并省略 */
+.wl-table-hover-copy__main > .wl-table-hover-copy__truncate {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  display: block;
+}
+
+.wl-table-hover-copy__main > button.wl-table-hover-copy__truncate {
+  font: inherit;
+  width: auto;
+  max-width: 100%;
 }
 
 .wl-table-hover-copy__btn {
@@ -408,7 +454,9 @@ th.wl-table-sticky-head input[type="checkbox"] {
   border-radius: 4px;
   line-height: 0;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+  color: var(--wl-copy-icon);
+  flex-shrink: 0;
 }
 
 .wl-table-hover-copy:hover .wl-table-hover-copy__btn,
@@ -417,11 +465,12 @@ th.wl-table-sticky-head input[type="checkbox"] {
 }
 
 .wl-table-hover-copy__btn:hover {
-  background-color: rgba(148, 163, 184, 0.12);
+  background-color: var(--wl-copy-hover-bg);
+  color: var(--wl-copy-icon-hover);
 }
 
 .wl-table-hover-copy__btn:focus-visible {
-  outline: 2px solid #38bdf8;
+  outline: 2px solid var(--wl-accent-sky);
   outline-offset: 2px;
   opacity: 1;
 }
@@ -439,7 +488,7 @@ th.wl-table-sticky-head input[type="checkbox"] {
   border: none;
   border-radius: 4px;
   background-color: transparent;
-  color: #64748b;
+  color: var(--wl-text-muted);
   cursor: pointer;
   font-size: 16px;
   line-height: 1;
@@ -449,11 +498,11 @@ th.wl-table-sticky-head input[type="checkbox"] {
   transition: color 0.12s ease, background-color 0.12s ease;
 }
 .wl-clearable-search-clear:hover {
-  color: #e2e8f0;
-  background-color: rgba(148, 163, 184, 0.12);
+  color: var(--wl-copy-icon-hover);
+  background-color: var(--wl-copy-hover-bg);
 }
 .wl-clearable-search-clear:active {
-  background-color: rgba(148, 163, 184, 0.2);
+  background-color: var(--wl-menu-item-hover);
 }
 
 /*
@@ -467,5 +516,290 @@ th.wl-table-sticky-head input[type="checkbox"] {
 
 .monaco-editor .sticky-widget .sticky-line-number {
   overflow: hidden;
+}
+
+/* 顶栏右上角统一 icon 操作区 */
+.wl-header-tray .wl-theme-toggle {
+  padding: 4px;
+}
+
+/* 主题切换：轻量 icon action（无独立按钮底、无背景 hover） */
+.wl-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.wl-theme-toggle:hover {
+  background: transparent;
+}
+
+.wl-theme-toggle:hover .wl-theme-toggle__icons {
+  color: var(--wl-text-heading);
+  filter: brightness(1.12);
+}
+
+.wl-theme-toggle:active .wl-theme-toggle__icons {
+  filter: brightness(1.05);
+}
+
+.wl-theme-toggle:focus-visible {
+  outline: 2px solid var(--wl-accent-sky);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* 平台配置：同组轻量 icon action，点击时齿轮轻微自转 */
+.wl-header-settings-action {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: var(--wl-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.18s ease;
+}
+
+.wl-header-settings-action__icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  color: var(--wl-text-muted);
+  transition: color 0.18s ease, filter 0.18s ease;
+}
+
+.wl-header-settings-action:hover .wl-header-settings-action__icon {
+  color: var(--wl-text-heading);
+  filter: brightness(1.12);
+}
+
+.wl-header-settings-action:focus-visible {
+  outline: 2px solid var(--wl-accent-sky);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.wl-header-settings-action[data-spinning="true"] .wl-header-settings-action__icon {
+  animation: wl-gear-spin 0.28s ease;
+}
+
+@keyframes wl-gear-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(72deg);
+  }
+}
+
+/* 左侧边栏：单轨宽度 = 导航宽；把手为右缘中部绝对定位凸耳，非整列竖条 */
+.wl-sidebar-rail {
+  --wl-sidebar-nav-w: 226px;
+  --wl-sidebar-collapsed-gutter: 0px;
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+  box-sizing: border-box;
+  width: var(--wl-sidebar-nav-w);
+  background-color: var(--wl-bg-sidebar);
+  border-right: 1px solid var(--wl-border-sidebar);
+  overflow: visible;
+  transition:
+    width 0.24s ease,
+    background-color 0.22s ease,
+    border-color 0.22s ease;
+}
+
+/* 收起：窄槽 + 工作区同色底，仅中部凸耳保留侧栏色，避免整列「侧栏条」 */
+.wl-sidebar-rail[data-collapsed="true"] {
+  width: var(--wl-sidebar-collapsed-gutter);
+  background-color: transparent;
+  border-right-color: transparent;
+  overflow: visible;
+}
+
+.wl-sidebar-rail__nav {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.2s ease;
+}
+
+/* 导航仍 220px 宽但移出可视区，避免 minWidth 在窄轨内撑破布局 */
+.wl-sidebar-rail[data-collapsed="true"] .wl-sidebar-rail__nav {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--wl-sidebar-nav-w);
+  height: 100%;
+  transform: translateX(-100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/*
+ * 凸耳：贴导航区右缘竖线中部外鼓，右侧连续圆角；收起时置于窄槽中央，仍为一小块与侧栏同色。
+ * 形状由椭圆式圆角近似线稿「页签/捏边」，非独立胶囊按钮块。
+ */
+.wl-sidebar-grip {
+  --wl-sidebar-grip-w: 18px;
+  --wl-sidebar-grip-h: 56px;
+  position: absolute;
+  top: 50%;
+  right: calc(-1 * var(--wl-sidebar-grip-w));
+  z-index: 2;
+  transform: translateY(-50%);
+  margin: 0;
+  padding: 0;
+  border: none;
+  box-sizing: border-box;
+  width: var(--wl-sidebar-grip-w);
+  height: var(--wl-sidebar-grip-h);
+  background-color: var(--wl-bg-sidebar);
+  color: var(--wl-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 连续曲线：右侧半鼓包 */
+  border-radius: 0 48% 48% 0 / 0 46% 46% 0;
+  border: 1px solid var(--wl-border-sidebar);
+  border-left: none;
+  box-shadow: none;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    width 0.22s ease,
+    height 0.22s ease,
+    border-radius 0.22s ease,
+    left 0.24s ease,
+    right 0.24s ease,
+    transform 0.24s ease;
+}
+
+.wl-sidebar-grip::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 6px;
+  height: 30px;
+  transform: translateY(-50%);
+  background-color: var(--wl-bg-sidebar);
+}
+
+.wl-sidebar-grip:hover {
+  background-color: var(--wl-sidebar-grip-hover-bg);
+  color: var(--wl-text-heading);
+}
+
+.wl-sidebar-grip:focus-visible {
+  outline: 2px solid var(--wl-accent-sky);
+  outline-offset: 1px;
+}
+
+.wl-sidebar-rail[data-collapsed="true"] .wl-sidebar-grip {
+  --wl-sidebar-grip-w: 16px;
+  --wl-sidebar-grip-h: 52px;
+  left: auto;
+  right: calc(-1 * var(--wl-sidebar-grip-w));
+  transform: translateY(-50%);
+  border-radius: 0 48% 48% 0 / 0 46% 46% 0;
+}
+
+.wl-sidebar-grip__chevron {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  display: block;
+  transition: transform 0.24s ease;
+  transform: rotate(0deg);
+}
+
+.wl-sidebar-rail[data-collapsed="true"] .wl-sidebar-grip__chevron {
+  transform: rotate(180deg);
+}
+
+/* 列表工具栏内联风险/警示（深浅由 token 控制对比度） */
+.wl-list-inline-alert {
+  font-size: 13px;
+  font-weight: 700;
+  margin-left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wl-list-alert-text);
+  background-color: var(--wl-list-alert-bg);
+  padding: 2px 8px;
+  border-radius: 6px;
+  box-shadow: var(--wl-list-alert-glow);
+}
+
+.wl-list-inline-warn-accent {
+  font-size: 12px;
+  margin-left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wl-list-warn-accent-text);
+}
+
+.wl-theme-toggle__icons {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  display: block;
+  color: var(--wl-text-muted);
+  transition: color 0.18s ease, filter 0.18s ease;
+}
+
+.wl-theme-toggle__icon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+[data-theme="dark"] .wl-theme-toggle__icon--sun {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+}
+
+[data-theme="dark"] .wl-theme-toggle__icon--moon {
+  opacity: 0;
+  transform: rotate(-28deg) scale(0.88);
+  pointer-events: none;
+}
+
+[data-theme="light"] .wl-theme-toggle__icon--sun {
+  opacity: 0;
+  transform: rotate(28deg) scale(0.88);
+  pointer-events: none;
+}
+
+[data-theme="light"] .wl-theme-toggle__icon--moon {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
 }
 
