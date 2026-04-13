@@ -126,6 +126,7 @@ export const InputDialog: React.FC<InputDialogProps> = ({
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button
             type="button"
+            className="wl-confirm-btn-cancel"
             disabled={submitting}
             onClick={() => !submitting && onClose()}
             style={{
@@ -142,6 +143,7 @@ export const InputDialog: React.FC<InputDialogProps> = ({
           </button>
           <button
             type="button"
+            className="wl-confirm-btn-primary"
             disabled={submitting}
             onClick={() => void submit()}
             style={{

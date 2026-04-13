@@ -2,6 +2,17 @@
 
 > 本文件用于记录开发过程中的关键变更，按功能域持续补充。
 
+## 2026-04
+
+### 交互一致性：文件管理、侧栏、按钮、作用域列表与底栏标签
+
+- **文件管理**（`FileManagerPanel.tsx` / `server/internal/httpapi/files.go`）：列目录增加可选 **`mtime`**（Unix 秒）；表格增加 **修改时间**列；列表行 **`wl-table-body` / `wl-table-row`** 与主列表一致的 hover；表头全选 **三态**（`indeterminate`），行为对齐 Pod 列表表头。
+- **左侧资源导航**（`Sidebar.tsx` / `global.css`）：仅可点击资源项 **`wl-sidebar-resource-item`** hover 使用 **`--wl-menu-item-hover`**（深色下避免与侧栏底色撞色）；分组标题无该类名。
+- **全局按钮 hover**（`global.css` / `tokens.css`）：新增 **`--wl-btn-overlay-hover`**，默认 **`inset` 叠层**覆盖大量内联样式按钮；排除已有专用规则的控件；`ConfirmDialog` / `InputDialog` 主操作按钮使用 **`wl-confirm-btn-*`** class。
+- **平台配置 · 已添加作用域**（`App.tsx`）：表格行加 **`wl-table-body` / `wl-table-row`**，整行 hover。
+- **底部标签栏**（`BottomPanel.tsx` / `global.css`）：标签格 **`wl-bottom-panel-tab`** / **`--active`**，hover 共用 **`--wl-btn-overlay-hover`**，激活态 **`--wl-bg-control`**。
+- **文档**：`doc/guide/file-manager.md`、`doc/dev/file-manager-design.md`、`doc/dev/theme-ui.md`、本变更记录。
+
 ## 2026-03（近期）
 
 ### 主题系统收敛、导航入口调整与 Shell 主题切换修复

@@ -59,9 +59,79 @@ body {
   background-color: var(--wl-scrollbar-thumb-hover);
 }
 
+/*
+ * 全局 <button> 默认 hover：在内联 background 上叠一层 --wl-btn-overlay-hover（tokens.css），
+ * 与深浅主题兼容；不依赖业务处逐个补 hover。
+ * 排除已有专用 hover 的按钮；需关闭叠层时用 .wl-btn--no-hover-overlay。
+ * 实心主色/危险确认按钮用 .wl-confirm-btn-* 单独提亮（避免与白膜叠加发灰）。
+ */
+button:hover:not(:disabled):not([aria-disabled="true"]):not(.wl-menu-item):not(.wl-sidebar-resource-item):not(
+    .wl-sidebar-grip
+  ):not(.wl-pod-menu-trigger):not(.wl-table-menu-trigger):not(.wl-theme-toggle):not(.wl-header-settings-action):not(
+    .wl-clearable-search-clear
+  ):not(.wl-searchable-dropdown-row):not(.wl-resource-jump):not(.wl-btn--no-hover-overlay) {
+  box-shadow: inset 0 0 0 999px var(--wl-btn-overlay-hover);
+}
+
+button.wl-confirm-btn-primary:hover:not(:disabled),
+button.wl-confirm-btn-danger:hover:not(:disabled) {
+  box-shadow: none;
+  filter: brightness(1.09);
+}
+
+button.wl-confirm-btn-primary:active:not(:disabled),
+button.wl-confirm-btn-danger:active:not(:disabled) {
+  filter: brightness(0.98);
+}
+
 /* 底栏标签横向滚动：略矮横条 + 内联 padding-bottom，减少悬停/拖动 thumb 盖住标题 */
 .wl-bottom-panel-tabs-scroll::-webkit-scrollbar {
   height: 6px;
+}
+
+/*
+ * 底部标签栏（Shell / Logs / YAML 等）：整格可点区域 hover，与全局按钮叠层共用 --wl-btn-overlay-hover。
+ * 层次：激活（实底 --wl-bg-control）> 非激活 hover（仅叠层）> 非激活常态；激活上再 hover 仅轻微叠层，不压过选中识别。
+ * 边框宽度不变，避免整排抖动。
+ */
+.wl-bottom-panel-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin: 0;
+  border: none;
+  border-right: 1px solid var(--wl-border-sidebar);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  outline: none;
+  color: var(--wl-text-secondary);
+  background-color: transparent;
+  transition: color 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease;
+}
+
+.wl-bottom-panel-tab:not(.wl-bottom-panel-tab--active):hover {
+  box-shadow: inset 0 0 0 999px var(--wl-btn-overlay-hover);
+  color: var(--wl-text-heading);
+}
+
+.wl-bottom-panel-tab--active {
+  background-color: var(--wl-bg-control);
+  color: var(--wl-text-heading);
+}
+
+.wl-bottom-panel-tab--active:hover {
+  box-shadow: inset 0 0 0 999px var(--wl-btn-overlay-hover);
+}
+
+.wl-bottom-panel-tab:focus-visible {
+  outline: 2px solid var(--wl-accent-sky);
+  outline-offset: -2px;
+  z-index: 1;
 }
 
 /* 三点菜单：一级与二级菜单行高亮（背景仅由 class 控制，避免被内联覆盖） */
@@ -112,6 +182,41 @@ body {
 
 .wl-menu-item.wl-menu-item-danger:disabled:hover {
   color: var(--wl-menu-danger-text);
+}
+
+/*
+ * 左侧资源导航：仅可点击项 hover（分组标题无此类名，不触发整行高亮）。
+ * 注意：深色主题下 --wl-bg-sidebar 与 --wl-bg-row-hover 同为 #0f172a，
+ * 若此处用 --wl-bg-row-hover，hover 与侧栏底色无对比，看起来「没有高亮」。
+ * 因此与下拉菜单 .wl-menu-item 一致，使用 --wl-menu-item-hover，在侧栏上始终可见。
+ */
+button.wl-sidebar-resource-item {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  font-size: 13px;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  background-color: transparent;
+  color: var(--wl-text-heading);
+  transition: background-color 0.12s ease, color 0.12s ease;
+  box-sizing: border-box;
+}
+button.wl-sidebar-resource-item:hover:not(:disabled):not(.wl-sidebar-resource-item--active) {
+  background-color: var(--wl-menu-item-hover);
+  color: var(--wl-text-menu);
+}
+button.wl-sidebar-resource-item.wl-sidebar-resource-item--active {
+  color: var(--wl-accent-sky);
+  background-color: var(--wl-bg-control);
+}
+button.wl-sidebar-resource-item.wl-sidebar-resource-item--active:hover:not(:disabled) {
+  background-color: var(--wl-menu-item-hover);
+  color: var(--wl-accent-sky);
+}
+button.wl-sidebar-resource-item:disabled:hover {
+  background-color: transparent;
 }
 
 /* 资源列表 sticky 表头（Pods / Deployments / StatefulSet 等复用 .wl-table-sticky-head） */

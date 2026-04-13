@@ -28,6 +28,11 @@
 - 文件面板默认展开宽度 **520px**（用户可拖拽调整）；拖拽范围约 **300px–780px**。
 - 工具栏按钮使用 `nowrap` 与略紧凑间距，在常见桌面宽度下优先单行排布；极窄时工具栏可横向滚动，避免关键按钮被挤到第二行。
 
+## 列表数据与列目录输出
+
+- 列目录响应中每项除 `name` / `type` / `size` 外，可选字段 **`mtime`**（Unix 秒，修改时间），由容器内 `stat -c %Y` 取得；解析不到则为缺省。
+- Shell 脚本输出为制表符分隔的多列，字段约定见 `server/internal/httpapi/files.go`；前端类型 `ContainerFileEntry` 见 `web/src/api.ts`。
+
 ## 后端接口
 
 - `GET /files` 列目录

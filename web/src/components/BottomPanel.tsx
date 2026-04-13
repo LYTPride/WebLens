@@ -273,19 +273,8 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
               key={t.id}
               role="button"
               tabIndex={0}
+              className={`wl-bottom-panel-tab${activeTabId === t.id ? " wl-bottom-panel-tab--active" : ""}`}
               onClick={() => onActiveTab(t.id)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 10px",
-                borderRight: "1px solid var(--wl-border-sidebar)",
-                backgroundColor: activeTabId === t.id ? "var(--wl-bg-control)" : "transparent",
-                color: activeTabId === t.id ? "var(--wl-text-heading)" : "var(--wl-text-secondary)",
-                cursor: "pointer",
-                fontSize: 12,
-                whiteSpace: "nowrap",
-              }}
             >
               <span>
                 {t.type === "shell"

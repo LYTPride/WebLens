@@ -4594,9 +4594,9 @@ export const App: React.FC = () => {
                         </th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="wl-table-body">
                       {clusterCombosLoading && clusterCombos.length === 0 && (
-                        <tr>
+                        <tr className="wl-table-row">
                           <td colSpan={4} style={{ ...tdStyle, textAlign: "center" }}>
                             加载作用域中…
                           </td>
@@ -4623,7 +4623,7 @@ export const App: React.FC = () => {
                             const fileName = cluster?.filePath.replace(/^.*[/\\]/, "") || "";
                             const aliasDraft = comboAliasDrafts[combo.id] ?? combo.alias ?? "";
                             return (
-                              <tr key={combo.id}>
+                              <tr key={combo.id} className="wl-table-row">
                                 <td style={tdStyle}>
                                   {cluster ? (
                                     <>
@@ -4756,7 +4756,7 @@ export const App: React.FC = () => {
                             );
                           })}
                       {!clusterCombosLoading && clusterCombos.length === 0 && (
-                        <tr>
+                        <tr className="wl-table-row">
                           <td colSpan={4} style={{ ...tdStyle, textAlign: "center" }}>
                             暂未添加任何作用域
                           </td>

@@ -44,6 +44,18 @@ function parentPath(p: string): string {
   return clean.slice(0, idx) || "/";
 }
 
+/** 本地时间，与产品内常见展示一致：YYYY-MM-DD HH:mm */
+function formatFileMtimeUnix(sec: number | undefined): string {
+  if (sec == null || !Number.isFinite(sec) || sec < 0) return "-";
+  const d = new Date(sec * 1000);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day} ${h}:${min}`;
+}
+
 export const FileManagerPanel: React.FC<Props> = ({
   clusterId,
   namespace,
@@ -70,6 +82,7 @@ export const FileManagerPanel: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileTableHeaderSelectRef = useRef<HTMLInputElement | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const [transferTasks, setTransferTasks] = useState<TransferTask[]>([]);
   const skipAddressBlurRef = useRef(false);
@@ -195,13 +208,35 @@ export const FileManagerPanel: React.FC<Props> = ({
     return crumbs;
   }, [currentPath]);
 
-  const toggleAll = (checked: boolean) => {
-    const next: Record<string, boolean> = {};
-    items.forEach((it) => {
-      next[it.name] = checked;
+  /** 与 Pod 列表表头一致：未选/半选 → 全选当前可见；已全选 → 清空当前可见 */
+  const toggleVisibleSelection = useCallback(() => {
+    const vis = items.map((it) => it.name);
+    setSelected((prev) => {
+      const next = { ...prev };
+      const allOn = vis.length > 0 && vis.every((n) => next[n]);
+      if (allOn) vis.forEach((n) => {
+        delete next[n];
+      });
+      else vis.forEach((n) => {
+        next[n] = true;
+      });
+      return next;
     });
-    setSelected(next);
-  };
+  }, [items]);
+
+  useEffect(() => {
+    const el = fileTableHeaderSelectRef.current;
+    if (!el) return;
+    const vis = items.map((it) => it.name);
+    if (vis.length === 0) {
+      el.checked = false;
+      el.indeterminate = false;
+      return;
+    }
+    const nSel = vis.filter((n) => selected[n]).length;
+    el.checked = nSel === vis.length;
+    el.indeterminate = nSel > 0 && nSel < vis.length;
+  }, [items, selected]);
 
   const sizeText = (n: number) => {
     if (n == null || n < 0) return "-";
@@ -644,31 +679,39 @@ export const FileManagerPanel: React.FC<Props> = ({
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr>
-              <th style={th}><input type="checkbox" onChange={(e) => toggleAll(e.target.checked)} checked={items.length > 0 && items.every((it) => selected[it.name])} /></th>
+              <th className="wl-table-sticky-head" style={{ ...th, width: 36, textAlign: "center" }}>
+                <input
+                  ref={fileTableHeaderSelectRef}
+                  type="checkbox"
+                  aria-label="全选当前可见文件与文件夹"
+                  onChange={toggleVisibleSelection}
+                />
+              </th>
               <th style={th}>名称</th>
               <th style={th}>类型</th>
               <th style={th}>大小</th>
+              <th style={{ ...th, whiteSpace: "nowrap" }}>修改时间</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="wl-table-body">
             {loading && (
-              <tr>
-                <td colSpan={4} style={{ ...td, textAlign: "center", color: "var(--wl-text-secondary)" }}>
+              <tr className="wl-table-row">
+                <td colSpan={5} style={{ ...td, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                   加载中…
                 </td>
               </tr>
             )}
             {!loading && items.length === 0 && (
-              <tr>
-                <td colSpan={4} style={{ ...td, textAlign: "center", color: "var(--wl-text-secondary)" }}>
+              <tr className="wl-table-row">
+                <td colSpan={5} style={{ ...td, textAlign: "center", color: "var(--wl-text-secondary)" }}>
                   空目录
                 </td>
               </tr>
             )}
             {!loading &&
               items.map((it) => (
-                <tr key={it.name} style={{ borderBottom: "1px solid var(--wl-border-table-row)" }}>
-                  <td style={td}>
+                <tr key={it.name} className="wl-table-row" style={{ borderBottom: "1px solid var(--wl-border-table-row)" }}>
+                  <td style={{ ...td, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={!!selected[it.name]}
@@ -695,6 +738,9 @@ export const FileManagerPanel: React.FC<Props> = ({
                   </td>
                   <td style={{ ...td, color: "var(--wl-text-secondary)" }}>{it.type === "dir" ? "dir" : "file"}</td>
                   <td style={{ ...td, color: "var(--wl-text-secondary)" }}>{it.type === "dir" ? "-" : sizeText(it.size)}</td>
+                  <td style={{ ...td, color: "var(--wl-text-secondary)", whiteSpace: "nowrap" }}>
+                    {formatFileMtimeUnix(it.mtime)}
+                  </td>
                 </tr>
               ))}
           </tbody>
