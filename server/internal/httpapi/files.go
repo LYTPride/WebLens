@@ -26,6 +26,8 @@ type fileEntry struct {
 	Name string `json:"name"`
 	Type string `json:"type"` // "file" | "dir"
 	Size int64  `json:"size"` // -1 表示未知；dir 通常为 -1
+	// Mtime 为可选的修改时间（Unix 秒），由 stat -c %Y 取得；nil 表示未知
+	Mtime *int64 `json:"mtime,omitempty"`
 }
 
 type listFilesResponse struct {
@@ -51,8 +53,8 @@ func registerFileRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 
-		// 通过 /bin/sh 执行 list：使用 ls -1Ap 区分目录（带 /），并尽力获取文件 size（stat 或 wc -c）
-		// 输出格式：name<TAB>type<TAB>size
+		// 通过 /bin/sh 执行 list：使用 ls -1Ap 区分目录（带 /），并尽力获取文件 size、mtime（stat）
+		// 输出格式：name<TAB>type<TAB>size<TAB>mtimeUnix（mtime 为空表示未知）
 		safePath := strings.ReplaceAll(p, `'`, `'\''`)
 		cmd := fmt.Sprintf(
 			`DIR='%s'; `+
@@ -61,10 +63,12 @@ func registerFileRoutes(r *gin.Engine, reg *cluster.Registry) {
 				`[ -z "$n" ] && continue; `+
 				`case "$n" in "."|".." ) continue;; esac; `+
 				`if [ "${n#*\/}" != "$n" ]; then `+ // endswith /
-				`printf '%%s\tdir\t-1\n' "${n%%/}"; `+
+				`d="${n%%/}"; mt=$(stat -c %%Y "$d" 2>/dev/null || echo ""); `+
+				`printf '%%s\tdir\t-1\t%%s\n' "$d" "$mt"; `+
 				`else `+
 				`sz=$( (stat -c %%s "$n" 2>/dev/null) || (wc -c < "$n" 2>/dev/null) || echo -1 ); `+
-				`printf '%%s\tfile\t%%s\n' "$n" "$sz"; `+
+				`mt=$(stat -c %%Y "$n" 2>/dev/null || echo ""); `+
+				`printf '%%s\tfile\t%%s\t%%s\n' "$n" "$sz" "$mt"; `+
 				`fi; `+
 				`done`,
 			safePath,
@@ -383,12 +387,12 @@ func parseFileEntries(out string) []fileEntry {
 			log.Printf("[files] parseFileEntries skip: invalid field count=%d line=%q", len(parts), trunc)
 			continue
 		}
-		if len(parts) != 3 {
+		if len(parts) != 3 && len(parts) != 4 {
 			trunc := line
 			if len(trunc) > 200 {
 				trunc = trunc[:200] + "..."
 			}
-			log.Printf("[files] parseFileEntries warn: field count=%d line=%q (only first3 will be used)", len(parts), trunc)
+			log.Printf("[files] parseFileEntries warn: field count=%d line=%q (only first 4 fields will be used)", len(parts), trunc)
 		}
 
 		name := parts[0]
@@ -416,7 +420,17 @@ func parseFileEntries(out string) []fileEntry {
 			log.Printf("[files] parseFileEntries warn: parse size failed line=%q", trunc)
 		}
 
-		items = append(items, fileEntry{Name: name, Type: typ, Size: size})
+		var mtime *int64
+		if len(parts) >= 4 {
+			ms := strings.TrimSpace(parts[3])
+			if ms != "" {
+				if v, err := parseInt64(ms); err == nil {
+					mtime = &v
+				}
+			}
+		}
+
+		items = append(items, fileEntry{Name: name, Type: typ, Size: size, Mtime: mtime})
 	}
 	return items
 }

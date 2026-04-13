@@ -151,6 +151,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
           <button
             type="button"
+            className="wl-confirm-btn-cancel"
             disabled={locked}
             onClick={() => {
               if (!locked) onClose();
@@ -169,6 +170,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </button>
           <button
             type="button"
+            className={variant === "primary" ? "wl-confirm-btn-primary" : "wl-confirm-btn-danger"}
             disabled={locked}
             onClick={() => void handleConfirm()}
             style={{

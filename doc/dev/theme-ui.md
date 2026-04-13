@@ -19,7 +19,13 @@
 
 - **轨道**：`App.tsx` 中 `.wl-sidebar-rail` 控制展开宽度；导航内容为 `Sidebar`（`edge="rail"` 时由轨道承担右侧分隔线）。
 - **把手**：`.wl-sidebar-grip` 为边栏右缘中部局部凸耳，与侧栏同色；收起时仅保留小凸耳，不保留整条竖向控制条。
+- **资源项 hover**：可点击项使用 `button.wl-sidebar-resource-item`（分组标题仅为文案 `div`，无该类）。Hover 背景为 `var(--wl-menu-item-hover)`（深色主题下与 `var(--wl-bg-row-hover)` 区分于侧栏底色，避免「看不见 hover」）；激活项为 `wl-sidebar-resource-item--active`，优先级高于 hover。
 - **v1 隐藏入口**：`web/src/utils/v1HiddenViews.ts` 中的 `V1_HIDDEN_VIEWS` 用于侧栏过滤与视图回退；当前 **Nodes** 等入口可按需隐藏，**业务逻辑与 API 仍保留**，恢复时从集合中移除即可。
+
+## 全局按钮与底栏标签 hover
+
+- **原生 `button` 默认 hover**：`global.css` 对绝大多数未单独设计 hover 的按钮使用 **`inset` 叠层**，颜色变量 **`--wl-btn-overlay-hover`**（在 `tokens.css` 中按主题定义）；已有专用样式的按钮通过选择器排除（如 `.wl-menu-item`、`.wl-sidebar-resource-item`、`.wl-pod-menu-trigger` 等）。需关闭叠层时可加 class **`wl-btn--no-hover-overlay`**。确认/输入弹窗主操作按钮使用 **`wl-confirm-btn-primary` / `wl-confirm-btn-danger`** 等单独提亮，避免叠层压在饱和色上发灰。
+- **底部标签栏（Shell / Logs / YAML）**：`BottomPanel.tsx` 中每个标签为 **`div.wl-bottom-panel-tab`**，激活为 **`wl-bottom-panel-tab--active`**；hover 与全局按钮共用 **`--wl-btn-overlay-hover`** 叠层，激活态使用 **`var(--wl-bg-control)`**，层次为 active > hover > normal，不改变边框宽度以免布局抖动。
 
 ## 受限态卡片
 

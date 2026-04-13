@@ -146,6 +146,12 @@
   /* 侧栏曲线把手：仅 hover 凸出区域 */
   --wl-sidebar-grip-hover-bg: rgba(71, 85, 105, 0.46);
 
+  /*
+   * 全局原生 <button> 默认 hover：在内联 background 之上叠一层（见 global.css）。
+   * 深色：微提亮，避免与 --wl-bg-sidebar / 控件底同色导致「无反馈」。
+   */
+  --wl-btn-overlay-hover: rgba(255, 255, 255, 0.09);
+
   color-scheme: dark;
 }
 
@@ -272,6 +278,8 @@
   --wl-access-denied-card-shadow: var(--wl-shadow-modal);
 
   --wl-sidebar-grip-hover-bg: rgba(148, 163, 184, 0.22);
+
+  --wl-btn-overlay-hover: rgba(15, 23, 42, 0.07);
 
   color-scheme: light;
 }

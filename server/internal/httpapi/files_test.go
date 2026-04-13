@@ -47,3 +47,19 @@ func TestParseFileEntries_InvalidFieldCount(t *testing.T) {
 	}
 }
 
+func TestParseFileEntries_WithMtime(t *testing.T) {
+	out := "app\tdir\t-1\t1713000000\n" +
+		"a.log\tfile\t123\t1713000001\n"
+
+	items := parseFileEntries(out)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].Mtime == nil || *items[0].Mtime != 1713000000 {
+		t.Fatalf("unexpected first mtime: %+v", items[0].Mtime)
+	}
+	if items[1].Mtime == nil || *items[1].Mtime != 1713000001 {
+		t.Fatalf("unexpected second mtime: %+v", items[1].Mtime)
+	}
+}
+

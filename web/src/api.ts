@@ -60,6 +60,8 @@ export interface ContainerFileEntry {
   type: "file" | "dir";
   /** bytes; -1 表示未知 */
   size: number;
+  /** 修改时间（Unix 秒），后端 stat 得到；缺省表示未知 */
+  mtime?: number;
 }
 
 export interface ListContainerFilesResponse {

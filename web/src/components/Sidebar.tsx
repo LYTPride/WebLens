@@ -58,18 +58,6 @@ const groupTitleStyle: React.CSSProperties = {
   textTransform: "uppercase" as const,
 };
 
-const itemStyle = (active: boolean): React.CSSProperties => ({
-  display: "block",
-  width: "100%",
-  padding: "8px 16px",
-  fontSize: 13,
-  color: active ? "var(--wl-accent-sky)" : "var(--wl-text-heading)",
-  backgroundColor: active ? "var(--wl-bg-control)" : "transparent",
-  border: "none",
-  cursor: "pointer",
-  textAlign: "left",
-});
-
 interface SidebarProps {
   currentView: ResourceKind;
   onSelect: (view: ResourceKind) => void;
@@ -100,7 +88,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onSelect, edge = 
               <button
                 key={item.id}
                 type="button"
-                style={itemStyle(currentView === item.id)}
+                className={`wl-sidebar-resource-item${currentView === item.id ? " wl-sidebar-resource-item--active" : ""}`}
                 onClick={() => onSelect(item.id)}
               >
                 {item.label}
