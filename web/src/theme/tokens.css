@@ -152,6 +152,26 @@
    */
   --wl-btn-overlay-hover: rgba(255, 255, 255, 0.09);
 
+  /*
+   * 列表顶栏「已选 N 项」批量操作条（Pods / Deployments 等）：与 --wl-pill-* 一样按主题分色，
+   * 避免浅色下沿用深色专用色（如浅字 #fecaca、#99f6e4）导致发灰、发虚。
+   */
+  --wl-bulk-bar-bg: var(--wl-bg-control);
+  --wl-bulk-bar-border: var(--wl-border-strong);
+  --wl-bulk-bar-shadow: none;
+  --wl-bulk-label: var(--wl-text-heading);
+  --wl-bulk-label-muted: var(--wl-text-secondary);
+  --wl-bulk-btn-danger-bg: rgba(185, 28, 28, 0.28);
+  --wl-bulk-btn-danger-border: rgba(248, 113, 113, 0.75);
+  --wl-bulk-btn-danger-text: #fecaca;
+  --wl-bulk-btn-secondary-bg: rgba(13, 148, 136, 0.24);
+  --wl-bulk-btn-secondary-border: rgba(45, 212, 191, 0.42);
+  --wl-bulk-btn-secondary-text: #99f6e4;
+  --wl-bulk-btn-ghost-bg: rgba(255, 255, 255, 0.06);
+  --wl-bulk-btn-ghost-border: var(--wl-border-strong);
+  --wl-bulk-btn-ghost-text: var(--wl-text-menu);
+  --wl-bulk-btn-hover-overlay: rgba(255, 255, 255, 0.1);
+
   color-scheme: dark;
 }
 
@@ -280,6 +300,22 @@
   --wl-sidebar-grip-hover-bg: rgba(148, 163, 184, 0.22);
 
   --wl-btn-overlay-hover: rgba(15, 23, 42, 0.07);
+
+  --wl-bulk-bar-bg: var(--wl-bg-elevated);
+  --wl-bulk-bar-border: var(--wl-border-strong);
+  --wl-bulk-bar-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  --wl-bulk-label: var(--wl-text-heading);
+  --wl-bulk-label-muted: var(--wl-text-secondary);
+  --wl-bulk-btn-danger-bg: var(--wl-pill-danger-bg);
+  --wl-bulk-btn-danger-border: var(--wl-pill-danger-border);
+  --wl-bulk-btn-danger-text: var(--wl-pill-danger-text);
+  --wl-bulk-btn-secondary-bg: rgba(13, 148, 136, 0.14);
+  --wl-bulk-btn-secondary-border: rgba(13, 116, 110, 0.38);
+  --wl-bulk-btn-secondary-text: #0f766e;
+  --wl-bulk-btn-ghost-bg: var(--wl-bg-table);
+  --wl-bulk-btn-ghost-border: #94a3b8;
+  --wl-bulk-btn-ghost-text: var(--wl-text-primary);
+  --wl-bulk-btn-hover-overlay: rgba(15, 23, 42, 0.06);
 
   color-scheme: light;
 }

@@ -4,6 +4,12 @@
 
 ## 2026-04
 
+### 资源列表：行尾菜单关联行高亮与批量操作条可读性
+
+- **行尾三点菜单展开时行高亮**（`global.css` / `App.tsx` / `NodesListTable.tsx` / `PVCListTable.tsx` / `ServicesListTable.tsx`）：主表行增加 **`wl-table-row--menu-open`**，在菜单打开期间保持与 hover 同级的底色并辅以左侧 **sky 内阴影**，鼠标移出行仍可识别「当前菜单对应行」；菜单关闭或执行菜单项后随 `*MenuOpenKey` 清空而恢复。StatefulSet 展开区 Pod 子行若带异常提示 **内联 `box-shadow`**，与菜单关联线 **合并** 避免被覆盖。
+- **Pods / Deployments 多选批量操作条**（`App.tsx` / `tokens.css` / `global.css`）：内联硬编码深色专用色（如删除 `#fecaca`、重启 `#99f6e4`）在浅色主题下对比不足；改为 **`--wl-bulk-*` token** + **`.wl-bulk-action-bar` / `.wl-bulk-btn--danger|secondary|ghost`**，浅色下危险/次级/取消分层更清晰；**`.wl-bulk-btn`** 从全局 `button:hover` 叠层中排除，使用 **`--wl-bulk-btn-hover-overlay`**。已选数量使用 **`.wl-bulk-action-bar__count`** 字重强调。
+- **文档**：`doc/guide/resource-lists.md`、`doc/dev/theme-ui.md`、本变更记录。
+
 ### 交互一致性：文件管理、侧栏、按钮、作用域列表与底栏标签
 
 - **文件管理**（`FileManagerPanel.tsx` / `server/internal/httpapi/files.go`）：列目录增加可选 **`mtime`**（Unix 秒）；表格增加 **修改时间**列；列表行 **`wl-table-body` / `wl-table-row`** 与主列表一致的 hover；表头全选 **三态**（`indeterminate`），行为对齐 Pod 列表表头。
