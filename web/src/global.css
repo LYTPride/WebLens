@@ -69,8 +69,66 @@ button:hover:not(:disabled):not([aria-disabled="true"]):not(.wl-menu-item):not(.
     .wl-sidebar-grip
   ):not(.wl-pod-menu-trigger):not(.wl-table-menu-trigger):not(.wl-theme-toggle):not(.wl-header-settings-action):not(
     .wl-clearable-search-clear
-  ):not(.wl-searchable-dropdown-row):not(.wl-resource-jump):not(.wl-btn--no-hover-overlay) {
+  ):not(.wl-searchable-dropdown-row):not(.wl-resource-jump):not(.wl-btn--no-hover-overlay):not(.wl-bulk-btn) {
   box-shadow: inset 0 0 0 999px var(--wl-btn-overlay-hover);
+}
+
+/* 列表顶栏批量操作条：Pods / Deployments 等（色值见 tokens --wl-bulk-*） */
+.wl-bulk-action-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--wl-bulk-bar-border);
+  background-color: var(--wl-bulk-bar-bg);
+  box-shadow: var(--wl-bulk-bar-shadow);
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--wl-bulk-label);
+}
+.wl-bulk-action-bar__count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.wl-bulk-action-bar__hint {
+  color: var(--wl-bulk-label-muted);
+  font-weight: 400;
+}
+.wl-bulk-btn {
+  margin: 0;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  cursor: pointer;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+  transition: box-shadow 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.wl-bulk-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button.wl-bulk-btn:hover:not(:disabled):not([aria-disabled="true"]) {
+  box-shadow: inset 0 0 0 999px var(--wl-bulk-btn-hover-overlay);
+}
+.wl-bulk-btn--danger {
+  border-color: var(--wl-bulk-btn-danger-border);
+  background-color: var(--wl-bulk-btn-danger-bg);
+  color: var(--wl-bulk-btn-danger-text);
+}
+.wl-bulk-btn--secondary {
+  border-color: var(--wl-bulk-btn-secondary-border);
+  background-color: var(--wl-bulk-btn-secondary-bg);
+  color: var(--wl-bulk-btn-secondary-text);
+}
+.wl-bulk-btn--ghost {
+  border-color: var(--wl-bulk-btn-ghost-border);
+  background-color: var(--wl-bulk-btn-ghost-bg);
+  color: var(--wl-bulk-btn-ghost-text);
 }
 
 button.wl-confirm-btn-primary:hover:not(:disabled),
@@ -236,6 +294,24 @@ th.wl-table-sticky-head input[type="checkbox"] {
 }
 .wl-table-body tr.wl-table-row:hover {
   background-color: var(--wl-bg-row-hover);
+}
+
+/*
+ * 行尾三点菜单展开时：鼠标移出行仍保持与 hover 同级的底色，并以左侧轻量 sky 线表示「当前菜单关联行」
+ * （非永久选中；关闭菜单或点选菜单项后由业务清空 menuOpenKey，此类名即移除）
+ */
+.wl-table-body tr.wl-table-row.wl-table-row--menu-open {
+  background-color: var(--wl-bg-row-hover);
+  box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--wl-accent-sky) 45%, transparent);
+}
+.wl-table-body tr.wl-table-row.wl-row-sort-position-changed.wl-table-row--menu-open {
+  animation: none;
+  background-color: var(--wl-bg-row-hover);
+  box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--wl-accent-sky) 45%, transparent);
+}
+.wl-table-body tr.wl-table-row.wl-row-sort-position-changed.wl-table-row--menu-open:hover {
+  background-color: var(--wl-bg-row-hover);
+  box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--wl-accent-sky) 45%, transparent);
 }
 
 /* 排序启用且 watch 导致该行在排序结果中 index 变化时的短暂提示（与 hover 错开，hover 优先） */

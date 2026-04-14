@@ -5076,24 +5076,11 @@ export const App: React.FC = () => {
                       </button>
                     )}
                     {currentView === "pods" && selectedPodKeys.size > 0 && (
-                      <div
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 8,
-                          flexWrap: "wrap",
-                          padding: "4px 10px",
-                          borderRadius: 6,
-                          border: "1px solid var(--wl-border-strong)",
-                          backgroundColor: "var(--wl-bg-control)",
-                          fontSize: 12,
-                          color: "var(--wl-text-heading)",
-                        }}
-                      >
+                      <div className="wl-bulk-action-bar">
                         <span>
-                          已选 {selectedPodKeys.size} 项
+                          已选 <span className="wl-bulk-action-bar__count">{selectedPodKeys.size}</span> 项
                           {podSelectedNotVisibleCount > 0 && (
-                            <span style={{ color: "var(--wl-text-secondary)" }}>
+                            <span className="wl-bulk-action-bar__hint">
                               {" "}
                               （其中 {podSelectedNotVisibleCount} 项当前未显示）
                             </span>
@@ -5101,6 +5088,7 @@ export const App: React.FC = () => {
                         </span>
                         <button
                           type="button"
+                          className="wl-bulk-btn wl-bulk-btn--danger"
                           disabled={!effectiveClusterId}
                           onClick={() =>
                             setBatchConfirm({
@@ -5108,54 +5096,24 @@ export const App: React.FC = () => {
                               keys: [...selectedPodKeys].sort(),
                             })
                           }
-                          style={{
-                            padding: "3px 10px",
-                            borderRadius: 4,
-                            border: "1px solid #7f1d1d",
-                            backgroundColor: "rgba(127,29,29,0.35)",
-                            color: "#fecaca",
-                            cursor: effectiveClusterId ? "pointer" : "not-allowed",
-                            fontSize: 11,
-                          }}
                         >
                           删除
                         </button>
                         <button
                           type="button"
+                          className="wl-bulk-btn wl-bulk-btn--ghost"
                           onClick={() => setSelectedPodKeys(new Set())}
-                          style={{
-                            padding: "3px 10px",
-                            borderRadius: 4,
-                            border: "1px solid var(--wl-border-strong)",
-                            backgroundColor: "transparent",
-                            color: "var(--wl-text-secondary)",
-                            cursor: "pointer",
-                            fontSize: 11,
-                          }}
                         >
                           取消选择
                         </button>
                       </div>
                     )}
                     {currentView === "deployments" && selectedDeploymentKeys.size > 0 && (
-                      <div
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 8,
-                          flexWrap: "wrap",
-                          padding: "4px 10px",
-                          borderRadius: 6,
-                          border: "1px solid var(--wl-border-strong)",
-                          backgroundColor: "var(--wl-bg-control)",
-                          fontSize: 12,
-                          color: "var(--wl-text-heading)",
-                        }}
-                      >
+                      <div className="wl-bulk-action-bar">
                         <span>
-                          已选 {selectedDeploymentKeys.size} 项
+                          已选 <span className="wl-bulk-action-bar__count">{selectedDeploymentKeys.size}</span> 项
                           {deploymentSelectedNotVisibleCount > 0 && (
-                            <span style={{ color: "var(--wl-text-secondary)" }}>
+                            <span className="wl-bulk-action-bar__hint">
                               {" "}
                               （其中 {deploymentSelectedNotVisibleCount} 项当前未显示）
                             </span>
@@ -5163,6 +5121,7 @@ export const App: React.FC = () => {
                         </span>
                         <button
                           type="button"
+                          className="wl-bulk-btn wl-bulk-btn--danger"
                           disabled={!effectiveClusterId}
                           onClick={() =>
                             setBatchConfirm({
@@ -5170,20 +5129,12 @@ export const App: React.FC = () => {
                               keys: [...selectedDeploymentKeys].sort(),
                             })
                           }
-                          style={{
-                            padding: "3px 10px",
-                            borderRadius: 4,
-                            border: "1px solid #7f1d1d",
-                            backgroundColor: "rgba(127,29,29,0.35)",
-                            color: "#fecaca",
-                            cursor: effectiveClusterId ? "pointer" : "not-allowed",
-                            fontSize: 11,
-                          }}
                         >
                           删除
                         </button>
                         <button
                           type="button"
+                          className="wl-bulk-btn wl-bulk-btn--secondary"
                           disabled={!effectiveClusterId}
                           onClick={() =>
                             setBatchConfirm({
@@ -5191,30 +5142,13 @@ export const App: React.FC = () => {
                               keys: [...selectedDeploymentKeys].sort(),
                             })
                           }
-                          style={{
-                            padding: "3px 10px",
-                            borderRadius: 4,
-                            border: "1px solid var(--wl-border-strong)",
-                            backgroundColor: "rgba(13,148,136,0.25)",
-                            color: "#99f6e4",
-                            cursor: effectiveClusterId ? "pointer" : "not-allowed",
-                            fontSize: 11,
-                          }}
                         >
                           重启
                         </button>
                         <button
                           type="button"
+                          className="wl-bulk-btn wl-bulk-btn--ghost"
                           onClick={() => setSelectedDeploymentKeys(new Set())}
-                          style={{
-                            padding: "3px 10px",
-                            borderRadius: 4,
-                            border: "1px solid var(--wl-border-strong)",
-                            backgroundColor: "transparent",
-                            color: "var(--wl-text-secondary)",
-                            cursor: "pointer",
-                            fontSize: 11,
-                          }}
                         >
                           取消选择
                         </button>
@@ -5451,7 +5385,7 @@ export const App: React.FC = () => {
                             key={p.metadata.uid}
                             className={`wl-table-row${
                               podsSortMoveHighlight.has(p.metadata.uid) ? " wl-row-sort-position-changed" : ""
-                            }`}
+                            }${isMenuOpen ? " wl-table-row--menu-open" : ""}`}
                           >
                             <td
                               style={{ ...tdStyle, width: LIST_SELECT_COL_WIDTH, textAlign: "center" }}
@@ -5778,7 +5712,7 @@ export const App: React.FC = () => {
                               deploymentsSortMoveHighlight.has(deploySortRowId)
                                 ? " wl-row-sort-position-changed"
                                 : ""
-                            }`}
+                            }${isMenuOpen ? " wl-table-row--menu-open" : ""}`}
                           >
                             <td
                               style={{ ...tdStyle, width: LIST_SELECT_COL_WIDTH, textAlign: "center" }}
@@ -6123,7 +6057,7 @@ export const App: React.FC = () => {
                         return (
                           <Fragment key={(s.metadata.uid as string) || menuKey}>
                             <tr
-                              className="wl-table-row"
+                              className={`wl-table-row${isMenuOpen ? " wl-table-row--menu-open" : ""}`}
                               onClick={() => {
                                 setExpandedStatefulSetKeys((prev) => {
                                   const n = new Set(prev);
@@ -6486,17 +6420,27 @@ export const App: React.FC = () => {
                                             hBr = "var(--wl-pill-danger-border)";
                                             hCol = "var(--wl-pill-danger-text)";
                                           }
+                                          const stsPodMenuAccent =
+                                            "inset 2px 0 0 0 color-mix(in srgb, var(--wl-accent-sky) 45%, transparent)";
                                           const rowShell: React.CSSProperties = {
                                             backgroundColor: abnormalRow ? "rgba(248,113,113,0.06)" : undefined,
-                                            boxShadow: isPrimaryAbnormal
-                                              ? "inset 3px 0 0 rgba(250,204,21,0.9)"
-                                              : abnormalRow
-                                                ? "inset 3px 0 0 rgba(249,115,22,0.45)"
-                                                : undefined,
+                                            boxShadow: (() => {
+                                              const base = isPrimaryAbnormal
+                                                ? "inset 3px 0 0 rgba(250,204,21,0.9)"
+                                                : abnormalRow
+                                                  ? "inset 3px 0 0 rgba(249,115,22,0.45)"
+                                                  : undefined;
+                                              if (pMenuOpen && base) return `${base}, ${stsPodMenuAccent}`;
+                                              return base;
+                                            })(),
                                           };
                                           const stsSubTd = secondaryExpandDataCellStyle(secondaryExpandTdBase);
                                           return (
-                                            <tr key={p.metadata.uid} className="wl-table-row" style={rowShell}>
+                                            <tr
+                                              key={p.metadata.uid}
+                                              className={`wl-table-row${pMenuOpen ? " wl-table-row--menu-open" : ""}`}
+                                              style={rowShell}
+                                            >
                                               <td style={stsSubTd}>
                                                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                                                   <span>{ord ?? "—"}</span>
@@ -6856,7 +6800,7 @@ export const App: React.FC = () => {
                         return (
                           <Fragment key={(ing.metadata.uid as string) || menuKey}>
                             <tr
-                              className="wl-table-row"
+                              className={`wl-table-row${isMenuOpen ? " wl-table-row--menu-open" : ""}`}
                               onClick={() => {
                                 setExpandedIngressKeys((prev) => {
                                   const n = new Set(prev);

@@ -235,7 +235,10 @@ export function NodesListTable({
           const age = formatAgeFromMetadata(row.metadata as { creationTimestamp?: string }, listAgeNow);
           const podCount = countPodsOnNode(pods, nname);
           return (
-            <tr key={(row.metadata as { uid?: string })?.uid || menuKey} className="wl-table-row">
+            <tr
+              key={(row.metadata as { uid?: string })?.uid || menuKey}
+              className={`wl-table-row${isMenuOpen ? " wl-table-row--menu-open" : ""}`}
+            >
               <td style={baseCell} title={nname}>
                 <span className="wl-table-hover-copy">
                   <span className="wl-table-hover-copy__main">

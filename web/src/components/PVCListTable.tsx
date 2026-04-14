@@ -265,7 +265,10 @@ export function PVCListTable({
           const usedByTitle =
             usedBySummary !== "—" ? `${PVC_USED_BY_DESCRIBE_HINT}（${usedBySummary}）` : undefined;
           return (
-            <tr key={(row.metadata as { uid?: string })?.uid || menuKey} className="wl-table-row">
+            <tr
+              key={(row.metadata as { uid?: string })?.uid || menuKey}
+              className={`wl-table-row${isMenuOpen ? " wl-table-row--menu-open" : ""}`}
+            >
               <td style={baseCell} title={pname}>
                 <span className="wl-table-hover-copy">
                   <span className="wl-table-hover-copy__main">

@@ -274,7 +274,7 @@ export function ServicesListTable({
           return (
             <Fragment key={(svc.metadata as { uid?: string })?.uid || menuKey}>
               <tr
-                className="wl-table-row"
+                className={`wl-table-row${isMenuOpen ? " wl-table-row--menu-open" : ""}`}
                 onClick={() => {
                   setExpandedKeys((prev) => {
                     const n = new Set(prev);
@@ -447,7 +447,10 @@ export function ServicesListTable({
                         className="wl-menu-item"
                         style={menuItemStyleForDropdown}
                         disabled={rowBusy}
-                        onClick={() => openEditTab(svc)}
+                        onClick={() => {
+                          setMenuOpenKey(null);
+                          openEditTab(svc);
+                        }}
                       >
                         <span style={{ marginRight: 8 }}>✎</span> Edit
                       </button>

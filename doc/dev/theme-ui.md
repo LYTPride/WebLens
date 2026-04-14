@@ -24,12 +24,18 @@
 
 ## 全局按钮与底栏标签 hover
 
-- **原生 `button` 默认 hover**：`global.css` 对绝大多数未单独设计 hover 的按钮使用 **`inset` 叠层**，颜色变量 **`--wl-btn-overlay-hover`**（在 `tokens.css` 中按主题定义）；已有专用样式的按钮通过选择器排除（如 `.wl-menu-item`、`.wl-sidebar-resource-item`、`.wl-pod-menu-trigger` 等）。需关闭叠层时可加 class **`wl-btn--no-hover-overlay`**。确认/输入弹窗主操作按钮使用 **`wl-confirm-btn-primary` / `wl-confirm-btn-danger`** 等单独提亮，避免叠层压在饱和色上发灰。
+- **原生 `button` 默认 hover**：`global.css` 对绝大多数未单独设计 hover 的按钮使用 **`inset` 叠层**，颜色变量 **`--wl-btn-overlay-hover`**（在 `tokens.css` 中按主题定义）；已有专用样式的按钮通过选择器排除（如 `.wl-menu-item`、`.wl-sidebar-resource-item`、`.wl-pod-menu-trigger`、**`.wl-bulk-btn`** 等）。需关闭叠层时可加 class **`wl-btn--no-hover-overlay`**。确认/输入弹窗主操作按钮使用 **`wl-confirm-btn-primary` / `wl-confirm-btn-danger`** 等单独提亮，避免叠层压在饱和色上发灰。
 - **底部标签栏（Shell / Logs / YAML）**：`BottomPanel.tsx` 中每个标签为 **`div.wl-bottom-panel-tab`**，激活为 **`wl-bottom-panel-tab--active`**；hover 与全局按钮共用 **`--wl-btn-overlay-hover`** 叠层，激活态使用 **`var(--wl-bg-control)`**，层次为 active > hover > normal，不改变边框宽度以免布局抖动。
 
 ## 受限态卡片
 
 - **组件**：`ResourceAccessDeniedState.tsx` 使用 `--wl-access-denied-card-*` 等 token，深浅主题下均为卡片式说明，而非固定深色面板。
+
+## 资源列表：批量操作条与行菜单关联 token
+
+- **批量操作条**（`App.tsx` 中 Pods / Deployments 多选条）：样式变量在 **`tokens.css`** 的 **`--wl-bulk-bar-*`**、**`--wl-bulk-label-*`**、**`--wl-bulk-btn-danger|secondary|ghost-*`**、**`--wl-bulk-btn-hover-overlay`**；浅色下危险按钮与 **pill 危险色**（`--wl-pill-danger-*`）对齐，避免沿用仅适合深色的硬编码前景色。
+- **类名**：**`.wl-bulk-action-bar`**、**`.wl-bulk-btn`**（**`--danger` / `--secondary` / `--ghost`**）、数量 **`.wl-bulk-action-bar__count`**、补充说明 **`.wl-bulk-action-bar__hint`**，定义见 **`global.css`**。
+- **行尾菜单打开时的行高亮**：主表 **`wl-table-row--menu-open`**（与 **`wl-row-sort-position-changed`** 并存时优先稳定菜单关联态），见 **`global.css`** 中 `.wl-table-body tr.wl-table-row` 相关规则。
 
 ## 相关记录
 
