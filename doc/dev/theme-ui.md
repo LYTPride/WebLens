@@ -26,6 +26,7 @@
 
 - **原生 `button` 默认 hover**：`global.css` 对绝大多数未单独设计 hover 的按钮使用 **`inset` 叠层**，颜色变量 **`--wl-btn-overlay-hover`**（在 `tokens.css` 中按主题定义）；已有专用样式的按钮通过选择器排除（如 `.wl-menu-item`、`.wl-sidebar-resource-item`、`.wl-pod-menu-trigger`、**`.wl-bulk-btn`** 等）。需关闭叠层时可加 class **`wl-btn--no-hover-overlay`**。确认/输入弹窗主操作按钮使用 **`wl-confirm-btn-primary` / `wl-confirm-btn-danger`** 等单独提亮，避免叠层压在饱和色上发灰。
 - **底部标签栏（Shell / Logs / YAML）**：`BottomPanel.tsx` 中每个标签为 **`div.wl-bottom-panel-tab`**，激活为 **`wl-bottom-panel-tab--active`**；hover 与全局按钮共用 **`--wl-btn-overlay-hover`** 叠层，激活态使用 **`var(--wl-bg-control)`**，层次为 active > hover > normal，不改变边框宽度以免布局抖动。
+- **底部标签「内容区」布局**：每个标签对应的内容容器为 **纵向 flex**（`flexDirection: "column"` + `minWidth: 0`），使 Shell / Logs / YAML 等在**横向**上被 stretch 铺满底栏宽度；若误用默认横向 flex，Logs 等子树会只占据内容宽度而出现右侧留白（修复说明见 `doc/dev/changelog.md`「底部工作区：Logs 标签页横向铺满」）。
 
 ## 受限态卡片
 

@@ -194,7 +194,17 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        minHeight: 0,
+        minWidth: 0,
+        width: "100%",
+        alignSelf: "stretch",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -203,6 +213,9 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           padding: "6px 10px",
           borderBottom: "1px solid var(--wl-border-sidebar)",
           flexShrink: 0,
+          minWidth: 0,
+          width: "100%",
+          boxSizing: "border-box",
         }}
       >
         <label style={{ fontSize: 12, color: "var(--wl-text-secondary)" }}>容器：</label>
@@ -401,9 +414,12 @@ export const LogsTab: React.FC<LogsTabProps> = ({
         onScroll={handleScroll}
         style={{
           flex: 1,
+          minWidth: 0,
+          width: "100%",
           margin: 0,
           padding: 10,
           overflow: "auto",
+          boxSizing: "border-box",
           fontSize: 13,
           fontFamily:
             "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
