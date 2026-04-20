@@ -338,8 +338,11 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
               key={tab.id}
               style={{
                 display: activeTabId !== tab.id ? "none" : "flex",
+                /* 必须是 column：默认 row 时子项在主轴（横向）上 flex-grow 为 0，Logs/YAML 等会缩成内容宽导致右侧大片留白 */
+                flexDirection: "column",
                 flex: 1,
                 minHeight: 0,
+                minWidth: 0,
                 overflow: "hidden",
                 backgroundColor: tab.type === "shell" ? "var(--wl-bg-table)" : undefined,
               }}

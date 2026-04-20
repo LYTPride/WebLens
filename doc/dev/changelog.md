@@ -4,6 +4,13 @@
 
 ## 2026-04
 
+### 底部工作区：Logs 标签页横向铺满（修复右侧留白）
+
+- **根因**：`BottomPanel.tsx` 中每个标签的内容容器使用 `display: flex` 但未指定 `flex-direction`，浏览器默认为 **横向 flex**；子项在主轴（宽度）上 `flex-grow` 为 0，`LogsTab` 未像 Shell 内层那样参与伸展，工具栏与 `<pre>` 日志区仅占内容宽度，右侧出现大块空白。
+- **修复**：标签内容容器改为 **`flexDirection: "column"`**（子项默认 `align-items: stretch`，横向铺满），并加 **`minWidth: 0`**；`LogsTab.tsx` 根容器与工具栏、日志滚动区补齐 **`flex: 1` / `width: 100%` / `minWidth: 0`** 等，与 flex 列布局一致。
+- **涉及文件**：`web/src/components/BottomPanel.tsx`、`web/src/components/LogsTab.tsx`。
+- **文档**：`doc/dev/theme-ui.md`、`doc/guide/pods.md`、本小节。
+
 ### 资源列表：行尾菜单关联行高亮与批量操作条可读性
 
 - **行尾三点菜单展开时行高亮**（`global.css` / `App.tsx` / `NodesListTable.tsx` / `PVCListTable.tsx` / `ServicesListTable.tsx`）：主表行增加 **`wl-table-row--menu-open`**，在菜单打开期间保持与 hover 同级的底色并辅以左侧 **sky 内阴影**，鼠标移出行仍可识别「当前菜单对应行」；菜单关闭或执行菜单项后随 `*MenuOpenKey` 清空而恢复。StatefulSet 展开区 Pod 子行若带异常提示 **内联 `box-shadow`**，与菜单关联线 **合并** 避免被覆盖。

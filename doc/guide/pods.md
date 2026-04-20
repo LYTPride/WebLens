@@ -8,7 +8,7 @@ Pods 页面由三部分组成：
 
 - 顶部：作用域选择（cluster + namespace）与应用按钮
 - 中部：Pods 表格（支持按 Name 过滤、列排序与 Watch 实时重排；详见 [资源列表说明](./resource-lists.md)）
-- 底部：工作区（Logs / Shell / 编辑等标签）
+- 底部：工作区（Logs / Shell / 编辑等标签）；**Logs** 工具栏与日志正文区域应横向铺满底栏内容区（若遇仅左侧有内容、右侧大块空白，一般为前端布局问题，见 `doc/dev/changelog.md` 相关修复记录）
 
 ## 状态标签
 
