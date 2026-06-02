@@ -64,9 +64,7 @@ func (r *Registry) LoadFromDir(dir string) error {
 			return nil
 		}
 
-		// simple filter on extension/name
-		lower := strings.ToLower(d.Name())
-		if !(strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") || strings.HasPrefix(lower, "config")) {
+		if !isKubeconfigCandidateName(d.Name()) {
 			return nil
 		}
 
@@ -78,6 +76,25 @@ func (r *Registry) LoadFromDir(dir string) error {
 	})
 
 	return err
+}
+
+func isKubeconfigCandidateName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.HasPrefix(name, ".") {
+		return false
+	}
+
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, "~") ||
+		strings.HasSuffix(lower, ".tmp") ||
+		strings.HasSuffix(lower, ".bak") ||
+		strings.HasSuffix(lower, ".swp") ||
+		strings.HasSuffix(lower, ".old") {
+		return false
+	}
+
+	ext := filepath.Ext(lower)
+	return ext == "" || ext == ".config" || ext == ".yaml" || ext == ".yml"
 }
 
 func (r *Registry) loadKubeconfigFile(path string) error {
