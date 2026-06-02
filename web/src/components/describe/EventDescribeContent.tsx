@@ -84,7 +84,7 @@ export function EventDescribeContent({
             wordBreak: "break-word",
             padding: "8px 10px",
             borderRadius: 6,
-            backgroundColor: "rgba(15,23,42,0.9)",
+            backgroundColor: "var(--wl-describe-section-bg)",
             border: "1px solid var(--wl-border-strong)",
           }}
         >

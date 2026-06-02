@@ -537,6 +537,84 @@ const tdStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
+const clusterComboActionColWidth = 128;
+
+const clusterComboActionThStyle: React.CSSProperties = {
+  ...thStyle,
+  width: clusterComboActionColWidth,
+  minWidth: clusterComboActionColWidth,
+  whiteSpace: "nowrap",
+};
+
+const clusterComboActionTdStyle: React.CSSProperties = {
+  ...tdStyle,
+  width: clusterComboActionColWidth,
+  minWidth: clusterComboActionColWidth,
+  whiteSpace: "nowrap",
+};
+
+const clusterComboActionButtonsStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  flexWrap: "nowrap",
+};
+
+const clusterComboActionButtonStyle: React.CSSProperties = {
+  padding: "4px 8px",
+  borderRadius: 4,
+  border: "1px solid var(--wl-border-subtle)",
+  backgroundColor: "var(--wl-bg-elevated)",
+  color: "var(--wl-text-primary)",
+  cursor: "pointer",
+  fontSize: 12,
+  minWidth: 44,
+  whiteSpace: "nowrap",
+  flexShrink: 0,
+};
+
+const clusterComboAliasCellStyle: React.CSSProperties = {
+  ...tdStyle,
+  minWidth: 0,
+};
+
+const clusterComboAliasControlsStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 4,
+  minWidth: 0,
+};
+
+const clusterComboAliasInputStyle: React.CSSProperties = {
+  flex: "1 1 auto",
+  minWidth: 0,
+  width: "100%",
+  padding: "4px 6px",
+  borderRadius: 4,
+  border: "1px solid var(--wl-border-subtle)",
+  backgroundColor: "var(--wl-bg-table)",
+  color: "var(--wl-text-primary)",
+};
+
+const clusterComboAliasButtonStyle: React.CSSProperties = {
+  padding: "2px 6px",
+  borderRadius: 4,
+  border: "1px solid var(--wl-border-subtle)",
+  backgroundColor: "var(--wl-bg-elevated)",
+  color: "var(--wl-text-primary)",
+  cursor: "pointer",
+  fontSize: 12,
+  whiteSpace: "nowrap",
+  flexShrink: 0,
+};
+
+const clusterComboTextEllipsisStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
 type K8sItem = { metadata: { name: string; namespace?: string; uid?: string }; [k: string]: unknown };
 
 /** Deployment 列表行（来自 K8s List API 的 item） */
@@ -4565,7 +4643,7 @@ export const App: React.FC = () => {
                 <div
                   style={{
                     maxHeight: 260,
-                    overflowY: "auto",
+                    overflow: "auto",
                     borderRadius: 6,
                     border: "1px solid var(--wl-border-subtle)",
                     backgroundColor: "var(--wl-bg-table)",
@@ -4574,10 +4652,18 @@ export const App: React.FC = () => {
                   <table
                     style={{
                       width: "100%",
+                      minWidth: 760,
+                      tableLayout: "fixed",
                       borderCollapse: "collapse",
                       fontSize: 12,
                     }}
                   >
+                    <colgroup>
+                      <col style={{ width: 240 }} />
+                      <col style={{ width: 128 }} />
+                      <col style={{ width: 264 }} />
+                      <col style={{ width: clusterComboActionColWidth }} />
+                    </colgroup>
                     <thead>
                       <tr>
                         <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
@@ -4589,7 +4675,7 @@ export const App: React.FC = () => {
                         <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           别名
                         </th>
-                        <th style={{ ...thStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
+                        <th style={{ ...clusterComboActionThStyle, position: "sticky", top: 0, backgroundColor: "var(--wl-bg-table)" }}>
                           操作
                         </th>
                       </tr>
@@ -4627,16 +4713,21 @@ export const App: React.FC = () => {
                                 <td style={tdStyle}>
                                   {cluster ? (
                                     <>
-                                      <div>{cluster.name}</div>
-                                      <div style={{ fontSize: 11, color: "var(--wl-text-muted)" }}>{fileName}</div>
+                                      <div style={clusterComboTextEllipsisStyle} title={cluster.name}>{cluster.name}</div>
+                                      <div
+                                        style={{ ...clusterComboTextEllipsisStyle, fontSize: 11, color: "var(--wl-text-muted)" }}
+                                        title={fileName}
+                                      >
+                                        {fileName}
+                                      </div>
                                     </>
                                   ) : (
                                     <span style={{ color: "#f97373" }}>集群未找到：{combo.clusterId}</span>
                                   )}
                                 </td>
-                                <td style={tdStyle}>{combo.namespace}</td>
-                                <td style={tdStyle}>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <td style={{ ...tdStyle, whiteSpace: "nowrap" }} title={combo.namespace}>{combo.namespace}</td>
+                                <td style={clusterComboAliasCellStyle}>
+                                  <div style={clusterComboAliasControlsStyle}>
                                     <input
                                       type="text"
                                       value={aliasDraft}
@@ -4647,14 +4738,7 @@ export const App: React.FC = () => {
                                         }))
                                       }
                                       placeholder="可选：为作用域起个别名"
-                                      style={{
-                                        flex: 1,
-                                        padding: "4px 6px",
-                                        borderRadius: 4,
-                                        border: "1px solid var(--wl-border-subtle)",
-                                        backgroundColor: "var(--wl-bg-table)",
-                                        color: "var(--wl-text-primary)",
-                                      }}
+                                      style={clusterComboAliasInputStyle}
                                     />
                                     <button
                                       type="button"
@@ -4669,11 +4753,7 @@ export const App: React.FC = () => {
                                           );
                                         }
                                       }}
-                                      style={{
-                                        ...btnStyle,
-                                        padding: "2px 6px",
-                                        marginRight: 0,
-                                      }}
+                                      style={clusterComboAliasButtonStyle}
                                     >
                                       ✓
                                     </button>
@@ -4695,18 +4775,14 @@ export const App: React.FC = () => {
                                           );
                                         }
                                       }}
-                                      style={{
-                                        ...btnStyle,
-                                        padding: "2px 6px",
-                                        marginRight: 0,
-                                      }}
+                                      style={clusterComboAliasButtonStyle}
                                     >
                                       ✕
                                     </button>
                                   </div>
                                 </td>
-                                <td style={tdStyle}>
-                                  <div style={{ display: "flex", gap: 6 }}>
+                                <td style={clusterComboActionTdStyle}>
+                                  <div style={clusterComboActionButtonsStyle}>
                                     <button
                                       type="button"
                                       onClick={async () => {
@@ -4727,7 +4803,7 @@ export const App: React.FC = () => {
                                           );
                                         }
                                       }}
-                                      style={btnStyle}
+                                      style={clusterComboActionButtonStyle}
                                     >
                                       测试
                                     </button>
@@ -4746,7 +4822,7 @@ export const App: React.FC = () => {
                                           );
                                         }
                                       }}
-                                      style={btnStyle}
+                                      style={clusterComboActionButtonStyle}
                                     >
                                       删除
                                     </button>
