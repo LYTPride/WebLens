@@ -4,6 +4,13 @@
 
 ## 2026-04
 
+### 平台配置、Events Describe 与 kubeconfig 文件扫描修复
+
+- **kubeconfig 扫描支持 `.config`**（`server/internal/cluster/registry.go`）：原扫描条件只放行 `.yaml` / `.yml` 或文件名以 `config` 开头的文件，导致 `xxxxx.config` 不会进入 `/api/clusters`，前端「集群选择」下拉框无法选到。扫描候选规则改为允许 **无后缀**、**`.config`**、**`.yaml`**、**`.yml`**；继续跳过隐藏文件、临时/备份文件与目录，候选文件仍由 `clientcmd.LoadFromFile` 做 kubeconfig 内容解析。新增 `server/internal/cluster/registry_test.go` 覆盖无后缀、`.config`、`.yaml`、隐藏/临时/目录跳过。
+- **平台配置 · 已添加作用域操作列稳定布局**（`web/src/pages/App.tsx`）：表格切到固定列宽与容器横向滚动；「操作」列设定稳定宽度，**测试 / 删除** 按钮容器 `nowrap`，按钮 `white-space: nowrap` 且 `flex-shrink: 0`；kubeconfig 文件名列省略，别名 input 使用 `minWidth: 0` 在自身列内收缩，避免长内容把操作按钮压成竖排。
+- **Events Describe Message 可读性**（`web/src/components/describe/EventDescribeContent.tsx`）：Message 块从固定深色背景改为 `--wl-describe-section-bg`，文字继续使用主题 token；浅色主题下恢复浅底深字，深色主题下保持原详情面板层级。
+- **文档同步**：根 `README.md` 只补充 kubeconfig 扫描这一核心能力；`doc/guide/events.md`、`doc/guide/resource-lists.md`、`doc/README.md` 与本变更记录补充用户可见行为和实现说明。
+
 ### 底部工作区：Logs 标签页横向铺满（修复右侧留白）
 
 - **根因**：`BottomPanel.tsx` 中每个标签的内容容器使用 `display: flex` 但未指定 `flex-direction`，浏览器默认为 **横向 flex**；子项在主轴（宽度）上 `flex-grow` 为 0，`LogsTab` 未像 Shell 内层那样参与伸展，工具栏与 `<pre>` 日志区仅占内容宽度，右侧出现大块空白。
@@ -163,4 +170,3 @@
 
 - 新增可复用组件 `web/src/components/ClearableSearchInput.tsx`：有关键字时显示右侧清空按钮，点击清空并 focus 回输入框
 - 已接入：平台配置「已添加作用域」搜索、集群下拉内搜索、资源列表 Name 过滤、Logs 关键字、Pod/Deployment YAML 编辑区关键字（样式见 `global.css` `.wl-clearable-search-clear`）
-

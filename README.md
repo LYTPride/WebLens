@@ -28,6 +28,8 @@ WebLens 是一个面向 Kubernetes 运维场景的 Web 控制台。它通过浏�
 
 首次使用请通过环境变量 **`WEBLENS_KUBECONFIG_DIR`**（**绝对路径**）指向 kubeconfig 目录，或在 Web 控制台「平台配置 · kubeconfig 存放目录」中填写保存。未配置时集群列表为空，直至目录配置成功。
 
+后端会扫描该目录中的 kubeconfig 文件：支持 **无后缀**、**`.config`**、**`.yaml`**、**`.yml`** 文件名；隐藏文件、临时/备份文件与目录会被跳过，候选文件仍需通过 kubeconfig 内容解析。
+
 可选：**`WEBLENS_ANALYTICS_LOG`** 指定 v1 **使用行为埋点** NDJSON 日志路径（默认 `logs/analytics.log`，与主日志分离）；前端 `POST /api/analytics/events`，失败不影响操作。说明见 `doc/dev/analytics.md`。
 
 ```bash
