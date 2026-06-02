@@ -14,16 +14,17 @@ type WlDropdownSurfaceProps = {
   children: React.ReactNode;
   role?: React.AriaRole;
   onClick?: React.MouseEventHandler<HTMLDivElement>;
+  onWheel?: React.WheelEventHandler<HTMLDivElement>;
 };
 
 /**
  * 统一下拉视觉容器（背景、圆角、阴影由 global.css 绑定 variant）。
  */
 export const WlDropdownSurface = React.forwardRef<HTMLDivElement, WlDropdownSurfaceProps>(
-  function WlDropdownSurface({ variant, className, style, children, role = "presentation", onClick }, ref) {
+  function WlDropdownSurface({ variant, className, style, children, role = "presentation", onClick, onWheel }, ref) {
     const cn = [VARIANT_CLASS[variant], className].filter(Boolean).join(" ");
     return (
-      <div ref={ref} className={cn} style={style} role={role} onClick={onClick}>
+      <div ref={ref} className={cn} style={style} role={role} onClick={onClick} onWheel={onWheel}>
         {children}
       </div>
     );

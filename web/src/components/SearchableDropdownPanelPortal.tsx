@@ -91,6 +91,7 @@ export function SearchableDropdownPanelPortal({
           minWidth: layout.minWidth,
           maxHeight: layout.maxHeight,
           overflow: layout.maxHeight ? ("hidden" as const) : undefined,
+          overflowX: "hidden" as const,
           display: "flex" as const,
           flexDirection: "column" as const,
           zIndex: Z_INDEX.dropdownSurface,
@@ -103,6 +104,7 @@ export function SearchableDropdownPanelPortal({
           left: 0,
           visibility: "hidden" as const,
           minWidth: minWidthPx,
+          overflowX: "hidden" as const,
           display: "flex" as const,
           flexDirection: "column" as const,
           zIndex: Z_INDEX.dropdownSurface,
@@ -123,6 +125,7 @@ export function SearchableDropdownPanelPortal({
         className="wl-searchable-dropdown-panel"
         style={positionedVisible}
         onClick={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
       >
         {children}
       </WlDropdownSurface>

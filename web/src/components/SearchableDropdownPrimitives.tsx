@@ -39,6 +39,9 @@ export const WL_SEARCHABLE_DROPDOWN_SEARCH_MARGIN_STYLE: React.CSSProperties = {
 /** 列表滚动区（占满剩余高度） */
 export const WL_SEARCHABLE_DROPDOWN_SCROLL_STYLE: React.CSSProperties = {
   overflowY: "auto",
+  overflowX: "hidden",
+  overscrollBehavior: "contain",
+  scrollbarGutter: "stable",
   flex: 1,
   minHeight: 0,
   maxHeight: 260,
@@ -47,6 +50,9 @@ export const WL_SEARCHABLE_DROPDOWN_SCROLL_STYLE: React.CSSProperties = {
 /** Portal 大下拉：高度由外层面板 maxHeight 约束，列表区仅 flex 滚动 */
 export const WL_SEARCHABLE_DROPDOWN_SCROLL_PORTAL_STYLE: React.CSSProperties = {
   overflowY: "auto",
+  overflowX: "hidden",
+  overscrollBehavior: "contain",
+  scrollbarGutter: "stable",
   flex: 1,
   minHeight: 0,
 };

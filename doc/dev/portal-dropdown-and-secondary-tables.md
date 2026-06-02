@@ -30,6 +30,8 @@
 
 - **不要**再给 `DropdownMenuPortal` 传 `open`；打开状态完全由「是否渲染组件」表达。
 - 子菜单或内容高度变化时传 **`repositionKey`**（如子菜单展开状态、搜索关键字、过滤结果长度），以触发重新测量。
+- 可搜索面板的列表区必须由内部滚动容器承载：滚动区使用 `overflow-y: auto`、`overflow-x: hidden`、`overscroll-behavior: contain` 与稳定 scrollbar gutter；面板内部滚动不会触发 `useFloatingDropdownPosition` 重新测量，避免 kubeconfig 列表较多时滚轮滚动导致菜单重绘、滚动条消失或无法继续滚动。
+- 下拉表面会阻止 `wheel` 事件继续冒泡到外层遮罩/弹窗；不要在业务页额外全局拦截滚轮，避免破坏下拉内部滚动。
 - 列表 **sticky 表头** 的 z-index 与 `Z_INDEX.stickyTableHead` 对齐：`web/src/components/ResizableTh.tsx`。
 
 ## 二、次级展开表格（Secondary expand rows）
