@@ -6,6 +6,7 @@
 
 ### 平台配置、Events Describe 与 kubeconfig 文件扫描修复
 
+- **平台配置 · 集群选择下拉滚动稳定性**（`SearchableDropdownPanelPortal.tsx` / `SearchableDropdownPrimitives.tsx` / `WlDropdownSurface.tsx` / `useFloatingDropdownPosition.ts`）：可搜索下拉是 body Portal，原定位 hook 捕获 `window` scroll 时也会响应面板内部列表滚动；kubeconfig 文件较多时，滚轮滚动会触发重新测量与高度重算，叠加外层 `overflow: hidden` 导致滚动条消失或无法继续滚动。修复为 **忽略面板内部 scroll 的重新定位**、下拉表面阻止 `wheel` 冒泡，列表滚动区补齐 `overflow-y: auto`、`overflow-x: hidden`、`overscroll-behavior: contain` 与稳定 scrollbar gutter。
 - **kubeconfig 扫描支持 `.config`**（`server/internal/cluster/registry.go`）：原扫描条件只放行 `.yaml` / `.yml` 或文件名以 `config` 开头的文件，导致 `xxxxx.config` 不会进入 `/api/clusters`，前端「集群选择」下拉框无法选到。扫描候选规则改为允许 **无后缀**、**`.config`**、**`.yaml`**、**`.yml`**；继续跳过隐藏文件、临时/备份文件与目录，候选文件仍由 `clientcmd.LoadFromFile` 做 kubeconfig 内容解析。新增 `server/internal/cluster/registry_test.go` 覆盖无后缀、`.config`、`.yaml`、隐藏/临时/目录跳过。
 - **平台配置 · 已添加作用域操作列稳定布局**（`web/src/pages/App.tsx`）：表格切到固定列宽与容器横向滚动；「操作」列设定稳定宽度，**测试 / 删除** 按钮容器 `nowrap`，按钮 `white-space: nowrap` 且 `flex-shrink: 0`；kubeconfig 文件名列省略，别名 input 使用 `minWidth: 0` 在自身列内收缩，避免长内容把操作按钮压成竖排。
 - **Events Describe Message 可读性**（`web/src/components/describe/EventDescribeContent.tsx`）：Message 块从固定深色背景改为 `--wl-describe-section-bg`，文字继续使用主题 token；浅色主题下恢复浅底深字，深色主题下保持原详情面板层级。

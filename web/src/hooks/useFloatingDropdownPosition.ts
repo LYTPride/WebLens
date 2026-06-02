@@ -10,7 +10,7 @@ export type FloatingDropdownLayout = {
 
 type UseFloatingDropdownPositionOptions = {
   triggerRef: RefObject<HTMLElement | null>;
-  panelRef: RefObject<HTMLElement | null>;
+  panelRef: RefObject<HTMLDivElement | null>;
   align: DropdownAlign;
   /** 测量前回调（例如可搜索面板根据 trigger 宽度设 minWidth） */
   beforeMeasure?: (panel: HTMLDivElement, triggerRect: DOMRect) => void;
@@ -36,11 +36,12 @@ export function useFloatingDropdownPosition({
   useLayoutEffect(() => {
     let cancelled = false;
 
-    const run = () => {
+    const run = (ev?: Event) => {
       if (cancelled) return;
       const trig = triggerRef.current;
       const panel = panelRef.current;
       if (!trig || !panel) return;
+      if (ev?.target instanceof Node && panel.contains(ev.target)) return;
       const tr = trig.getBoundingClientRect();
       beforeMeasureRef.current?.(panel, tr);
       const pw = panel.offsetWidth || 160;
@@ -62,7 +63,7 @@ export function useFloatingDropdownPosition({
     let raf2 = 0;
     const raf1 = requestAnimationFrame(() => {
       run();
-      raf2 = requestAnimationFrame(run);
+      raf2 = requestAnimationFrame(() => run());
     });
 
     window.addEventListener("resize", run);
