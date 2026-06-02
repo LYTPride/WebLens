@@ -15,7 +15,7 @@
 - [Pods 使用手册](./guide/pods.md)
 - [Deployments 使用手册](./guide/deployments.md)
 - [Events（事件）使用手册](./guide/events.md)（list/watch、Describe、关联资源跳转与 v1 隐藏视图约定）
-- [资源列表：筛选、排序与实时更新](./guide/resource-lists.md)（含 **PVC**、**Events**、**Nodes 与 RBAC 受限态**、**多选批量操作**、**行尾菜单行高亮**、刷新重探测说明）
+- [资源列表：筛选、排序与实时更新](./guide/resource-lists.md)（含 **平台配置作用域**、**PVC**、**Events**、**Nodes 与 RBAC 受限态**、**多选批量操作**、**行尾菜单行高亮**、刷新重探测说明）
 - [Ingress 与 Services（列表、Describe、跨资源联动）](./guide/ingress-services.md)
 - [Shell 使用手册](./guide/shell.md)
 - [文件管理面板使用手册](./guide/file-manager.md)
@@ -41,4 +41,3 @@
 - 新增“用户可见行为”优先写入 `guide/`
 - 新增“实现细节/协议/数据结构”优先写入 `dev/`
 - 版本迭代节点在 `dev/changelog.md` 追加记录
-
