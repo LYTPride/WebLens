@@ -103,6 +103,21 @@
 
   --wl-log-match-inactive-bg: #475569;
   --wl-log-match-inactive-text: #ffffff;
+  --wl-log-match-active-bg: #b45309;
+  --wl-log-match-active-text: #ffffff;
+
+  --wl-terminal-bg: #020617;
+  --wl-terminal-fg: #e2e8f0;
+  --wl-terminal-cursor: #f8fafc;
+  --wl-terminal-cursor-accent: #020617;
+  --wl-terminal-selection-bg: rgba(56, 189, 248, 0.32);
+
+  --wl-input-caret: #f8fafc;
+  --wl-input-placeholder: #64748b;
+  --wl-selection-bg: rgba(56, 189, 248, 0.35);
+  --wl-selection-text: #f8fafc;
+  --wl-status-success-text: #4ade80;
+  --wl-status-error-text: #f87171;
 
   --wl-shadow-bottom-panel: 0 -2px 12px rgba(0, 0, 0, 0.3);
   --wl-bottom-resize-handle: #475569;
@@ -260,6 +275,21 @@
 
   --wl-log-match-inactive-bg: #cbd5e1;
   --wl-log-match-inactive-text: #0f172a;
+  --wl-log-match-active-bg: #fde68a;
+  --wl-log-match-active-text: #78350f;
+
+  --wl-terminal-bg: #ffffff;
+  --wl-terminal-fg: #0f172a;
+  --wl-terminal-cursor: #0f172a;
+  --wl-terminal-cursor-accent: #ffffff;
+  --wl-terminal-selection-bg: rgba(14, 165, 233, 0.24);
+
+  --wl-input-caret: #0f172a;
+  --wl-input-placeholder: #64748b;
+  --wl-selection-bg: rgba(14, 165, 233, 0.24);
+  --wl-selection-text: #0f172a;
+  --wl-status-success-text: #166534;
+  --wl-status-error-text: #991b1b;
 
   --wl-shadow-bottom-panel: 0 -4px 20px rgba(15, 23, 42, 0.08);
   --wl-bottom-resize-handle: #94a3b8;

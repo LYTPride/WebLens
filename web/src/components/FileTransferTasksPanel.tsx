@@ -138,7 +138,7 @@ export function FileTransferTasksPanel({ tasks, defaultCollapsed = false, onDism
                         t.downloadBasis === "estimated" && t.status === "running"
                           ? "#a78bfa"
                           : t.status === "error"
-                            ? "#f87171"
+                            ? "var(--wl-status-error-text)"
                             : t.status === "success"
                               ? "#22c55e"
                               : "var(--wl-accent-sky)",
@@ -155,7 +155,7 @@ export function FileTransferTasksPanel({ tasks, defaultCollapsed = false, onDism
                 <div
                   style={{
                     ...detailLine,
-                    color: t.status === "error" ? "#f87171" : "var(--wl-text-muted)",
+                    color: t.status === "error" ? "var(--wl-status-error-text)" : "var(--wl-text-muted)",
                     whiteSpace: "pre-line",
                   }}
                 >
@@ -183,8 +183,8 @@ function kindTag(kind: TransferKind): React.CSSProperties {
 }
 
 function statusStyle(s: TransferStatus): React.CSSProperties {
-  if (s === "success") return { color: "#4ade80", fontSize: 11 };
-  if (s === "error") return { color: "#f87171", fontSize: 11 };
+  if (s === "success") return { color: "var(--wl-status-success-text)", fontSize: 11 };
+  if (s === "error") return { color: "var(--wl-status-error-text)", fontSize: 11 };
   return { color: "var(--wl-accent-sky)", fontSize: 11 };
 }
 
