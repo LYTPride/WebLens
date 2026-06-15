@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "../theme/ThemeContext";
-import { Terminal } from "xterm";
+import { Terminal, type ITheme } from "xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
 
@@ -29,40 +29,40 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
   });
   const [hoverMenuItem, setHoverMenuItem] = useState<"copy" | "paste" | null>(null);
 
-  const readShellTermColors = useCallback(() => {
+  const readShellTermTheme = useCallback((): ITheme => {
     const cs = getComputedStyle(document.documentElement);
     return {
-      background: cs.getPropertyValue("--wl-describe-table-bg").trim() || "#020617",
-      foreground: cs.getPropertyValue("--wl-text-heading").trim() || "#e2e8f0",
+      background: cs.getPropertyValue("--wl-terminal-bg").trim() || "#020617",
+      foreground: cs.getPropertyValue("--wl-terminal-fg").trim() || "#e2e8f0",
+      cursor: cs.getPropertyValue("--wl-terminal-cursor").trim() || "#f8fafc",
+      cursorAccent: cs.getPropertyValue("--wl-terminal-cursor-accent").trim() || "#020617",
+      selectionBackground: cs.getPropertyValue("--wl-terminal-selection-bg").trim() || "rgba(56, 189, 248, 0.32)",
     };
   }, []);
 
   const applyShellThemeToTerm = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
-    const colors = readShellTermColors();
-    term.options.theme = { background: colors.background, foreground: colors.foreground };
+    const termTheme = readShellTermTheme();
+    term.options.theme = termTheme;
     // xterm 主题切换后，已渲染行有时不会立即重绘，主动 refresh 避免出现黑白反转残留。
     if (term.rows > 0) term.refresh(0, term.rows - 1);
     const host = containerRef.current;
     if (host) {
-      host.style.backgroundColor = colors.background;
+      host.style.backgroundColor = termTheme.background ?? "";
       const viewport = host.querySelector(".xterm-viewport") as HTMLElement | null;
-      if (viewport) viewport.style.backgroundColor = colors.background;
+      if (viewport) viewport.style.backgroundColor = termTheme.background ?? "";
     }
-  }, [readShellTermColors]);
+  }, [readShellTermTheme]);
 
   // 初始化 xterm 终端
   useEffect(() => {
-    const colors = readShellTermColors();
+    const termTheme = readShellTermTheme();
     const term = new Terminal({
       fontFamily:
         "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
       fontSize: 14,
-      theme: {
-        background: colors.background,
-        foreground: colors.foreground,
-      },
+      theme: termTheme,
       cursorBlink: true,
       scrollback: 2000,
     });
@@ -81,7 +81,7 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
       term.dispose();
       termRef.current = null;
     };
-  }, [readShellTermColors]);
+  }, [readShellTermTheme]);
 
   useEffect(() => {
     // 主题切换时，ThemeProvider 会在 effect 中更新 data-theme。
@@ -232,7 +232,7 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        backgroundColor: "var(--wl-bg-table)",
+        backgroundColor: "var(--wl-terminal-bg)",
       }
     : {
         width: "90%",
@@ -260,7 +260,7 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
     minHeight: 0,
     margin: 0,
     padding: 0,
-    backgroundColor: "var(--wl-bg-table)",
+    backgroundColor: "var(--wl-terminal-bg)",
     display: "flex",
   };
 
@@ -375,6 +375,7 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
       >
         <div
           ref={containerRef}
+          className="wl-shell-terminal-host"
           style={{ flex: 1, minHeight: 0, width: "100%", height: "100%" }}
         />
       </div>
@@ -392,8 +393,8 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
               position: "fixed",
               top: contextMenu.y,
               left: contextMenu.x,
-              backgroundColor: "var(--wl-bg-table)",
-              border: "1px solid var(--wl-border-sidebar)",
+              backgroundColor: "var(--wl-menu-surface)",
+              border: "1px solid var(--wl-menu-border)",
               borderRadius: 6,
               boxShadow: "var(--wl-shadow-modal)",
               padding: 4,
@@ -412,8 +413,8 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
                 width: "100%",
                 padding: "6px 10px",
                 border: "none",
-                background: hoverMenuItem === "copy" ? "var(--wl-bg-control)" : "transparent",
-                color: "var(--wl-text-primary)",
+                background: hoverMenuItem === "copy" ? "var(--wl-menu-item-hover)" : "transparent",
+                color: "var(--wl-text-menu)",
                 fontSize: 13,
                 textAlign: "left",
                 cursor: "pointer",
@@ -431,8 +432,8 @@ export const PodShell: React.FC<PodShellProps> = ({ wsUrl, podName, namespace, o
                 width: "100%",
                 padding: "6px 10px",
                 border: "none",
-                background: hoverMenuItem === "paste" ? "var(--wl-bg-control)" : "transparent",
-                color: "var(--wl-text-primary)",
+                background: hoverMenuItem === "paste" ? "var(--wl-menu-item-hover)" : "transparent",
+                color: "var(--wl-text-menu)",
                 fontSize: 13,
                 textAlign: "left",
                 cursor: "pointer",

@@ -23,10 +23,10 @@ const tagStyle: React.CSSProperties = {
   margin: "0 6px 6px 0",
   padding: "2px 8px",
   borderRadius: 4,
-  backgroundColor: "rgba(30,41,59,0.9)",
-  border: "1px solid var(--wl-border-strong)",
+  backgroundColor: "var(--wl-pill-surface-bg)",
+  border: "1px solid var(--wl-pill-surface-border)",
   fontSize: 11,
-  color: "var(--wl-text-secondary)",
+  color: "var(--wl-pill-surface-text)",
   maxWidth: "100%",
   wordBreak: "break-all",
 };
@@ -191,7 +191,7 @@ export function PvcDescribeContent({
           </div>
         )}
             {abnormalMountCount > 0 && (
-          <div style={{ fontSize: 12, color: "#f87171", marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: "var(--wl-status-error-text)", marginBottom: 8 }}>
             {abnormalMountCount} 个挂载 Pod 处于非「健康」或 Status 异常，可从下表跳转 Pods 排查。
           </div>
         )}

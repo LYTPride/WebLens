@@ -16,10 +16,10 @@ const tagStyle: React.CSSProperties = {
   margin: "0 6px 6px 0",
   padding: "2px 8px",
   borderRadius: 4,
-  backgroundColor: "rgba(30,41,59,0.9)",
-  border: "1px solid var(--wl-border-strong)",
+  backgroundColor: "var(--wl-pill-surface-bg)",
+  border: "1px solid var(--wl-pill-surface-border)",
   fontSize: 11,
-  color: "var(--wl-text-secondary)",
+  color: "var(--wl-pill-surface-text)",
   maxWidth: "100%",
   wordBreak: "break-all",
 };

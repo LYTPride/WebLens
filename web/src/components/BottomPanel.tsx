@@ -344,7 +344,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                 minHeight: 0,
                 minWidth: 0,
                 overflow: "hidden",
-                backgroundColor: tab.type === "shell" ? "var(--wl-bg-table)" : undefined,
+                backgroundColor: tab.type === "shell" ? "var(--wl-terminal-bg)" : undefined,
               }}
             >
               {tab.type === "shell" ? (

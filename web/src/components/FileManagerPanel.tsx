@@ -670,7 +670,7 @@ export const FileManagerPanel: React.FC<Props> = ({
       <FileTransferTasksPanel tasks={transferTasks} onDismissTask={removeTransferTask} />
 
       {error && (
-        <div style={{ padding: "8px 12px", color: "#f87171", fontSize: 12, borderBottom: "1px solid var(--wl-border-table-row)" }}>
+        <div style={{ padding: "8px 12px", color: "var(--wl-status-error-text)", fontSize: 12, borderBottom: "1px solid var(--wl-border-table-row)" }}>
           {error}
         </div>
       )}
@@ -902,4 +902,3 @@ const th: React.CSSProperties = {
 const td: React.CSSProperties = {
   padding: "8px 10px",
 };
-

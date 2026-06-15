@@ -444,10 +444,10 @@ export const LogsTab: React.FC<LogsTabProps> = ({
                 ref={seg.matchIndex === safeIndex ? currentMatchRef : undefined}
                 style={{
                   backgroundColor:
-                    seg.matchIndex === safeIndex ? "#b45309" : "var(--wl-log-match-inactive-bg)",
+                    seg.matchIndex === safeIndex ? "var(--wl-log-match-active-bg)" : "var(--wl-log-match-inactive-bg)",
                   color:
                     seg.matchIndex === safeIndex
-                      ? "var(--wl-text-on-primary)"
+                      ? "var(--wl-log-match-active-text)"
                       : "var(--wl-log-match-inactive-text)",
                 }}
               >
