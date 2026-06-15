@@ -233,8 +233,8 @@ export function NodeDescribeContent({ view, events, ageLabel, pods }: NodeDescri
             ? {
                 padding: 12,
                 borderRadius: 8,
-                backgroundColor: "rgba(127,29,29,0.18)",
-                border: "1px solid rgba(248,113,113,0.35)",
+                backgroundColor: "var(--wl-event-warning-bg)",
+                border: "1px solid var(--wl-event-warning-border)",
               }
             : undefined
         }

@@ -2,6 +2,15 @@
 
 > 本文件用于记录开发过程中的关键变更，按功能域持续补充。
 
+## 2026-06
+
+### 浅色主题 Events / 告警可读性修复
+
+- **Describe Events 卡片语义 token 化**（`DescribeEventsSection.tsx` / `tokens.css`）：原 Warning / Failed 类事件复用了深色主题浅红文字（如 `#fecaca`）与半透明深红背景，浅色主题下会出现粉底浅字、正文不可读。新增 **`--wl-event-normal-*` / `--wl-event-warning-*`** token，分别定义背景、边框、强调线、标题、正文与辅助信息颜色；Pod、Deployment、StatefulSet、Ingress、Service、PVC、Node 等 Describe 面板共用的 Events 区块同步受益。
+- **Events 页面 Message 同步修复**（`EventDescribeContent.tsx`）：Warning 事件详情正文使用同一套 event severity token，保持浅色主题深字可读、深色主题不刺眼。
+- **异常/诊断行色收口**（`App.tsx`、`IngressDescribeContent.tsx`、`ServiceDescribeContent.tsx`、`ServicesListTable.tsx`、`StatefulSetDescribeContent.tsx`）：Ingress 规则诊断、Service Endpoints、StatefulSet 实例异常摘要/行高亮改为 **`--wl-row-danger|warning|attention-*`** 与 pill token，避免浅色主题下硬编码透明色过淡或与正文层次不一致。
+- **README**：本次属于主题可读性修复，不改变核心能力与启动方式，根 README 不新增条目。
+
 ## 2026-04
 
 ### 平台配置、Events Describe 与 kubeconfig 文件扫描修复

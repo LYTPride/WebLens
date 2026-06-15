@@ -565,9 +565,9 @@ export function ServicesListTable({
                         epRows.map((er, ri) => {
                           const shell: React.CSSProperties =
                             !er.ready
-                              ? { backgroundColor: "rgba(249,115,22,0.08)" }
+                              ? { backgroundColor: "var(--wl-row-warning-tint)" }
                               : er.podHealth && er.podHealth !== "健康"
-                                ? { backgroundColor: "rgba(202,138,4,0.06)" }
+                                ? { backgroundColor: "var(--wl-row-attention-tint)" }
                                 : {};
                           const canPod = er.podName && er.podName !== "—";
                           return (
