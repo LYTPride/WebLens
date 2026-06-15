@@ -219,9 +219,9 @@ export function ServiceDescribeContent({
                     key={i}
                     style={
                       !r.ready
-                        ? { backgroundColor: "rgba(249,115,22,0.06)" }
+                        ? { backgroundColor: "var(--wl-row-warning-tint)" }
                         : r.podHealth && r.podHealth !== "健康"
-                          ? { backgroundColor: "rgba(202,138,4,0.05)" }
+                          ? { backgroundColor: "var(--wl-row-attention-tint)" }
                           : undefined
                     }
                   >

@@ -7,8 +7,14 @@ const sectionTitle: React.CSSProperties = {
   color: "var(--wl-text-primary)",
 };
 
+function isWarningEvent(ev: K8sEvent): boolean {
+  const type = ev.type?.toLowerCase() ?? "";
+  const reason = ev.reason?.toLowerCase() ?? "";
+  return type === "warning" || reason.includes("fail");
+}
+
 /**
- * Describe 面板中的 Events 列表，与 Pod describe 视觉一致（Warning/失败类事件红色底高亮）
+ * Describe 面板中的 Events 列表。Warning/失败类事件使用主题语义 token，避免浅色主题复用深色浅红文字。
  */
 export const DescribeEventsSection: React.FC<{ events: K8sEvent[] }> = ({ events }) => {
   return (
@@ -18,34 +24,39 @@ export const DescribeEventsSection: React.FC<{ events: K8sEvent[] }> = ({ events
       {events.length > 0 && (
         <div style={{ fontSize: 12, lineHeight: 1.6 }}>
           {events.map((ev) => {
-            const isWarning =
-              (ev.type && ev.type.toLowerCase() === "warning") ||
-              (ev.reason && ev.reason.toLowerCase().includes("fail"));
+            const isWarning = isWarningEvent(ev);
             return (
               <div
                 key={ev.metadata?.uid || `${ev.lastTimestamp}-${ev.reason}-${ev.message}`}
                 style={{
-                  padding: "4px 6px",
-                  borderRadius: 4,
-                  marginBottom: 4,
-                  backgroundColor: isWarning ? "rgba(127,29,29,0.2)" : "transparent",
+                  padding: "7px 9px",
+                  borderRadius: 6,
+                  marginBottom: 6,
+                  backgroundColor: isWarning ? "var(--wl-event-warning-bg)" : "var(--wl-event-normal-bg)",
+                  border: `1px solid ${isWarning ? "var(--wl-event-warning-border)" : "var(--wl-event-normal-border)"}`,
+                  boxShadow: isWarning ? "inset 3px 0 0 var(--wl-event-warning-accent)" : undefined,
                 }}
               >
                 <div>
                   <span
                     style={{
-                      fontWeight: isWarning ? 700 : 500,
-                      color: isWarning ? "#f97373" : "var(--wl-text-primary)",
+                      fontWeight: isWarning ? 700 : 600,
+                      color: isWarning ? "var(--wl-event-warning-title)" : "var(--wl-event-normal-title)",
                     }}
                   >
                     {ev.type ?? "-"} {ev.reason ?? ""}
                   </span>{" "}
-                  <span style={{ color: "var(--wl-text-label)" }}>
+                  <span style={{ color: isWarning ? "var(--wl-event-warning-meta)" : "var(--wl-event-normal-meta)" }}>
                     {ev.lastTimestamp ?? ev.firstTimestamp ?? ""}
                     {typeof ev.count === "number" && ev.count > 1 ? ` ×${ev.count}` : ""}
                   </span>
                 </div>
-                <div style={{ whiteSpace: "pre-wrap", color: isWarning ? "#fecaca" : "var(--wl-text-secondary)" }}>
+                <div
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    color: isWarning ? "var(--wl-event-warning-text)" : "var(--wl-event-normal-text)",
+                  }}
+                >
                   {ev.message}
                 </div>
               </div>

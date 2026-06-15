@@ -21,6 +21,7 @@ Events 页面展示当前 **已应用命名空间** 下的 Kubernetes **Core Eve
 
 - 点击行或按列表交互打开右侧 **Describe** 时，可查看 **Reason、Message、Source、Involved Object、Count、时间** 等结构化信息。
 - **Message** 区域使用与详情面板一致的主题背景与文字 token：浅色主题下保持浅底深字可读，深色主题下保持深色面板观感，不会出现深背景配深色文字的低对比度问题。
+- **Warning / Failed** 类事件在 Events 页面详情与各资源 Describe 的 Events 区块中使用独立告警色：浅色主题下标题、正文、时间/次数与背景保持足够对比，深色主题下保留告警语义但不过度刺眼。
 - **关联资源**：对 Involved Object 提供跳转入口时，会切换到 **侧栏已支持的列表视图**（如 Pods、Deployments、PVC、Services、Ingress、Nodes、StatefulSets），并带上名称过滤，便于连贯排障。
 - **v1 未在侧栏开放的资源类型**（如 DaemonSet、Job、CronJob、ConfigMap、Secret 等）**不展示跳转**，避免进入无列表页；会话恢复时若 localStorage 中仍为上述隐藏视图键，会 **回落到 Pods**（实现见 `web/src/utils/v1HiddenViews.ts`）。
 

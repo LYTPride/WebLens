@@ -6429,15 +6429,15 @@ export const App: React.FC = () => {
                                         marginBottom: 10,
                                         padding: "8px 10px",
                                         borderRadius: 6,
-                                        border: "1px solid rgba(234,179,8,0.35)",
-                                        backgroundColor: "rgba(234,179,8,0.08)",
+                                        border: "1px solid var(--wl-event-warning-border)",
+                                        backgroundColor: "var(--wl-event-warning-bg)",
                                         fontSize: 12,
-                                        color: "var(--wl-text-heading)",
+                                        color: "var(--wl-event-warning-text)",
                                         lineHeight: 1.5,
                                       }}
                                     >
                                       <div>{stsExpandSummary}</div>
-                                      <div style={{ marginTop: 6, fontSize: 11, color: "var(--wl-text-muted)" }}>
+                                      <div style={{ marginTop: 6, fontSize: 11, color: "var(--wl-event-warning-meta)" }}>
                                         Ordinal 顺序提示：建议先核对较小序号实例；下表已将异常实例置顶并按严重度排序。
                                       </div>
                                     </div>
@@ -6499,12 +6499,12 @@ export const App: React.FC = () => {
                                           const stsPodMenuAccent =
                                             "inset 2px 0 0 0 color-mix(in srgb, var(--wl-accent-sky) 45%, transparent)";
                                           const rowShell: React.CSSProperties = {
-                                            backgroundColor: abnormalRow ? "rgba(248,113,113,0.06)" : undefined,
+                                            backgroundColor: abnormalRow ? "var(--wl-row-warning-tint)" : undefined,
                                             boxShadow: (() => {
                                               const base = isPrimaryAbnormal
-                                                ? "inset 3px 0 0 rgba(250,204,21,0.9)"
+                                                ? "inset 3px 0 0 var(--wl-row-danger-accent)"
                                                 : abnormalRow
-                                                  ? "inset 3px 0 0 rgba(249,115,22,0.45)"
+                                                  ? "inset 3px 0 0 var(--wl-row-warning-accent)"
                                                   : undefined;
                                               if (pMenuOpen && base) return `${base}, ${stsPodMenuAccent}`;
                                               return base;
@@ -7146,9 +7146,9 @@ export const App: React.FC = () => {
                                     {expandRows.map((r, ri) => {
                                       const rowShell: React.CSSProperties =
                                         r.severityRank >= 3
-                                          ? { backgroundColor: "rgba(185,28,28,0.08)" }
+                                          ? { backgroundColor: "var(--wl-row-danger-tint)" }
                                           : r.severityRank >= 2
-                                            ? { backgroundColor: "rgba(249,115,22,0.06)" }
+                                            ? { backgroundColor: "var(--wl-row-warning-tint)" }
                                             : {};
                                       const canLinkSvc =
                                         r.serviceName &&

@@ -176,15 +176,15 @@ export const StatefulSetDescribeContent: React.FC<StatefulSetDescribeContentProp
               marginBottom: 10,
               padding: "8px 10px",
               borderRadius: 6,
-              border: "1px solid rgba(234,179,8,0.35)",
-              backgroundColor: "rgba(234,179,8,0.08)",
+              border: "1px solid var(--wl-event-warning-border)",
+              backgroundColor: "var(--wl-event-warning-bg)",
               fontSize: 12,
-              color: "var(--wl-text-heading)",
+              color: "var(--wl-event-warning-text)",
               lineHeight: 1.5,
             }}
           >
             <div>{describeSummary}</div>
-            <div style={{ marginTop: 6, fontSize: 11, color: "var(--wl-text-muted)" }}>
+            <div style={{ marginTop: 6, fontSize: 11, color: "var(--wl-event-warning-meta)" }}>
               列表已按异常优先排序；建议先处理 ordinal 最小的异常实例（见「优先检查」标记）。
             </div>
           </div>
@@ -226,11 +226,11 @@ export const StatefulSetDescribeContent: React.FC<StatefulSetDescribeContentProp
                   const isPrimaryAbnormal =
                     !!primaryAbnormalPod && p.metadata.uid === primaryAbnormalPod.metadata.uid;
                   const rowStyle: React.CSSProperties = {
-                    backgroundColor: abnormalRow ? "rgba(248,113,113,0.06)" : undefined,
+                    backgroundColor: abnormalRow ? "var(--wl-row-warning-tint)" : undefined,
                     boxShadow: isPrimaryAbnormal
-                      ? "inset 3px 0 0 rgba(250,204,21,0.9)"
+                      ? "inset 3px 0 0 var(--wl-row-danger-accent)"
                       : abnormalRow
-                        ? "inset 3px 0 0 rgba(249,115,22,0.45)"
+                        ? "inset 3px 0 0 var(--wl-row-warning-accent)"
                         : undefined,
                   };
                   return (
@@ -245,9 +245,9 @@ export const StatefulSetDescribeContent: React.FC<StatefulSetDescribeContentProp
                                 fontWeight: 700,
                                 padding: "1px 5px",
                                 borderRadius: 4,
-                                backgroundColor: "rgba(234,179,8,0.2)",
-                                border: "1px solid rgba(250,204,21,0.55)",
-                                color: "#facc15",
+                                backgroundColor: "var(--wl-pill-attention-bg)",
+                                border: "1px solid var(--wl-pill-attention-border)",
+                                color: "var(--wl-pill-attention-text)",
                               }}
                             >
                               优先检查

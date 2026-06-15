@@ -254,11 +254,11 @@ export function IngressDescribeContent({
                 {diagRows.map((r, ri) => {
                   const rowShell: React.CSSProperties =
                     r.severityRank >= 3
-                      ? { backgroundColor: "rgba(185,28,28,0.08)" }
+                      ? { backgroundColor: "var(--wl-row-danger-tint)" }
                       : r.severityRank >= 2
-                        ? { backgroundColor: "rgba(249,115,22,0.06)" }
+                        ? { backgroundColor: "var(--wl-row-warning-tint)" }
                         : r.severityRank >= 1
-                          ? { backgroundColor: "rgba(202,138,4,0.05)" }
+                          ? { backgroundColor: "var(--wl-row-attention-tint)" }
                           : {};
                   const canLinkSvc =
                     !!onJumpServices &&

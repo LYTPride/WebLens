@@ -28,6 +28,12 @@
 - **底部标签栏（Shell / Logs / YAML）**：`BottomPanel.tsx` 中每个标签为 **`div.wl-bottom-panel-tab`**，激活为 **`wl-bottom-panel-tab--active`**；hover 与全局按钮共用 **`--wl-btn-overlay-hover`** 叠层，激活态使用 **`var(--wl-bg-control)`**，层次为 active > hover > normal，不改变边框宽度以免布局抖动。
 - **底部标签「内容区」布局**：每个标签对应的内容容器为 **纵向 flex**（`flexDirection: "column"` + `minWidth: 0`），使 Shell / Logs / YAML 等在**横向**上被 stretch 铺满底栏宽度；若误用默认横向 flex，Logs 等子树会只占据内容宽度而出现右侧留白（修复说明见 `doc/dev/changelog.md`「底部工作区：Logs 标签页横向铺满」）。
 
+## 事件 / 告警语义色
+
+- **Describe Events**：`DescribeEventsSection.tsx` 使用 `--wl-event-normal-*` 与 `--wl-event-warning-*` token 区分 Normal 与 Warning / Failed 类事件；token 覆盖背景、边框、左侧强调线、标题、正文和时间/次数等辅助信息，避免浅色主题复用深色浅红文字导致低对比。
+- **Events 页面详情**：`EventDescribeContent.tsx` 的 Message 区域在 Warning 事件下复用同一套 event token，保持列表页与 Describe 面板语义一致。
+- **异常行底色**：Ingress 规则诊断、Service Endpoints、StatefulSet 实例等行级异常提示使用 `--wl-row-danger-tint`、`--wl-row-warning-tint`、`--wl-row-attention-tint` 与 `--wl-row-*accent`，新增同类行高亮时优先复用这些变量，不再直接写深色主题透明红/橙色。
+
 ## 受限态卡片
 
 - **组件**：`ResourceAccessDeniedState.tsx` 使用 `--wl-access-denied-card-*` 等 token，深浅主题下均为卡片式说明，而非固定深色面板。

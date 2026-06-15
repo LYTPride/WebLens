@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import type { EventSortRow } from "../../utils/resourceListSort";
 import { buildEventSortStats } from "../../utils/resourceListSort";
-import { formatEventInvolved, involvedKindToView, involvedObjectFilterName } from "../../utils/eventTable";
+import { eventIsWarning, formatEventInvolved, involvedKindToView, involvedObjectFilterName } from "../../utils/eventTable";
 import { ResourceJumpChip } from "../ResourceJumpChip";
 
 const sectionTitle: React.CSSProperties = {
@@ -32,6 +32,7 @@ export function EventDescribeContent({
 }: EventDescribeContentProps) {
   const [copied, setCopied] = useState(false);
   const stats = buildEventSortStats(event);
+  const isWarning = eventIsWarning(event);
   const view = involvedKindToView(event.involvedObject?.kind);
   const filterName = involvedObjectFilterName(event);
   const jumpLabel =
@@ -78,14 +79,15 @@ export function EventDescribeContent({
         <div
           style={{
             fontSize: 12,
-            color: "var(--wl-text-heading)",
+            color: isWarning ? "var(--wl-event-warning-text)" : "var(--wl-text-heading)",
             lineHeight: 1.6,
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             padding: "8px 10px",
             borderRadius: 6,
-            backgroundColor: "var(--wl-describe-section-bg)",
-            border: "1px solid var(--wl-border-strong)",
+            backgroundColor: isWarning ? "var(--wl-event-warning-bg)" : "var(--wl-describe-section-bg)",
+            border: `1px solid ${isWarning ? "var(--wl-event-warning-border)" : "var(--wl-border-strong)"}`,
+            boxShadow: isWarning ? "inset 3px 0 0 var(--wl-event-warning-accent)" : undefined,
           }}
         >
           {event.message || "—"}
