@@ -14,6 +14,8 @@ import {
   applyPvcYaml,
   fetchNodeYaml,
   applyNodeYaml,
+  fetchConfigMapYaml,
+  applyConfigMapYaml,
 } from "../api";
 import { ClearableSearchInput } from "./ClearableSearchInput";
 import { YamlMonacoEditor, type YamlMonacoEditorHandle } from "./YamlMonacoEditor";
@@ -23,12 +25,84 @@ interface PodYamlEditTabProps {
   namespace: string;
   podName: string;
   /** 默认 Pod；Deployment 时与 podName 传部署名称 */
-  yamlKind?: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "node";
+  yamlKind?: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "node" | "configmap";
   onClose: () => void;
   /** Deployment 保存时传入 API 返回的 JSON 对象，便于列表局部更新 */
   onSaved?: (result?: unknown) => void;
   /** 仅当标签激活时才请求 YAML，避免与 Watch 等长连接争抢导致长时间等待 */
   isActive?: boolean;
+}
+
+type ApiErrorLike = {
+  message?: string;
+  response?: {
+    status?: number;
+    data?: unknown;
+  };
+};
+
+function extractApiError(e: unknown, fallback: string): { status?: number; message: string } {
+  const err = e as ApiErrorLike | null;
+  const data = err?.response?.data;
+  let message = "";
+  if (typeof data === "string") {
+    const text = data.trim();
+    if (text) {
+      try {
+        const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
+        const parsedMessage = parsed.error ?? parsed.message;
+        message = typeof parsedMessage === "string" && parsedMessage.trim() ? parsedMessage : text;
+      } catch {
+        message = text;
+      }
+    }
+  } else if (data && typeof data === "object") {
+    const parsed = data as { error?: unknown; message?: unknown };
+    const parsedMessage = parsed.error ?? parsed.message;
+    if (typeof parsedMessage === "string" && parsedMessage.trim()) {
+      message = parsedMessage;
+    }
+  }
+  if (!message) {
+    message = err?.message ?? fallback;
+  }
+  return { status: err?.response?.status, message };
+}
+
+function yamlKindLabel(kind: NonNullable<PodYamlEditTabProps["yamlKind"]>): string {
+  switch (kind) {
+    case "deployment":
+      return "Deployment";
+    case "statefulset":
+      return "StatefulSet";
+    case "ingress":
+      return "Ingress";
+    case "service":
+      return "Service";
+    case "pvc":
+      return "PersistentVolumeClaim";
+    case "node":
+      return "Node";
+    case "configmap":
+      return "ConfigMap";
+    default:
+      return "Pod";
+  }
+}
+
+function buildYamlErrorHint(status: number | undefined, yamlKind: NonNullable<PodYamlEditTabProps["yamlKind"]>): string | null {
+  if (status === 403) {
+    return yamlKind === "configmap"
+      ? "当前账号缺少 get 或 update ConfigMap 权限；列表只需要 list/watch，但 YAML 编辑需要读取并更新单个 ConfigMap。"
+      : "当前账号缺少读取或更新该资源 YAML 的权限。";
+  }
+  if (status === 404) {
+    return "资源不存在、Namespace 不匹配，或当前选择的集群与目标 kubeconfig/context 不一致。";
+  }
+  if (status && status >= 500) {
+    return "后端返回内部错误；页面已保留后端错误正文，服务端日志会同时记录 cluster、namespace 和 name。";
+  }
+  return null;
 }
 
 export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
@@ -44,6 +118,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   const [initialYaml, setInitialYaml] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorHint, setErrorHint] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
@@ -52,6 +127,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   const loadYaml = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setErrorHint(null);
     try {
       const text =
         yamlKind === "deployment"
@@ -66,12 +142,15 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
                   ? await fetchPvcYaml(clusterId, namespace, podName)
                   : yamlKind === "node"
                     ? await fetchNodeYaml(clusterId, podName)
-                    : await fetchPodYaml(clusterId, namespace, podName);
+                    : yamlKind === "configmap"
+                      ? await fetchConfigMapYaml(clusterId, namespace, podName)
+                      : await fetchPodYaml(clusterId, namespace, podName);
       setYaml(text);
       setInitialYaml(text);
     } catch (e: unknown) {
-      const err = e as { message?: string; response?: { data?: { error?: string } } };
-      setError(err?.response?.data?.error ?? err?.message ?? "加载 YAML 失败");
+      const parsed = extractApiError(e, "加载 YAML 失败");
+      setError(`${yamlKindLabel(yamlKind)} ${yamlKind === "node" ? podName : `${namespace}/${podName}`} YAML 加载失败：${parsed.message}`);
+      setErrorHint(buildYamlErrorHint(parsed.status, yamlKind));
     } finally {
       setLoading(false);
     }
@@ -136,6 +215,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
     }
     setSaving(true);
     setError(null);
+    setErrorHint(null);
     try {
       if (yamlKind === "deployment") {
         const data = await applyDeploymentYaml(clusterId, namespace, podName, yaml);
@@ -161,6 +241,10 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         const data = await applyNodeYaml(clusterId, podName, yaml);
         setInitialYaml(yaml);
         onSaved?.(data);
+      } else if (yamlKind === "configmap") {
+        const data = await applyConfigMapYaml(clusterId, namespace, podName, yaml);
+        setInitialYaml(yaml);
+        onSaved?.(data);
       } else {
         await applyPodYaml(clusterId, namespace, podName, yaml);
         setInitialYaml(yaml);
@@ -168,8 +252,9 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
       }
       if (andClose) onClose();
     } catch (e: unknown) {
-      const err = e as { message?: string; response?: { data?: { error?: string } } };
-      setError(err?.response?.data?.error ?? err?.message ?? "保存失败");
+      const parsed = extractApiError(e, "保存失败");
+      setError(`${yamlKindLabel(yamlKind)} ${yamlKind === "node" ? podName : `${namespace}/${podName}`} YAML 保存失败：${parsed.message}`);
+      setErrorHint(buildYamlErrorHint(parsed.status, yamlKind));
     } finally {
       setSaving(false);
     }
@@ -178,6 +263,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   const cancel = () => {
     setYaml(initialYaml);
     setError(null);
+    setErrorHint(null);
     onClose();
   };
 
@@ -227,6 +313,8 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
                       ? "PersistentVolumeClaim"
                       : yamlKind === "node"
                         ? "Node"
+                        : yamlKind === "configmap"
+                          ? "ConfigMap"
                         : "Pod"}
           </span>
           <span>Name: {podName}</span>
@@ -292,7 +380,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
             </>
           )}
           {error && (
-            <span style={{ fontSize: 12, color: "#f97373" }}>{error}</span>
+            <span style={{ fontSize: 12, color: "var(--wl-status-error-text)" }}>{error}</span>
           )}
           <button
             type="button"
@@ -344,10 +432,31 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         </div>
       </div>
 
-      {/* Monaco：内置行号、YAML 高亮、右侧 minimap、编辑器内 sticky scroll（indentation 模型） */}
-      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
-        <YamlMonacoEditor ref={editorRef} value={yaml} onChange={setYaml} />
-      </div>
+      {error && !yaml ? (
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            minWidth: 0,
+            padding: 24,
+            color: "var(--wl-text-secondary)",
+            backgroundColor: "var(--wl-bg-table)",
+            borderTop: "1px solid var(--wl-border-sidebar)",
+            fontSize: 13,
+            lineHeight: 1.6,
+          }}
+        >
+          <div style={{ color: "var(--wl-status-error-text)", fontWeight: 600, marginBottom: 8 }}>YAML 加载失败</div>
+          <div>{error}</div>
+          {errorHint ? (
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--wl-text-muted)" }}>{errorHint}</div>
+          ) : null}
+        </div>
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+          <YamlMonacoEditor ref={editorRef} value={yaml} onChange={setYaml} />
+        </div>
+      )}
     </div>
   );
 };

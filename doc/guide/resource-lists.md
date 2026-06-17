@@ -1,6 +1,6 @@
 # 资源列表：筛选、排序与实时更新
 
-本文说明 WebLens 中 **Pods**、**Deployments**、**StatefulSets**、**PersistentVolumeClaims（PVC）**、**Events** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。**Ingress**、**Services** 列表同样支持 Name 筛选、表头调宽与排序等（以当前版本为准）；展开区与 Describe 中的名称与联动交互见 [Ingress 与 Services](./ingress-services.md)。**Events** 的默认排序策略与 Involved Object 跳转约定见 [Events 使用手册](./events.md)。
+本文说明 WebLens 中 **Pods**、**Deployments**、**StatefulSets**、**ConfigMaps**、**PersistentVolumeClaims（PVC）**、**Events** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。**Ingress**、**Services** 列表同样支持 Name 筛选、表头调宽与排序等（以当前版本为准）；展开区与 Describe 中的名称与联动交互见 [Ingress 与 Services](./ingress-services.md)。**ConfigMaps** 的影响范围、风险标签与配置编辑见 [ConfigMaps 使用手册](./configmaps.md)。**Events** 的默认排序策略与 Involved Object 跳转约定见 [Events 使用手册](./events.md)。
 
 ## 列表标题格式
 
@@ -54,6 +54,12 @@
 - **Events** 为 **命名空间作用域** 资源：**HTTP list + watch**、Name（Involved）筛选、表头调宽与列排序、**serverTimeMs** 与 **Age** 列行为与其他列表一致。
 - **未开启列排序** 时，表格使用 **异常优先的默认顺序**（Warning、count、lastSeen 等综合排序），便于排障；点击表头列后则按该列升/降序，与「刷新列表清空排序」规则一致。详情见 [Events 使用手册](./events.md)。
 
+## ConfigMaps
+
+- **ConfigMaps** 为 **命名空间作用域** 资源：列表受当前已应用的 **集群 + 命名空间** 约束，采用与其他资源相同的 **HTTP list + watch** 模式。
+- 支持 **Describe** 侧栏、**YAML 编辑**、**配置 key 编辑**、**导出 YAML**、**删除** 与 **批量删除/导出**（需集群 RBAC 允许）；Name 打开 Describe，三点菜单只放操作。
+- 表格会基于同作用域 Pod 数据派生引用统计、配置规模和风险标签；详情见 [ConfigMaps 使用手册](./configmaps.md)。
+
 ## PersistentVolumeClaims（PVC）
 
 - **PVC** 为 **命名空间作用域** 资源：列表受当前已应用的 **集群 + 命名空间** 约束（与 Pods、Deployments 等一致），采用与其他资源相同的 **HTTP list + watch** 模式。
@@ -83,4 +89,5 @@
 
 - [Pods 使用手册](./pods.md)
 - [Deployments 使用手册](./deployments.md)
+- [ConfigMaps 使用手册](./configmaps.md)
 - [Events 使用手册](./events.md)
