@@ -1650,7 +1650,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 	RegisterStatefulSetRoutes(r, reg)
 	RegisterIngressRoutes(r, reg)
 	RegisterServiceRoutes(r, reg)
+	RegisterConfigMapRoutes(r, reg)
 	RegisterPVCRoutes(r, reg)
 	RegisterNodeRoutes(r, reg)
 }
-

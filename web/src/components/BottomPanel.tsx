@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { PodShell } from "./PodShell";
 import { LogsTab } from "./LogsTab";
 import { PodYamlEditTab } from "./PodYamlEditTab";
-import { podExecWsUrl } from "../api";
+import { podExecWsUrl, type ConfigMap } from "../api";
 import { FileManagerPanel } from "./FileManagerPanel";
+import { ConfigMapEditorTab } from "./ConfigMapEditorTab";
+import type { ConfigMapReferenceSummary } from "../utils/configMapTable";
 
 export interface PanelTab {
   id: string;
-  type: "shell" | "logs" | "edit";
+  type: "shell" | "logs" | "edit" | "config-editor";
   clusterId: string;
   namespace: string;
   pod: string;
@@ -16,7 +18,9 @@ export interface PanelTab {
   /** 该 Pod 的容器列表（用于 Logs 容器下拉） */
   containers: string[];
   /** edit 标签：YAML 资源类型，默认 pod */
-  yamlKind?: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "node";
+  yamlKind?: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "node" | "configmap";
+  configMap?: ConfigMap;
+  configMapReferences?: ConfigMapReferenceSummary;
 }
 
 interface BottomPanelProps {
@@ -31,6 +35,7 @@ interface BottomPanelProps {
   onMinimizedChange: (v: boolean) => void;
   /** YAML 保存成功（Deployment 时带 API 返回体） */
   onEditSaved?: (tab: PanelTab, result?: unknown) => void;
+  onToast?: (message: string | null) => void;
 }
 
 const MIN_HEIGHT = 0.15;
@@ -56,6 +61,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
   minimized,
   onMinimizedChange,
   onEditSaved,
+  onToast,
 }) => {
   const [dragging, setDragging] = useState(false);
   const dragStartY = useRef(0);
@@ -282,7 +288,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   : t.type === "logs"
                     ? `Logs: ${t.title}`
                     : t.type === "edit"
-                      ? `${t.yamlKind === "deployment" ? "Deployment" : t.yamlKind === "statefulset" ? "StatefulSet" : t.yamlKind === "ingress" ? "Ingress" : t.yamlKind === "service" ? "Service" : t.yamlKind === "pvc" ? "PVC" : t.yamlKind === "node" ? "Node" : "Pod"}: ${t.pod}`
+                      ? `${t.yamlKind === "deployment" ? "Deployment" : t.yamlKind === "statefulset" ? "StatefulSet" : t.yamlKind === "ingress" ? "Ingress" : t.yamlKind === "service" ? "Service" : t.yamlKind === "pvc" ? "PVC" : t.yamlKind === "node" ? "Node" : t.yamlKind === "configmap" ? "ConfigMap" : "Pod"}: ${t.pod}`
+                      : t.type === "config-editor"
+                        ? `Config Editor: ${t.pod}`
                       : t.title}
               </span>
               <button
@@ -533,7 +541,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   onClose={() => onCloseTab(tab.id)}
                   isActive={activeTabId === tab.id}
                 />
-              ) : (
+              ) : tab.type === "edit" ? (
                 <PodYamlEditTab
                   clusterId={tab.clusterId}
                   namespace={tab.namespace}
@@ -543,6 +551,17 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   onSaved={(result) => onEditSaved?.(tab, result)}
                   isActive={activeTabId === tab.id}
                 />
+              ) : tab.configMap && tab.configMapReferences ? (
+                <ConfigMapEditorTab
+                  clusterId={tab.clusterId}
+                  configMap={tab.configMap}
+                  references={tab.configMapReferences}
+                  onClose={() => onCloseTab(tab.id)}
+                  onSaved={(result) => onEditSaved?.(tab, result)}
+                  setToastMessage={onToast}
+                />
+              ) : (
+                <div style={{ padding: 16, color: "var(--wl-text-secondary)", fontSize: 12 }}>ConfigMap 编辑器缺少资源数据</div>
               )}
             </div>
           ))}

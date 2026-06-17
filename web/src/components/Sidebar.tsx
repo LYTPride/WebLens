@@ -31,6 +31,10 @@ const MENU: { title: string; items: { id: ResourceKind; label: string }[] }[] = 
     title: "存储",
     items: [{ id: "persistentvolumeclaims", label: "Persistent Volume Claims" }],
   },
+  {
+    title: "配置",
+    items: [{ id: "configmaps", label: "ConfigMaps" }],
+  },
 ];
 
 const sidebarStyle: React.CSSProperties = {

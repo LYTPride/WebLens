@@ -43,7 +43,7 @@ export const ClearableSearchInput = forwardRef<HTMLInputElement, ClearableSearch
     },
     forwardedRef,
   ) {
-    const innerRef = useRef<HTMLInputElement>(null);
+    const innerRef = useRef<HTMLInputElement | null>(null);
     const setInputRef = useCallback(
       (el: HTMLInputElement | null) => {
         innerRef.current = el;
