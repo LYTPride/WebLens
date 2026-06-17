@@ -18,6 +18,8 @@ export interface Pod {
     /** 存在时表示 Pod 正在删除，Status 列应展示 Terminating */
     deletionTimestamp?: string;
     ownerReferences?: Array<{ kind: string; name: string; uid?: string; controller?: boolean }>;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
   };
   status?: {
     phase?: string;
@@ -30,7 +32,7 @@ export interface Pod {
       ready: boolean;
       state?: {
         waiting?: { reason?: string; message?: string };
-        terminated?: { reason?: string; message?: string };
+        terminated?: { reason?: string; message?: string; exitCode?: number };
       };
     }>;
     initContainerStatuses?: Array<{
@@ -39,15 +41,32 @@ export interface Pod {
       ready: boolean;
       state?: {
         waiting?: { reason?: string; message?: string };
-        terminated?: { reason?: string; message?: string };
+        terminated?: { reason?: string; message?: string; exitCode?: number };
       };
     }>;
   };
   spec?: {
     nodeName?: string;
-    containers?: Array<{ name: string }>;
+    containers?: Array<{
+      name: string;
+      image?: string;
+      ports?: Array<{ containerPort?: number; protocol?: string }>;
+      envFrom?: Array<{ configMapRef?: { name?: string; optional?: boolean } }>;
+      env?: Array<{ name?: string; valueFrom?: { configMapKeyRef?: { name?: string; key?: string; optional?: boolean } } }>;
+    }>;
+    initContainers?: Array<{
+      name: string;
+      image?: string;
+      ports?: Array<{ containerPort?: number; protocol?: string }>;
+      envFrom?: Array<{ configMapRef?: { name?: string; optional?: boolean } }>;
+      env?: Array<{ name?: string; valueFrom?: { configMapKeyRef?: { name?: string; key?: string; optional?: boolean } } }>;
+    }>;
     /** 列表接口若带 volumes，可用于展示 Pod 挂载的 PVC 名称 */
-    volumes?: Array<{ name?: string; persistentVolumeClaim?: { claimName?: string } }>;
+    volumes?: Array<{
+      name?: string;
+      persistentVolumeClaim?: { claimName?: string };
+      configMap?: { name?: string; optional?: boolean; items?: Array<{ key?: string; path?: string }> };
+    }>;
   };
   // 后端计算得到的健康信息，仅用于前端标签展示与解释
   healthLabel?: "健康" | "关注" | "警告" | "严重";
@@ -314,6 +333,39 @@ export interface PvcDescribeView {
 
 export interface PvcDescribe {
   view: PvcDescribeView;
+  events: K8sEvent[];
+}
+
+export interface ConfigMap {
+  apiVersion?: string;
+  kind?: string;
+  metadata: {
+    name: string;
+    namespace?: string;
+    uid?: string;
+    creationTimestamp?: string;
+    resourceVersion?: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+  };
+  data?: Record<string, string>;
+  binaryData?: Record<string, string>;
+}
+
+export interface ConfigMapDescribeView {
+  name: string;
+  namespace: string;
+  uid?: string;
+  creationTimestamp?: string;
+  resourceVersion?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  data?: Record<string, string>;
+  binaryData?: Record<string, string>;
+}
+
+export interface ConfigMapDescribe {
+  view: ConfigMapDescribeView;
   events: K8sEvent[];
 }
 
@@ -1245,6 +1297,60 @@ export async function deletePvc(clusterId: string, namespace: string, name: stri
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/persistentvolumeclaims/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
   );
+}
+
+export async function fetchConfigMapDescribe(
+  clusterId: string,
+  namespace: string,
+  name: string,
+): Promise<ConfigMapDescribe> {
+  const res = await api.get<ConfigMapDescribe>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/describe`,
+  );
+  return res.data;
+}
+
+export async function fetchConfigMapYaml(clusterId: string, namespace: string, name: string): Promise<string> {
+  const res = await api.get<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/yaml`,
+    { responseType: "text" },
+  );
+  return res.data;
+}
+
+export async function applyConfigMapYaml(
+  clusterId: string,
+  namespace: string,
+  name: string,
+  yamlBody: string,
+): Promise<ConfigMap> {
+  const res = await api.put<ConfigMap>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    yamlBody,
+    { headers: { "Content-Type": "text/yaml" } },
+  );
+  return res.data;
+}
+
+export async function deleteConfigMap(clusterId: string, namespace: string, name: string): Promise<void> {
+  await api.delete(
+    `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+  );
+}
+
+export type ConfigMapBatchItem = { namespace: string; name: string };
+
+export async function batchDeleteConfigMaps(clusterId: string, items: ConfigMapBatchItem[]): Promise<void> {
+  await api.post(`/api/clusters/${encodeURIComponent(clusterId)}/configmaps/batch-delete`, { items });
+}
+
+export async function exportConfigMapsYaml(clusterId: string, items: ConfigMapBatchItem[]): Promise<string> {
+  const res = await api.post<string>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/export`,
+    { items },
+    { responseType: "text" },
+  );
+  return res.data;
 }
 
 export async function fetchNodeDescribe(clusterId: string, name: string): Promise<NodeDescribe> {

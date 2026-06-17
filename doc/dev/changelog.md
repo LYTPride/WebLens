@@ -4,6 +4,15 @@
 
 ## 2026-06
 
+### ConfigMaps 一等资源页
+
+- **入口与列表**：ConfigMaps 从 v1 隐藏视图移出，侧栏新增「配置 / ConfigMaps」；列表改为专用列（Name、Namespace、引用资源、配置规模、风险、Age、操作），Name 打开右侧 Describe，复制名称仍是 hover/focus 小图标，三点菜单只放编辑 YAML、编辑配置、下载 YAML、删除。
+- **数据流**：后端保留 ConfigMap list/watch，并新增 describe/yaml/update/delete ops；前端新增独立 `configMapItems` raw state、refresh nonce、watch gap fill 与 `applyK8sNamespacedWatchEvent` 合并，不再用 generic table 暴露可见页面。
+- **排障模型**：前端基于 raw Pods memo 派生 Pod 引用统计，覆盖 volume、envFrom、env/configMapKeyRef 与 initContainers；配置规模合并 data/binaryData key 数与大小；风险标签覆盖未引用、空配置、超大配置、疑似敏感配置、高影响范围。
+- **Describe 与底部工作区**：新增结构化 ConfigMap Describe（影响范围、风险分析、配置摘要、Key 列表、基本信息、Events）；YAML Edit 复用底部 `PodYamlEditTab`；新增 Config Editor 底部 tab，可浏览 key、复制/下载内容，并支持保存 data 文本 key。
+- **YAML 加载修复**：`PodYamlEditTab` 补齐 `yamlKind === "configmap"` 的加载分支，避免把 ConfigMap 名称误走 Pod YAML API；错误展示会解析 JSON / 纯文本响应体，仅在真实 403 时提示权限方向。后端 ConfigMap ops 改为按 Kubernetes `StatusError` 返回 403/404/409/400 等真实状态码，并在日志中记录 cluster、namespace、name。
+- **文档**：新增 `doc/guide/configmaps.md`，同步根 `README.md`、`doc/guide/resource-lists.md` 与 Events 关联跳转说明。
+
 ### 浅色主题 Events / 告警可读性修复
 
 - **Describe Events 卡片语义 token 化**（`DescribeEventsSection.tsx` / `tokens.css`）：原 Warning / Failed 类事件复用了深色主题浅红文字（如 `#fecaca`）与半透明深红背景，浅色主题下会出现粉底浅字、正文不可读。新增 **`--wl-event-normal-*` / `--wl-event-warning-*`** token，分别定义背景、边框、强调线、标题、正文与辅助信息颜色；Pod、Deployment、StatefulSet、Ingress、Service、PVC、Node 等 Describe 面板共用的 Events 区块同步受益。

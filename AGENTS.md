@@ -262,6 +262,8 @@ Use the existing operational-console style: dense, scannable, restrained.
 - Refresh list refreshes the current resource type and clears that page's sort state when that is the established behavior.
 - Tables should use stable column widths, `table-layout: fixed` when appropriate, and avoid layout shift.
 - Use `ResizableTh` and `useResourceListColumnResize` for draggable columns.
+- Resource-table select-all checkboxes belong to the table header: use the shared `SelectionHeaderCell`/resource-table selection header implementation so the select `th` uses the same header background, border, hover, and sticky tokens as other header cells.
+- Do not give selection header cells body-cell, panel, page, or one-off hardcoded backgrounds; check the result in both light and dark themes, using Pods and Deployments as the reference behavior.
 - Use `ResourceSortArrows` for sortable columns.
 - When sorting is active, Watch updates may reorder rows and should keep the current sort.
 - Row menu open state should keep the associated row highlighted with `wl-table-row--menu-open`.
