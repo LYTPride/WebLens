@@ -43,6 +43,13 @@ import {
   type PvcDescribe,
   fetchNodeDescribe,
   type NodeDescribe,
+  fetchConfigMapDescribe,
+  fetchConfigMapYaml,
+  deleteConfigMap,
+  batchDeleteConfigMaps,
+  exportConfigMapsYaml,
+  type ConfigMap,
+  type ConfigMapDescribe,
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
 import { ThemeToggleButton } from "../components/ThemeToggleButton";
@@ -50,6 +57,7 @@ import { ResourceTable, type Column } from "../components/ResourceTable";
 import { BottomPanel, type PanelTab } from "../components/BottomPanel";
 import { ResizableTh } from "../components/ResizableTh";
 import { ResourceSortArrows } from "../components/ResourceSortArrows";
+import { SelectionHeaderCell } from "../components/SelectionHeaderCell";
 import {
   sortByState,
   comparePodsForSort,
@@ -115,6 +123,21 @@ import {
   type PvcListRow,
 } from "../utils/pvcTable";
 import {
+  compareConfigMapsForSort,
+  configMapKey,
+  configMapMatchesFilter,
+  configMapRiskRank,
+  deriveConfigMapReferences,
+  deriveConfigMapRisks,
+  formatConfigMapReferenceSummary,
+  summarizeConfigMapSize,
+  type ConfigMapListRow,
+  type ConfigMapReferenceSummary,
+  type ConfigMapRisk,
+  type ConfigMapSortKey,
+  type ConfigMapSortStats,
+} from "../utils/configMapTable";
+import {
   countPodsOnNode,
   deriveNodeStatusSummary,
   formatNodeCpuMemoryCapacity,
@@ -158,9 +181,11 @@ import { StatefulSetDescribeContent } from "../components/describe/StatefulSetDe
 import { IngressDescribeContent } from "../components/describe/IngressDescribeContent";
 import { ServiceDescribeContent } from "../components/describe/ServiceDescribeContent";
 import { PvcDescribeContent } from "../components/describe/PvcDescribeContent";
+import { ConfigMapDescribeContent } from "../components/describe/ConfigMapDescribeContent";
 import { NodeDescribeContent } from "../components/describe/NodeDescribeContent";
 import { ServicesListTable } from "../components/ServicesListTable";
 import { PVC_COLUMN_KEYS, PVC_COLUMN_DEFAULTS, PVCListTable } from "../components/PVCListTable";
+import { CONFIGMAP_COLUMN_KEYS, CONFIGMAP_COLUMN_DEFAULTS, ConfigMapsListTable } from "../components/ConfigMapsListTable";
 import { NODE_COLUMN_KEYS, NODE_COLUMN_DEFAULTS, NodesListTable } from "../components/NodesListTable";
 import { EVENT_COLUMN_KEYS, EVENT_COLUMN_DEFAULTS, EventsListTable } from "../components/EventsListTable";
 import { EventDescribeContent } from "../components/describe/EventDescribeContent";
@@ -435,6 +460,20 @@ function serviceColumnMinWidth(key: string): number {
   return m[key] ?? MIN_COL_WIDTH;
 }
 
+function configMapColumnMinWidth(key: string): number {
+  const m: Record<string, number> = {
+    select: 40,
+    name: 140,
+    namespace: 72,
+    references: 110,
+    size: 96,
+    risk: 140,
+    age: 56,
+    actions: 72,
+  };
+  return m[key] ?? MIN_COL_WIDTH;
+}
+
 const SERVICE_COLUMN_LABELS: Record<(typeof SERVICE_COLUMN_KEYS)[number], string> = {
   name: "Name",
   namespace: "Namespace",
@@ -521,15 +560,6 @@ const thStyle: React.CSSProperties = {
   color: "var(--wl-text-table-header)",
 };
 
-/** 与 ResizableTh 默认 sticky 表头一致（定位、背景、底边），供首列勾选 th 使用，避免滚动时与表头脱节 */
-const stickyHeaderThCheckbox: React.CSSProperties = {
-  position: "sticky",
-  top: 0,
-  zIndex: 2,
-  backgroundColor: "var(--wl-bg-table-header)",
-  boxShadow: "0 1px 0 0 var(--wl-border-table-header)",
-  boxSizing: "border-box",
-};
 
 const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
@@ -754,6 +784,7 @@ export const App: React.FC = () => {
   const [ingressItems, setIngressItems] = useState<K8sItem[]>([]);
   const [serviceItems, setServiceItems] = useState<K8sItem[]>([]);
   const [pvcItems, setPvcItems] = useState<K8sItem[]>([]);
+  const [configMapItems, setConfigMapItems] = useState<ConfigMap[]>([]);
   const [eventItems, setEventItems] = useState<K8sItem[]>([]);
   const [serviceEndpointItems, setServiceEndpointItems] = useState<K8sItem[]>([]);
   /** Ingress 排障：同作用域 Service 列表（仅 Ingress 视图拉取 + watch，与通用 resourceItems 隔离） */
@@ -766,6 +797,7 @@ export const App: React.FC = () => {
   const [ingressLoading, setIngressLoading] = useState(false);
   const [serviceLoading, setServiceLoading] = useState(false);
   const [pvcLoading, setPvcLoading] = useState(false);
+  const [configMapLoading, setConfigMapLoading] = useState(false);
   const [eventLoading, setEventLoading] = useState(false);
   const [nodeLoading, setNodeLoading] = useState(false);
   const [nodeItems, setNodeItems] = useState<K8sItem[]>([]);
@@ -835,6 +867,7 @@ export const App: React.FC = () => {
   const [ingressesListNonce, setIngressesListNonce] = useState(0);
   const [servicesListNonce, setServicesListNonce] = useState(0);
   const [pvcsListNonce, setPvcsListNonce] = useState(0);
+  const [configMapsListNonce, setConfigMapsListNonce] = useState(0);
   const [eventsListNonce, setEventsListNonce] = useState(0);
   const [nodesListNonce, setNodesListNonce] = useState(0);
   /** Deployment / StatefulSet Scale 弹窗 */
@@ -849,10 +882,11 @@ export const App: React.FC = () => {
   /** Pods / Deployments 多选（全局，跨搜索排序；与 listScopeKey、刷新列表联动清空） */
   const [selectedPodKeys, setSelectedPodKeys] = useState<Set<string>>(() => new Set());
   const [selectedDeploymentKeys, setSelectedDeploymentKeys] = useState<Set<string>>(() => new Set());
+  const [selectedConfigMapKeys, setSelectedConfigMapKeys] = useState<Set<string>>(() => new Set());
   const podTableHeaderSelectRef = useRef<HTMLInputElement>(null);
   const deployTableHeaderSelectRef = useRef<HTMLInputElement>(null);
   const [batchConfirm, setBatchConfirm] = useState<{
-    kind: "pods-delete" | "deployments-delete" | "deployments-restart";
+    kind: "pods-delete" | "deployments-delete" | "deployments-restart" | "configmaps-delete";
     keys: string[];
   } | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
@@ -874,10 +908,12 @@ export const App: React.FC = () => {
   const [expandedIngressKeys, setExpandedIngressKeys] = useState<Set<string>>(() => new Set());
   const [serviceRowBusyKey, setServiceRowBusyKey] = useState<string | null>(null);
   const [pvcRowBusyKey, setPvcRowBusyKey] = useState<string | null>(null);
+  const [configMapRowBusyKey, setConfigMapRowBusyKey] = useState<string | null>(null);
   const [nodeMenuOpenKey, setNodeMenuOpenKey] = useState<string | null>(null);
   const [nodeRowBusyKey, setNodeRowBusyKey] = useState<string | null>(null);
   const [serviceMenuOpenKey, setServiceMenuOpenKey] = useState<string | null>(null);
   const [pvcMenuOpenKey, setPvcMenuOpenKey] = useState<string | null>(null);
+  const [configMapMenuOpenKey, setConfigMapMenuOpenKey] = useState<string | null>(null);
   const [expandedServiceKeys, setExpandedServiceKeys] = useState<Set<string>>(() => new Set());
   const [expandedStatefulSetKeys, setExpandedStatefulSetKeys] = useState<Set<string>>(() => new Set());
   /** 列表区按 Name 关键字搜索（Pods / Deployments / Ingresses 等共用） */
@@ -889,6 +925,7 @@ export const App: React.FC = () => {
   const [ingressesListSort, setIngressesListSort] = useState<ResourceListSortState<IngressSortKey>>(null);
   const [servicesListSort, setServicesListSort] = useState<ResourceListSortState<ServiceSortKey>>(null);
   const [pvcsListSort, setPvcsListSort] = useState<ResourceListSortState<PvcSortKey>>(null);
+  const [configMapsListSort, setConfigMapsListSort] = useState<ResourceListSortState<ConfigMapSortKey>>(null);
   const [eventsListSort, setEventsListSort] = useState<ResourceListSortState<EventSortKey>>(null);
   const [nodesListSort, setNodesListSort] = useState<ResourceListSortState<NodeSortKey>>(null);
   /** Pod / Deployments / StatefulSets / Ingresses 表列宽（统一由 useResourceListColumnResize 管理） */
@@ -945,6 +982,15 @@ export const App: React.FC = () => {
     columnKeys: PVC_COLUMN_KEYS,
     defaults: PVC_COLUMN_DEFAULTS,
     minWidthForKey: pvcColumnMinWidth,
+  });
+  const {
+    columnWidths: configMapColumnWidths,
+    beginResize: beginResizeConfigMap,
+    totalDataWidth: configMapDataColumnsWidth,
+  } = useResourceListColumnResize({
+    columnKeys: CONFIGMAP_COLUMN_KEYS,
+    defaults: CONFIGMAP_COLUMN_DEFAULTS,
+    minWidthForKey: configMapColumnMinWidth,
   });
   const {
     columnWidths: nodeColumnWidths,
@@ -1004,6 +1050,7 @@ export const App: React.FC = () => {
   const lastIngressesListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   const lastServicesListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   const lastPvcsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
+  const lastConfigMapsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   const lastEventsListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   const lastNodesListFetchRef = useRef<{ scope: string; nonce: number } | null>(null);
   /** 「刷新列表」点击后用于在 HTTP 完成时显示成功/失败 toast，避免与普通列表加载混淆 */
@@ -1013,6 +1060,7 @@ export const App: React.FC = () => {
   const ingressesManualRefreshToastRef = useRef(false);
   const servicesManualRefreshToastRef = useRef(false);
   const pvcsManualRefreshToastRef = useRef(false);
+  const configMapsManualRefreshToastRef = useRef(false);
   const eventsManualRefreshToastRef = useRef(false);
   const nodesManualRefreshToastRef = useRef(false);
   /** watch 断线重连 / 可见性恢复时 list 合并补齐的节流（毫秒时间戳） */
@@ -1021,6 +1069,7 @@ export const App: React.FC = () => {
   const lastStsWatchGapFillAtRef = useRef(0);
   const lastIngressWatchGapFillAtRef = useRef(0);
   const lastPvcsWatchGapFillAtRef = useRef(0);
+  const lastConfigMapsWatchGapFillAtRef = useRef(0);
   const lastEventsWatchGapFillAtRef = useRef(0);
   const lastNodesWatchGapFillAtRef = useRef(0);
   const lastServicesWatchGapFillAtRef = useRef(0);
@@ -1033,7 +1082,7 @@ export const App: React.FC = () => {
   /** Describe 右侧弹层：Pod 或 Deployment */
   const [describeTarget, setDescribeTarget] = useState<
     | {
-        kind: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "node";
+        kind: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "configmap" | "node";
         clusterId: string;
         namespace: string;
         name: string;
@@ -1047,6 +1096,7 @@ export const App: React.FC = () => {
   const [describeIngressData, setDescribeIngressData] = useState<IngressDescribe | null>(null);
   const [describeServiceData, setDescribeServiceData] = useState<ServiceDescribe | null>(null);
   const [describePvcData, setDescribePvcData] = useState<PvcDescribe | null>(null);
+  const [describeConfigMapData, setDescribeConfigMapData] = useState<ConfigMapDescribe | null>(null);
   const [describeNodeData, setDescribeNodeData] = useState<NodeDescribe | null>(null);
   const [describeLoading, setDescribeLoading] = useState(false);
   const [describeError, setDescribeError] = useState<string | null>(null);
@@ -1081,6 +1131,7 @@ export const App: React.FC = () => {
       currentView === "ingresses" ||
       currentView === "services" ||
       currentView === "persistentvolumeclaims" ||
+      currentView === "configmaps" ||
       currentView === "events" ||
       currentView === "nodes" ||
       describeTarget !== null);
@@ -1097,6 +1148,7 @@ export const App: React.FC = () => {
     loggedPodAgeRowByUid.clear();
     setSelectedPodKeys(new Set());
     setSelectedDeploymentKeys(new Set());
+    setSelectedConfigMapKeys(new Set());
   }, [listScopeKey]);
 
   useEffect(() => {
@@ -1124,6 +1176,18 @@ export const App: React.FC = () => {
       return next.size === prev.size ? prev : next;
     });
   }, [deploymentItems]);
+
+  useEffect(() => {
+    setSelectedConfigMapKeys((prev) => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(configMapItems.map((it) => configMapKey(it.metadata.namespace ?? "", it.metadata.name)));
+      const next = new Set<string>();
+      for (const k of prev) {
+        if (valid.has(k)) next.add(k);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [configMapItems]);
 
   useEffect(() => {
     if (!configModalOpen) {
@@ -1186,6 +1250,7 @@ export const App: React.FC = () => {
     setIngressMenuOpenKey(null);
     setServiceMenuOpenKey(null);
     setPvcMenuOpenKey(null);
+    setConfigMapMenuOpenKey(null);
     setNodeMenuOpenKey(null);
   }, [currentView]);
 
@@ -1197,6 +1262,7 @@ export const App: React.FC = () => {
       !ingressMenuOpenKey &&
       !serviceMenuOpenKey &&
       !pvcMenuOpenKey &&
+      !configMapMenuOpenKey &&
       !nodeMenuOpenKey
     )
       return;
@@ -1209,6 +1275,7 @@ export const App: React.FC = () => {
         setIngressMenuOpenKey(null);
         setServiceMenuOpenKey(null);
         setPvcMenuOpenKey(null);
+        setConfigMapMenuOpenKey(null);
         setNodeMenuOpenKey(null);
       }
     };
@@ -1221,6 +1288,7 @@ export const App: React.FC = () => {
     ingressMenuOpenKey,
     serviceMenuOpenKey,
     pvcMenuOpenKey,
+    configMapMenuOpenKey,
     nodeMenuOpenKey,
   ]);
 
@@ -1423,6 +1491,24 @@ export const App: React.FC = () => {
           }
         })
         .finally(() => setDescribeLoading(false));
+    } else if (describeTarget.kind === "configmap") {
+      setDescribeConfigMapData(null);
+      fetchConfigMapDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
+        .then((data) => {
+          setDescribeConfigMapData(data);
+          setDescribeError(null);
+        })
+        .catch((e: any) => {
+          const status = e?.response?.status;
+          const backendMsg = e?.response?.data?.error;
+          if (status === 404) {
+            setDescribeConfigMapData(null);
+            setDescribeError("ConfigMap 已不存在或已被删除");
+          } else {
+            setDescribeError(backendMsg ?? e?.message ?? "加载 Describe 失败");
+          }
+        })
+        .finally(() => setDescribeLoading(false));
     } else {
       setDescribePvcData(null);
       fetchPvcDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
@@ -1453,6 +1539,7 @@ export const App: React.FC = () => {
       setDescribeIngressData(null);
       setDescribeServiceData(null);
       setDescribePvcData(null);
+      setDescribeConfigMapData(null);
       setDescribeNodeData(null);
       setDescribeError(null);
       setDescribeLoading(false);
@@ -1771,6 +1858,101 @@ export const App: React.FC = () => {
     });
   };
 
+  const openDescribeForConfigMap = (cm: ConfigMapListRow) => {
+    if (!effectiveClusterId) return;
+    setDescribeTarget({
+      kind: "configmap",
+      clusterId: effectiveClusterId,
+      namespace: cm.metadata.namespace ?? "",
+      name: cm.metadata.name,
+    });
+  };
+
+  const openEditConfigMapYamlTab = (cm: ConfigMapListRow) => {
+    if (!effectiveClusterId) return;
+    const ns = cm.metadata.namespace ?? "";
+    const name = cm.metadata.name;
+    const id = `edit-cm-${ns}-${name}`;
+    setPanelTabs((prev) => {
+      const exists = prev.some((t) => t.id === id);
+      if (exists) return prev;
+      const tab: PanelTab = {
+        id,
+        type: "edit",
+        clusterId: effectiveClusterId,
+        namespace: ns,
+        pod: name,
+        container: "",
+        title: `${name} (ConfigMap)`,
+        containers: [],
+        yamlKind: "configmap",
+      };
+      return [...prev, tab];
+    });
+    setActivePanelTabId(id);
+    setConfigMapMenuOpenKey(null);
+    trackUsage({
+      event: "open_yaml_edit",
+      resource: "configmap",
+      target: `${ns}/${name}`,
+      ...usageScopeFields(),
+    });
+  };
+
+  const openConfigMapEditorTab = (cm: ConfigMapListRow) => {
+    if (!effectiveClusterId) return;
+    const ns = cm.metadata.namespace ?? "";
+    const name = cm.metadata.name;
+    const id = `config-editor-${ns}-${name}`;
+    const refs = configMapRefsByKey.get(configMapKey(ns, name)) ?? deriveConfigMapReferences(pods, ns, name);
+    setPanelTabs((prev) => {
+      const exists = prev.some((t) => t.id === id);
+      if (exists) return prev;
+      const tab: PanelTab = {
+        id,
+        type: "config-editor",
+        clusterId: effectiveClusterId,
+        namespace: ns,
+        pod: name,
+        container: "",
+        title: `${name} (Config Editor)`,
+        containers: [],
+        configMap: cm,
+        configMapReferences: refs,
+      };
+      return [...prev, tab];
+    });
+    setActivePanelTabId(id);
+    setConfigMapMenuOpenKey(null);
+    trackUsage({
+      event: "open_config_editor",
+      resource: "configmap",
+      target: `${ns}/${name}`,
+      ...usageScopeFields(),
+    });
+  };
+
+  const downloadConfigMapYaml = async (cm: ConfigMapListRow) => {
+    if (!effectiveClusterId) return;
+    const ns = cm.metadata.namespace ?? "";
+    const name = cm.metadata.name;
+    try {
+      const yaml = await fetchConfigMapYaml(effectiveClusterId, ns, name);
+      const blob = new Blob([yaml], { type: "text/yaml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${ns}-${name}-configmap.yaml`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setToastMessage("已下载 ConfigMap YAML");
+    } catch (err: any) {
+      setToastMessage(err?.response?.data?.error ?? err?.message ?? "下载失败");
+    }
+  };
+
   const openDescribeForNode = (n: NodeListRow) => {
     if (!effectiveClusterId) return;
     setDescribeTarget({
@@ -2045,6 +2227,18 @@ export const App: React.FC = () => {
             return !keys.includes(k);
           }),
         );
+      } else if (kind === "configmaps-delete") {
+        await batchDeleteConfigMaps(effectiveClusterId, keys.map((key) => parseNsNameRowKey(key)));
+        trackUsage({
+          event: "delete_configmap",
+          resource: "configmap",
+          target: `batch:${keys.length}`,
+          ...usageScopeFields(),
+        });
+        setSelectedConfigMapKeys(new Set());
+        setBatchConfirm(null);
+        setToastMessage(`已删除 ${keys.length} 个 ConfigMap`);
+        setConfigMapItems((prev) => prev.filter((it) => !keys.includes(configMapKey(it.metadata.namespace ?? "", it.metadata.name))));
       } else {
         for (const key of keys) {
           const { namespace, name } = parseNsNameRowKey(key);
@@ -2222,6 +2416,25 @@ export const App: React.FC = () => {
     }
   }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
 
+  const runConfigMapsWatchGapFill = useCallback(async () => {
+    const cid = effectiveClusterId;
+    const ns = effectiveNamespace;
+    if (!cid || !pageVisible || currentViewRef.current !== "configmaps") return;
+    const t = Date.now();
+    if (t - lastConfigMapsWatchGapFillAtRef.current < WATCH_GAP_FILL_MIN_MS) return;
+    lastConfigMapsWatchGapFillAtRef.current = t;
+    try {
+      const { items, serverTimeMs } = await fetchResourceList<ConfigMap>(cid, "configmaps", ns || undefined);
+      syncServerClock(serverTimeMs);
+      const cur = activeClusterNsRef.current;
+      if (cur.clusterId !== cid || (cur.namespace || "") !== (ns || "")) return;
+      if (currentViewRef.current !== "configmaps") return;
+      setConfigMapItems((prev) => mergeNamespacedItemsWithListSnapshot(prev as unknown as K8sItem[], items as unknown as K8sItem[], ns) as unknown as ConfigMap[]);
+    } catch {
+      /* silent */
+    }
+  }, [effectiveClusterId, effectiveNamespace, pageVisible, syncServerClock]);
+
   const runEventsWatchGapFill = useCallback(async () => {
     const cid = effectiveClusterId;
     const ns = effectiveNamespace;
@@ -2276,6 +2489,7 @@ export const App: React.FC = () => {
       currentView === "ingresses" ||
       currentView === "services" ||
       currentView === "persistentvolumeclaims" ||
+      currentView === "configmaps" ||
       currentView === "nodes";
     if (needsPodsData) void runPodsWatchGapFill();
     if (currentView === "deployments") void runDeploymentsWatchGapFill();
@@ -2283,6 +2497,7 @@ export const App: React.FC = () => {
     if (currentView === "ingresses") void runIngressesWatchGapFill();
     if (currentView === "services") void runServicesWatchGapFill();
     if (currentView === "persistentvolumeclaims") void runPvcsWatchGapFill();
+    if (currentView === "configmaps") void runConfigMapsWatchGapFill();
     if (currentView === "events") void runEventsWatchGapFill();
     if (currentView === "nodes") void runNodesWatchGapFill();
   }, [
@@ -2295,6 +2510,7 @@ export const App: React.FC = () => {
     runIngressesWatchGapFill,
     runServicesWatchGapFill,
     runPvcsWatchGapFill,
+    runConfigMapsWatchGapFill,
     runEventsWatchGapFill,
     runNodesWatchGapFill,
   ]);
@@ -2417,6 +2633,7 @@ export const App: React.FC = () => {
       currentView === "deployments" ||
       currentView === "ingresses" ||
       currentView === "persistentvolumeclaims" ||
+      currentView === "configmaps" ||
       currentView === "nodes";
 
     if (!needsPodsData && podsWatchCancelRef.current) {
@@ -3026,6 +3243,107 @@ export const App: React.FC = () => {
     syncServerClock,
   ]);
 
+  // ConfigMaps：独立列表 + Watch（引用关系由 raw Pods 派生）
+  useEffect(() => {
+    if (!effectiveClusterId) return;
+    if (!pageVisible) return;
+    if (currentView !== "configmaps") return;
+
+    if (resourceWatchCancelRef.current) {
+      resourceWatchCancelRef.current();
+      resourceWatchCancelRef.current = null;
+    }
+
+    const scopeKey = listScopeKey;
+    const last = lastConfigMapsListFetchRef.current;
+    const needHttp = !last || last.scope !== scopeKey || last.nonce !== configMapsListNonce;
+    const ns = effectiveNamespace || undefined;
+
+    if (!needHttp) {
+      setApplyingSelection(false);
+    }
+
+    if (needHttp) {
+      setConfigMapLoading(true);
+      setError(null);
+      fetchResourceList<ConfigMap>(effectiveClusterId, "configmaps", ns)
+        .then(({ items, serverTimeMs }) => {
+          syncServerClock(serverTimeMs);
+          const cur = activeClusterNsRef.current;
+          if (currentViewRef.current !== "configmaps") {
+            if (configMapsManualRefreshToastRef.current) configMapsManualRefreshToastRef.current = false;
+            return;
+          }
+          if (cur.clusterId !== effectiveClusterId || (cur.namespace || "") !== (effectiveNamespace || "")) {
+            if (configMapsManualRefreshToastRef.current) configMapsManualRefreshToastRef.current = false;
+            return;
+          }
+          setConfigMapItems(items);
+          setError(null);
+          lastConfigMapsListFetchRef.current = { scope: scopeKey, nonce: configMapsListNonce };
+          if (configMapsManualRefreshToastRef.current) {
+            configMapsManualRefreshToastRef.current = false;
+            setToastMessage("列表已刷新");
+          }
+        })
+        .catch((err: any) => {
+          if (configMapsManualRefreshToastRef.current) {
+            configMapsManualRefreshToastRef.current = false;
+            setToastMessage("刷新失败，请稍后重试");
+          }
+          const status = err?.response?.status;
+          const backendMsg = err?.response?.data?.error;
+          if (status === 404) setError("当前集群不存在，请点击「刷新」重载 kubeconfig 目录");
+          else if (status === 403) setError("当前账号没有 list configmaps 权限");
+          else if (status === 500 && backendMsg) setError(`集群 API 调用失败：${backendMsg}`);
+          else if (status === 500) setError("当前集群不可用，请检查 kubeconfig 与集群连通性，或点击「刷新」重试");
+          else setError(err?.message || "加载失败，请稍后重试");
+        })
+        .finally(() => {
+          setConfigMapLoading(false);
+          setApplyingSelection(false);
+        });
+    }
+
+    const cancel = watchResourceList<ConfigMap>(effectiveClusterId, "configmaps", ns, {
+      onEvent: (ev) => {
+        syncServerClock(ev.serverTimeMs);
+        setConfigMapItems((prev) => applyK8sNamespacedWatchEvent(prev as unknown as K8sItem[], ev as any, effectiveNamespace) as unknown as ConfigMap[]);
+      },
+      onError: (err) => {
+        // eslint-disable-next-line no-console
+        console.error("configmaps watch error:", err);
+        fetchResourceList<ConfigMap>(effectiveClusterId, "configmaps", ns)
+          .then(({ items, serverTimeMs }) => {
+            syncServerClock(serverTimeMs);
+            if (currentViewRef.current !== "configmaps") return;
+            setConfigMapItems(items);
+          })
+          .catch(() => {});
+      },
+      onConnectionEstablished: () => {
+        void runConfigMapsWatchGapFill();
+      },
+    });
+    resourceWatchCancelRef.current = cancel;
+
+    return () => {
+      if (resourceWatchCancelRef.current) {
+        resourceWatchCancelRef.current();
+        resourceWatchCancelRef.current = null;
+      }
+    };
+  }, [
+    effectiveClusterId,
+    effectiveNamespace,
+    currentView,
+    pageVisible,
+    listScopeKey,
+    configMapsListNonce,
+    runConfigMapsWatchGapFill,
+    syncServerClock,
+  ]);
+
   // Events：命名空间作用域 list + watch（与 PVC 同模式，独立 eventItems）
   useEffect(() => {
     if (!effectiveClusterId) return;
@@ -3408,6 +3726,7 @@ export const App: React.FC = () => {
       currentView === "ingresses" ||
       currentView === "services" ||
       currentView === "persistentvolumeclaims" ||
+      currentView === "configmaps" ||
       currentView === "events" ||
       currentView === "nodes"
     )
@@ -3423,7 +3742,7 @@ export const App: React.FC = () => {
     const cancel = watchResourceList<K8sItem>(
       effectiveClusterId,
       currentView,
-      currentView === "nodes" ? undefined : effectiveNamespace || undefined,
+      effectiveNamespace || undefined,
       {
         onEvent: (ev) => {
           syncServerClock(ev.serverTimeMs);
@@ -3697,6 +4016,75 @@ export const App: React.FC = () => {
     );
   }, [filteredPvcs, pvcsListSort, pvcSortStatsByKey, pvcsListSort?.key === "age" ? listAgeNow : 0]);
 
+  const configMapRefsByKey = useMemo(() => {
+    const m = new Map<string, ConfigMapReferenceSummary>();
+    for (const cm of configMapItems) {
+      const ns = cm.metadata.namespace ?? "";
+      const name = cm.metadata.name;
+      m.set(configMapKey(ns, name), deriveConfigMapReferences(pods, ns, name));
+    }
+    return m;
+  }, [configMapItems, pods]);
+
+  const configMapRisksByKey = useMemo(() => {
+    const m = new Map<string, ConfigMapRisk[]>();
+    for (const cm of configMapItems) {
+      const key = configMapKey(cm.metadata.namespace ?? "", cm.metadata.name);
+      const refs = configMapRefsByKey.get(key) ?? deriveConfigMapReferences(pods, cm.metadata.namespace ?? "", cm.metadata.name);
+      m.set(key, deriveConfigMapRisks(cm, refs));
+    }
+    return m;
+  }, [configMapItems, configMapRefsByKey, pods]);
+
+  const filteredConfigMaps = useMemo(() => {
+    const k = nameFilter.trim();
+    if (!k) return configMapItems;
+    return configMapItems.filter((cm) => {
+      const key = configMapKey(cm.metadata.namespace ?? "", cm.metadata.name);
+      const refs = configMapRefsByKey.get(key) ?? deriveConfigMapReferences(pods, cm.metadata.namespace ?? "", cm.metadata.name);
+      const risks = configMapRisksByKey.get(key) ?? deriveConfigMapRisks(cm, refs);
+      return configMapMatchesFilter(cm, k, refs, risks);
+    });
+  }, [configMapItems, configMapRefsByKey, configMapRisksByKey, nameFilter, pods]);
+
+  const hasRiskyConfigMaps = useMemo(() => {
+    for (const risks of configMapRisksByKey.values()) {
+      if (configMapRiskRank(risks) > 0) return true;
+    }
+    return false;
+  }, [configMapRisksByKey]);
+
+  const configMapSortStatsByKey = useMemo(() => {
+    const m = new Map<string, ConfigMapSortStats>();
+    for (const cm of filteredConfigMaps) {
+      const key = configMapKey(cm.metadata.namespace ?? "", cm.metadata.name);
+      const refs = configMapRefsByKey.get(key) ?? deriveConfigMapReferences(pods, cm.metadata.namespace ?? "", cm.metadata.name);
+      const risks = configMapRisksByKey.get(key) ?? deriveConfigMapRisks(cm, refs);
+      const size = summarizeConfigMapSize(cm);
+      m.set(key, {
+        references: refs.totalResources,
+        sizeBytes: size.totalBytes,
+        riskRank: configMapRiskRank(risks),
+      });
+    }
+    return m;
+  }, [filteredConfigMaps, configMapRefsByKey, configMapRisksByKey, pods]);
+
+  const sortedConfigMaps = useMemo(() => {
+    const getStats = (row: ConfigMapListRow) => {
+      const k = configMapKey(row.metadata.namespace ?? "", row.metadata.name);
+      return configMapSortStatsByKey.get(k) ?? { references: 0, sizeBytes: 0, riskRank: 0 };
+    };
+    const byAge = configMapsListSort?.key === "age";
+    return sortByState(
+      filteredConfigMaps,
+      configMapsListSort,
+      byAge
+        ? (a, b, key) => compareConfigMapsForSort(a, b, key, getStats, listAgeNow)
+        : (a, b, key) => compareConfigMapsForSort(a, b, key, getStats),
+    );
+  }, [filteredConfigMaps, configMapsListSort, configMapSortStatsByKey, configMapsListSort?.key === "age" ? listAgeNow : 0]);
+
   const filteredEvents = useMemo(() => {
     const k = nameFilter.trim();
     if (!k) return eventItems;
@@ -3883,6 +4271,16 @@ export const App: React.FC = () => {
     [selectedDeploymentKeys, visibleDeploymentKeysSet],
   );
 
+
+  const visibleConfigMapKeysSet = useMemo(
+    () => new Set(sortedConfigMaps.map((cm) => configMapKey(cm.metadata.namespace ?? "", cm.metadata.name))),
+    [sortedConfigMaps],
+  );
+  const configMapSelectedNotVisibleCount = useMemo(
+    () => [...selectedConfigMapKeys].filter((k) => !visibleConfigMapKeysSet.has(k)).length,
+    [selectedConfigMapKeys, visibleConfigMapKeysSet],
+  );
+
   const podSortMembershipKey = useMemo(
     () =>
       [...filteredPods]
@@ -3973,6 +4371,7 @@ export const App: React.FC = () => {
 
   const serviceTableTotalWidth = useMemo(() => serviceDataColumnsWidth, [serviceDataColumnsWidth]);
   const pvcTableTotalWidth = useMemo(() => pvcDataColumnsWidth, [pvcDataColumnsWidth]);
+  const configMapTableTotalWidth = useMemo(() => configMapDataColumnsWidth, [configMapDataColumnsWidth]);
   const nodeTableTotalWidth = useMemo(() => nodeDataColumnsWidth, [nodeDataColumnsWidth]);
   const eventTableTotalWidth = useMemo(() => eventDataColumnsWidth, [eventDataColumnsWidth]);
 
@@ -4184,6 +4583,8 @@ export const App: React.FC = () => {
               ? `确认删除 ${batchConfirm.keys.length} 个 Deployment？`
               : batchConfirm?.kind === "deployments-restart"
                 ? `确认重启 ${batchConfirm.keys.length} 个 Deployment？`
+                : batchConfirm?.kind === "configmaps-delete"
+                  ? `确认删除 ${batchConfirm.keys.length} 个 ConfigMap？`
                 : ""
         }
         description={
@@ -4191,6 +4592,8 @@ export const App: React.FC = () => {
             ? "将触发滚动更新，Pod 会按策略逐步重建。"
             : batchConfirm?.kind === "deployments-delete"
               ? "删除后不可恢复。"
+              : batchConfirm?.kind === "configmaps-delete"
+                ? "删除后不可恢复；若被工作负载引用，相关应用可能启动失败或配置异常。"
               : undefined
         }
         items={batchConfirm?.keys ?? []}
@@ -5078,6 +5481,8 @@ export const App: React.FC = () => {
                                 ? filteredServices.length
                                 : currentView === "persistentvolumeclaims"
                                   ? filteredPvcs.length
+                                  : currentView === "configmaps"
+                                    ? filteredConfigMaps.length
                                   : currentView === "events"
                                     ? filteredEvents.length
                                     : currentView === "nodes"
@@ -5090,6 +5495,7 @@ export const App: React.FC = () => {
                       currentView === "ingresses" ||
                       currentView === "services" ||
                       currentView === "persistentvolumeclaims" ||
+                      currentView === "configmaps" ||
                       currentView === "events" ||
                       currentView === "nodes") && (
                       <button
@@ -5122,6 +5528,11 @@ export const App: React.FC = () => {
                             pvcsManualRefreshToastRef.current = true;
                             setPvcsListSort(null);
                             setPvcsListNonce((n) => n + 1);
+                          } else if (currentView === "configmaps") {
+                            configMapsManualRefreshToastRef.current = true;
+                            setConfigMapsListSort(null);
+                            setSelectedConfigMapKeys(new Set());
+                            setConfigMapsListNonce((n) => n + 1);
                           } else if (currentView === "events") {
                             eventsManualRefreshToastRef.current = true;
                             setEventsListSort(null);
@@ -5230,6 +5641,66 @@ export const App: React.FC = () => {
                         </button>
                       </div>
                     )}
+                    {currentView === "configmaps" && selectedConfigMapKeys.size > 0 && (
+                      <div className="wl-bulk-action-bar">
+                        <span>
+                          已选 <span className="wl-bulk-action-bar__count">{selectedConfigMapKeys.size}</span> 项
+                          {configMapSelectedNotVisibleCount > 0 && (
+                            <span className="wl-bulk-action-bar__hint">
+                              {" "}
+                              （其中 {configMapSelectedNotVisibleCount} 项当前未显示）
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          className="wl-bulk-btn wl-bulk-btn--danger"
+                          disabled={!effectiveClusterId}
+                          onClick={() =>
+                            setBatchConfirm({
+                              kind: "configmaps-delete",
+                              keys: [...selectedConfigMapKeys].sort(),
+                            })
+                          }
+                        >
+                          删除
+                        </button>
+                        <button
+                          type="button"
+                          className="wl-bulk-btn wl-bulk-btn--secondary"
+                          disabled={!effectiveClusterId}
+                          onClick={() => {
+                            if (!effectiveClusterId) return;
+                            const items = [...selectedConfigMapKeys].map((key) => parseNsNameRowKey(key));
+                            exportConfigMapsYaml(effectiveClusterId, items)
+                              .then((yaml) => {
+                                const blob = new Blob([yaml], { type: "text/yaml;charset=utf-8" });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement("a");
+                                a.href = url;
+                                a.download = `weblens-configmaps-${items.length}.yaml`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(url);
+                                setToastMessage(`已导出 ${items.length} 个 ConfigMap`);
+                              })
+                              .catch((err: any) => {
+                                setToastMessage(err?.response?.data?.error ?? err?.message ?? "导出失败");
+                              });
+                          }}
+                        >
+                          导出 YAML
+                        </button>
+                        <button
+                          type="button"
+                          className="wl-bulk-btn wl-bulk-btn--ghost"
+                          onClick={() => setSelectedConfigMapKeys(new Set())}
+                        >
+                          取消选择
+                        </button>
+                      </div>
+                    )}
                     {applyingSelection && (
                       <span style={{ fontSize: 12, color: "#38bdf8" }}>
                         正在根据新的集群与命名空间加载资源…
@@ -5242,6 +5713,7 @@ export const App: React.FC = () => {
                         currentView === "ingresses" ||
                         currentView === "services" ||
                         currentView === "persistentvolumeclaims" ||
+                        currentView === "configmaps" ||
                         currentView === "events") &&
                       showServerClockSkewHint && (
                         <span
@@ -5294,6 +5766,14 @@ export const App: React.FC = () => {
                         当前范围内存在未就绪或异常的 PVC，可按「状态」排序后点击 Name 打开 Describe 核对绑定与关联 Pod。
                       </span>
                     )}
+                    {!applyingSelection && currentView === "configmaps" && hasRiskyConfigMaps && (
+                      <span className="wl-list-inline-alert">
+                        <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
+                          ⚠
+                        </span>
+                        当前范围内存在未引用、空配置、超大或疑似敏感 ConfigMap，可按「风险」排序并点击 Name 查看影响范围。
+                      </span>
+                    )}
                     {!applyingSelection && currentView === "services" && hasRiskyServices && (
                       <span className="wl-list-inline-alert">
                         <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
@@ -5313,6 +5793,8 @@ export const App: React.FC = () => {
                           ? "按 Service 名称过滤"
                             : currentView === "persistentvolumeclaims"
                             ? "按 PVC 名称过滤"
+                            : currentView === "configmaps"
+                              ? "按 Name / Namespace / Key / 风险过滤"
                             : currentView === "events"
                               ? "按 Reason / Message / 关联对象过滤"
                               : currentView === "nodes"
@@ -5362,18 +5844,7 @@ export const App: React.FC = () => {
                     </colgroup>
                     <thead>
                       <tr>
-                        <th
-                          className="wl-table-sticky-head"
-                          style={{
-                            ...thStyle,
-                            ...stickyHeaderThCheckbox,
-                            width: LIST_SELECT_COL_WIDTH,
-                            maxWidth: LIST_SELECT_COL_WIDTH,
-                            minWidth: LIST_SELECT_COL_WIDTH,
-                            textAlign: "center",
-                            verticalAlign: "middle",
-                          }}
-                        >
+                        <SelectionHeaderCell thBase={thStyle} width={LIST_SELECT_COL_WIDTH}>
                           <input
                             ref={podTableHeaderSelectRef}
                             type="checkbox"
@@ -5391,7 +5862,7 @@ export const App: React.FC = () => {
                               });
                             }}
                           />
-                        </th>
+                        </SelectionHeaderCell>
                         {(
                           ["Name", "Namespace", "Node", "存活时间", "状态标签", "Status", "Restarts", "容器数", "操作"] as const
                         ).map((label, i) => {
@@ -5686,18 +6157,7 @@ export const App: React.FC = () => {
                     </colgroup>
                     <thead>
                       <tr>
-                        <th
-                          className="wl-table-sticky-head"
-                          style={{
-                            ...thStyle,
-                            ...stickyHeaderThCheckbox,
-                            width: LIST_SELECT_COL_WIDTH,
-                            maxWidth: LIST_SELECT_COL_WIDTH,
-                            minWidth: LIST_SELECT_COL_WIDTH,
-                            textAlign: "center",
-                            verticalAlign: "middle",
-                          }}
-                        >
+                        <SelectionHeaderCell thBase={thStyle} width={LIST_SELECT_COL_WIDTH}>
                           <input
                             ref={deployTableHeaderSelectRef}
                             type="checkbox"
@@ -5716,7 +6176,7 @@ export const App: React.FC = () => {
                               });
                             }}
                           />
-                        </th>
+                        </SelectionHeaderCell>
                         {(
                           [
                             { label: "Name", key: "name" as const },
@@ -7290,6 +7750,60 @@ export const App: React.FC = () => {
                     deletePvcApi={deletePvc}
                   />
                 </>
+              ) : currentView === "configmaps" ? (
+                <>
+                  <ConfigMapsListTable
+                    sortedRows={sortedConfigMaps as ConfigMapListRow[]}
+                    loading={configMapLoading}
+                    listSort={configMapsListSort}
+                    setListSort={setConfigMapsListSort}
+                    columnWidths={configMapColumnWidths}
+                    beginResize={beginResizeConfigMap}
+                    totalWidth={configMapTableTotalWidth}
+                    refsByKey={configMapRefsByKey}
+                    risksByKey={configMapRisksByKey}
+                    listAgeNow={listAgeNow}
+                    effectiveClusterId={effectiveClusterId}
+                    selectedKeys={selectedConfigMapKeys}
+                    onToggleRow={(key, checked) => {
+                      setSelectedConfigMapKeys((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.add(key);
+                        else next.delete(key);
+                        return next;
+                      });
+                    }}
+                    onToggleVisible={(checked) => {
+                      setSelectedConfigMapKeys((prev) => {
+                        const next = new Set(prev);
+                        for (const cm of sortedConfigMaps) {
+                          const key = configMapKey(cm.metadata.namespace ?? "", cm.metadata.name);
+                          if (checked) next.add(key);
+                          else next.delete(key);
+                        }
+                        return next;
+                      });
+                    }}
+                    menuOpenKey={configMapMenuOpenKey}
+                    setMenuOpenKey={setConfigMapMenuOpenKey}
+                    rowBusyKey={configMapRowBusyKey}
+                    setRowBusyKey={setConfigMapRowBusyKey}
+                    openDescribe={openDescribeForConfigMap}
+                    openEditYamlTab={openEditConfigMapYamlTab}
+                    openConfigEditorTab={openConfigMapEditorTab}
+                    downloadYaml={downloadConfigMapYaml}
+                    copyName={copyName}
+                    setActionConfirm={setActionConfirm}
+                    onDeletedOne={(ns, name) => {
+                      setConfigMapItems((prev) =>
+                        prev.filter((it) => !((it.metadata.namespace ?? "") === ns && it.metadata.name === name)),
+                      );
+                    }}
+                    setToastMessage={setToastMessage}
+                    setError={setError}
+                    deleteConfigMapApi={deleteConfigMap}
+                  />
+                </>
               ) : currentView === "events" ? (
                 <>
                   <EventsListTable
@@ -7375,6 +7889,7 @@ export const App: React.FC = () => {
         onHeightRatioChange={setPanelHeightRatio}
         minimized={panelMinimized}
         onMinimizedChange={setPanelMinimized}
+        onToast={setToastMessage}
         onEditSaved={(tab, result) => {
           if (tab.yamlKind === "deployment" && result) {
             setDeploymentItems((prev) => mergeDeploymentIntoList(prev, result));
@@ -7390,6 +7905,10 @@ export const App: React.FC = () => {
           }
           if (tab.yamlKind === "pvc" && result) {
             setPvcItems((prev) => mergeDeploymentIntoList(prev, result));
+          }
+          if ((tab.yamlKind === "configmap" || tab.type === "config-editor") && result) {
+            setConfigMapItems((prev) => mergeDeploymentIntoList(prev as unknown as K8sItem[], result) as unknown as ConfigMap[]);
+            if (describeTarget?.kind === "configmap") refreshDescribe();
           }
           if (tab.yamlKind === "node" && result) {
             setNodeItems((prev) => mergeDeploymentIntoList(prev, result));
@@ -7481,6 +8000,8 @@ export const App: React.FC = () => {
                             ? "Service"
                             : describeTarget.kind === "pvc"
                               ? "PersistentVolumeClaim"
+                              : describeTarget.kind === "configmap"
+                                ? "ConfigMap"
                               : describeTarget.kind === "node"
                                 ? "Node"
                                 : "Pod"}
@@ -7711,6 +8232,19 @@ export const App: React.FC = () => {
                   onJumpPods={jumpServiceToPods}
                   onJumpIngress={jumpServiceToIngress}
                   onCopyName={copyName}
+                />
+              )}
+              {!describeLoading && describeTarget.kind === "configmap" && (
+                <ConfigMapDescribeContent
+                  view={describeConfigMapData?.view}
+                  events={describeConfigMapData?.events ?? []}
+                  ageLabel={formatAgeFromMetadata(
+                    { creationTimestamp: describeConfigMapData?.view?.creationTimestamp },
+                    listAgeNow,
+                  )}
+                  pods={pods}
+                  onCopyName={copyName}
+                  onJumpPods={jumpServiceToPods}
                 />
               )}
               {!describeLoading && describeTarget.kind === "pvc" && (

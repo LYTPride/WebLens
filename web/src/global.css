@@ -312,12 +312,17 @@ button.wl-sidebar-resource-item:disabled:hover {
   background-color: transparent;
 }
 
-/* 资源列表 sticky 表头（Pods / Deployments / StatefulSet 等复用 .wl-table-sticky-head） */
+/* 资源列表 sticky 表头（Pods / Deployments / ConfigMaps / StatefulSet 等复用 .wl-table-sticky-head；选择列表头复用 .wl-table-select-th） */
 th.wl-table-sticky-head:hover {
   background-color: var(--wl-bg-table-header-hover) !important;
 }
 
-th.wl-table-sticky-head input[type="checkbox"] {
+th.wl-table-select-th {
+  background-color: var(--wl-bg-table-header);
+}
+
+th.wl-table-sticky-head input[type="checkbox"],
+th.wl-table-select-th input[type="checkbox"] {
   cursor: pointer;
   vertical-align: middle;
   accent-color: var(--wl-checkbox-accent);
