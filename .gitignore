@@ -11,6 +11,9 @@ release/
 # 服务端 v1 使用行为埋点（本地运行生成）
 logs/
 
+# Kubernetes 凭据目录（禁止提交 kubeconfig / client key）
+kubeconfigs/
+
 # OS / IDE
 .DS_Store
 *.swp
