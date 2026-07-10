@@ -63,11 +63,11 @@ func TestDefaultPasswordRequiresChangeAndRejectsDefaultReuse(t *testing.T) {
 	if !loggedIn.MustChangePassword {
 		t.Fatal("new normal user must change default password")
 	}
-	if err := store.ChangePassword(ctx, user.ID, DefaultUserPassword, DefaultUserPassword, ""); err == nil {
+	if err := store.ChangePassword(ctx, user.ID, "", DefaultUserPassword, ""); err == nil {
 		t.Fatal("ChangePassword accepted the default password as the new password")
 	}
-	if err := store.ChangePassword(ctx, user.ID, DefaultUserPassword, "UserPass123", ""); err != nil {
-		t.Fatalf("ChangePassword: %v", err)
+	if err := store.ChangePassword(ctx, user.ID, "", "UserPass123", ""); err != nil {
+		t.Fatalf("ChangePassword without old password during forced change: %v", err)
 	}
 	updated, err := store.UserByID(ctx, user.ID)
 	if err != nil {
@@ -75,6 +75,12 @@ func TestDefaultPasswordRequiresChangeAndRejectsDefaultReuse(t *testing.T) {
 	}
 	if updated.MustChangePassword {
 		t.Fatal("must_change_password was not cleared after password update")
+	}
+	if err := store.ChangePassword(ctx, user.ID, "", "UserPass124", ""); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("ChangePassword without old password after forced change err = %v, want ErrInvalidCredentials", err)
+	}
+	if err := store.ChangePassword(ctx, user.ID, "UserPass123", "UserPass124", ""); err != nil {
+		t.Fatalf("ChangePassword with current password after forced change: %v", err)
 	}
 }
 

@@ -520,7 +520,11 @@ func (s *Store) ChangePassword(ctx context.Context, id int64, oldPassword, newPa
 	if err != nil {
 		return err
 	}
-	if !CheckPassword(u.PasswordHash, oldPassword) {
+	if oldPassword == "" {
+		if !u.MustChangePassword || !CheckPassword(u.PasswordHash, DefaultUserPassword) {
+			return ErrInvalidCredentials
+		}
+	} else if !CheckPassword(u.PasswordHash, oldPassword) {
 		return ErrInvalidCredentials
 	}
 	if err := ValidateNewPassword(oldPassword, newPassword); err != nil {

@@ -12,6 +12,8 @@ import {
   type ClusterSummary,
 } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ClearableSearchInput } from "../components/ClearableSearchInput";
+import { CopyIcon } from "../components/icons/CopyIcon";
 import { kubeconfigDisplayFileName } from "../components/SearchableDropdownPrimitives";
 
 type Tab = "users" | "scopes";
@@ -90,10 +92,14 @@ export const AdminAccessModal: React.FC<{
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copyableDefaultPassword, setCopyableDefaultPassword] = useState<string | null>(null);
+  const [copyableDefaultPasswordMessage, setCopyableDefaultPasswordMessage] = useState<string | null>(null);
+  const [defaultPasswordCopied, setDefaultPasswordCopied] = useState(false);
   const [newUsername, setNewUsername] = useState("");
   const [busyUserId, setBusyUserId] = useState<number | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [selectedScopeIds, setSelectedScopeIds] = useState<Set<string>>(() => new Set());
+  const [scopeSearch, setScopeSearch] = useState("");
   const [scopesLoading, setScopesLoading] = useState(false);
   const [savingScopes, setSavingScopes] = useState(false);
   const [confirm, setConfirm] = useState<{
@@ -105,7 +111,19 @@ export const AdminAccessModal: React.FC<{
   } | null>(null);
 
   const normalUsers = useMemo(() => users.filter((u) => u.role === "user"), [users]);
+  const clusterById = useMemo(() => new Map(clusters.map((cluster) => [cluster.id, cluster])), [clusters]);
   const selectedUser = useMemo(() => users.find((u) => u.id === selectedUserId) ?? null, [selectedUserId, users]);
+  const scopeSearchTerm = scopeSearch.trim().toLowerCase();
+  const filteredClusterCombos = useMemo(() => {
+    if (!scopeSearchTerm) return clusterCombos;
+    return clusterCombos.filter((combo) => {
+      const cluster = clusterById.get(combo.clusterId);
+      const fileName = cluster ? kubeconfigDisplayFileName(cluster.filePath) : combo.clusterId;
+      return [fileName, combo.namespace, combo.alias ?? ""].some((part) =>
+        part.toLowerCase().includes(scopeSearchTerm),
+      );
+    });
+  }, [clusterById, clusterCombos, scopeSearchTerm]);
 
   const reloadUsers = useCallback(async () => {
     setLoading(true);
@@ -127,6 +145,10 @@ export const AdminAccessModal: React.FC<{
   useEffect(() => {
     if (!open) return;
     setTab(initialTab);
+    setScopeSearch("");
+    setCopyableDefaultPassword(null);
+    setCopyableDefaultPasswordMessage(null);
+    setDefaultPasswordCopied(false);
     void reloadUsers();
   }, [initialTab, open, reloadUsers]);
 
@@ -147,18 +169,59 @@ export const AdminAccessModal: React.FC<{
     const username = newUsername.trim();
     if (!username) return;
     setError(null);
+    setCopyableDefaultPassword(null);
+    setCopyableDefaultPasswordMessage(null);
+    setDefaultPasswordCopied(false);
     try {
       const res = await createAdminUser(username);
+      const message = `用户 ${res.user.username} 已创建，默认密码为 ${res.defaultPassword}`;
       setNewUsername("");
       await reloadUsers();
-      setError(`用户 ${res.user.username} 已创建，默认密码为 ${res.defaultPassword}`);
+      setError(message);
+      setCopyableDefaultPassword(res.defaultPassword);
+      setCopyableDefaultPasswordMessage(message);
     } catch (err: any) {
+      setCopyableDefaultPassword(null);
+      setCopyableDefaultPasswordMessage(null);
+      setDefaultPasswordCopied(false);
       setError(err?.response?.data?.error ?? err?.message ?? "创建用户失败");
     }
   };
 
+  const copyDefaultPassword = useCallback((password: string) => {
+    const value = password.trim();
+    if (!value) return;
+
+    const markCopied = () => setDefaultPasswordCopied(true);
+    const fallbackExecCommand = () => {
+      const textarea = document.createElement("textarea");
+      try {
+        textarea.value = value;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        const ok = document.execCommand && document.execCommand("copy");
+        if (ok) markCopied();
+        else setError("复制默认密码失败");
+      } catch {
+        setError("复制默认密码失败");
+      } finally {
+        textarea.remove();
+      }
+    };
+
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(value).then(markCopied).catch(fallbackExecCommand);
+    } else {
+      fallbackExecCommand();
+    }
+  }, []);
+
   const comboLabel = (combo: ClusterCombo) => {
-    const cluster = clusters.find((c) => c.id === combo.clusterId);
+    const cluster = clusterById.get(combo.clusterId);
     const fileName = cluster ? kubeconfigDisplayFileName(cluster.filePath) : combo.clusterId;
     const clusterName = cluster?.name ?? combo.clusterId;
     const base = `${fileName} · ${clusterName} · ${combo.namespace}`;
@@ -241,9 +304,34 @@ export const AdminAccessModal: React.FC<{
                 border: "1px solid var(--wl-pill-info-border)",
                 color: "var(--wl-pill-info-text)",
                 fontSize: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
               }}
             >
-              {error}
+              <span>{error}</span>
+              {copyableDefaultPassword && copyableDefaultPasswordMessage === error && (
+                <button
+                  type="button"
+                  onClick={() => copyDefaultPassword(copyableDefaultPassword)}
+                  title="复制默认密码"
+                  aria-label="复制默认密码"
+                  style={{
+                    ...smallButtonStyle,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "3px 7px",
+                    borderColor: "var(--wl-pill-info-border)",
+                    background: "var(--wl-bg-elevated)",
+                    color: "var(--wl-pill-info-text)",
+                  }}
+                >
+                  <CopyIcon size={14} />
+                  {defaultPasswordCopied ? "已复制" : "复制"}
+                </button>
+              )}
             </div>
           )}
 
@@ -322,6 +410,9 @@ export const AdminAccessModal: React.FC<{
                                       variant: "primary",
                                       onConfirm: async () => {
                                         const res = await resetAdminUserPassword(user.id);
+                                        setCopyableDefaultPassword(null);
+                                        setCopyableDefaultPasswordMessage(null);
+                                        setDefaultPasswordCopied(false);
                                         setError(`密码已重置为 ${res.defaultPassword}`);
                                       },
                                     })
@@ -358,7 +449,7 @@ export const AdminAccessModal: React.FC<{
               </div>
             </>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "220px minmax(0, 1fr)", gap: 14, minHeight: 360, overflow: "hidden" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "220px minmax(0, 1fr)", gap: 14, minHeight: 360, height: "min(560px, calc(88vh - 160px))", overflow: "hidden" }}>
               <div style={{ border: "1px solid var(--wl-border-sidebar)", borderRadius: 8, overflow: "auto" }}>
                 {normalUsers.length === 0 ? (
                   <div style={{ padding: 12, fontSize: 13, color: "var(--wl-text-muted)" }}>暂无普通用户</div>
@@ -384,76 +475,115 @@ export const AdminAccessModal: React.FC<{
                   </button>
                 ))}
               </div>
-              <div style={{ border: "1px solid var(--wl-border-sidebar)", borderRadius: 8, padding: 12, overflow: "auto" }}>
+              <div
+                style={{
+                  border: "1px solid var(--wl-border-sidebar)",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                  minWidth: 0,
+                  minHeight: 0,
+                }}
+              >
                 {!selectedUser ? (
-                  <div style={{ color: "var(--wl-text-muted)", fontSize: 13 }}>请选择普通用户</div>
+                  <div style={{ padding: 12, color: "var(--wl-text-muted)", fontSize: 13 }}>请选择普通用户</div>
                 ) : (
                   <>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--wl-text-heading)" }}>{selectedUser.username}</div>
-                        <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>从已添加作用域中勾选授权项</div>
+                    <div
+                      style={{
+                        flexShrink: 0,
+                        padding: 12,
+                        borderBottom: "1px solid var(--wl-border-table-row)",
+                        background: "var(--wl-bg-elevated)",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--wl-text-heading)" }}>{selectedUser.username}</div>
+                          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>从已添加作用域中勾选授权项</div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={savingScopes || scopesLoading}
+                          onClick={async () => {
+                            if (!selectedUserId) return;
+                            setSavingScopes(true);
+                            setError(null);
+                            try {
+                              await saveAdminUserScopes(selectedUserId, Array.from(selectedScopeIds));
+                              await reloadUsers();
+                              setError("授权已保存");
+                            } catch (err: any) {
+                              setError(err?.response?.data?.error ?? err?.message ?? "保存授权失败");
+                            } finally {
+                              setSavingScopes(false);
+                            }
+                          }}
+                          style={smallButtonStyle}
+                        >
+                          {savingScopes ? "保存中..." : "保存授权"}
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        disabled={savingScopes || scopesLoading}
-                        onClick={async () => {
-                          if (!selectedUserId) return;
-                          setSavingScopes(true);
-                          setError(null);
-                          try {
-                            await saveAdminUserScopes(selectedUserId, Array.from(selectedScopeIds));
-                            await reloadUsers();
-                            setError("授权已保存");
-                          } catch (err: any) {
-                            setError(err?.response?.data?.error ?? err?.message ?? "保存授权失败");
-                          } finally {
-                            setSavingScopes(false);
-                          }
+                      <ClearableSearchInput
+                        value={scopeSearch}
+                        onChange={setScopeSearch}
+                        placeholder="搜索 kubeconfig / 命名空间 / 别名"
+                        disabled={scopesLoading || clusterCombos.length === 0}
+                        style={{ width: "100%", marginTop: 10 }}
+                        inputStyle={{
+                          padding: "7px 10px",
+                          borderRadius: 6,
+                          border: "1px solid var(--wl-border-strong)",
+                          background: "var(--wl-bg-input)",
+                          color: "var(--wl-text-heading)",
+                          fontSize: 13,
+                          outline: "none",
                         }}
-                        style={smallButtonStyle}
-                      >
-                        {savingScopes ? "保存中..." : "保存授权"}
-                      </button>
+                      />
                     </div>
-                    {scopesLoading ? (
-                      <div style={{ fontSize: 13, color: "var(--wl-text-muted)" }}>加载授权中...</div>
-                    ) : clusterCombos.length === 0 ? (
-                      <div style={{ fontSize: 13, color: "var(--wl-text-muted)" }}>暂无已添加作用域，请先到平台配置添加。</div>
-                    ) : (
-                      <div style={{ display: "grid", gap: 6 }}>
-                        {clusterCombos.map((combo) => (
-                          <label
-                            key={combo.id}
-                            style={{
-                              display: "flex",
-                              gap: 8,
-                              alignItems: "flex-start",
-                              padding: "8px 10px",
-                              borderRadius: 6,
-                              border: "1px solid var(--wl-border-subtle)",
-                              background: selectedScopeIds.has(combo.id) ? "var(--wl-bg-control)" : "var(--wl-bg-table)",
-                              color: "var(--wl-text-primary)",
-                              fontSize: 13,
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedScopeIds.has(combo.id)}
-                              onChange={(e) => {
-                                setSelectedScopeIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (e.target.checked) next.add(combo.id);
-                                  else next.delete(combo.id);
-                                  return next;
-                                });
+                    <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
+                      {scopesLoading ? (
+                        <div style={{ fontSize: 13, color: "var(--wl-text-muted)" }}>加载授权中...</div>
+                      ) : clusterCombos.length === 0 ? (
+                        <div style={{ fontSize: 13, color: "var(--wl-text-muted)" }}>暂无已添加作用域，请先到平台配置添加。</div>
+                      ) : filteredClusterCombos.length === 0 ? (
+                        <div style={{ fontSize: 13, color: "var(--wl-text-muted)" }}>未找到匹配的作用域</div>
+                      ) : (
+                        <div style={{ display: "grid", gap: 6 }}>
+                          {filteredClusterCombos.map((combo) => (
+                            <label
+                              key={combo.id}
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                alignItems: "flex-start",
+                                padding: "8px 10px",
+                                borderRadius: 6,
+                                border: "1px solid var(--wl-border-subtle)",
+                                background: selectedScopeIds.has(combo.id) ? "var(--wl-bg-control)" : "var(--wl-bg-table)",
+                                color: "var(--wl-text-primary)",
+                                fontSize: 13,
                               }}
-                            />
-                            <span>{comboLabel(combo)}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedScopeIds.has(combo.id)}
+                                onChange={(e) => {
+                                  setSelectedScopeIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (e.target.checked) next.add(combo.id);
+                                    else next.delete(combo.id);
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <span>{comboLabel(combo)}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>

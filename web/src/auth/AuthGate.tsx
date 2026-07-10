@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ThemeToggleButton } from "../components/ThemeToggleButton";
 import { useAuth } from "./AuthContext";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_WARNING_MS = 30 * 1000;
+const AUTH_VIDEO_SRC = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260506_081238_406ed0e3-5d83-436e-a512-0bbff7ec5b95.mp4";
 
 const eyeIcon = (
   <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -41,7 +41,7 @@ const PasswordInput: React.FC<{
       />
       <button
         type="button"
-        className="wl-auth-eye"
+        className="wl-auth-eye wl-btn--no-hover-overlay"
         onClick={() => setVisible((v) => !v)}
         aria-label={visible ? "隐藏密码" : "显示密码"}
         title={visible ? "隐藏密码" : "显示密码"}
@@ -53,12 +53,22 @@ const PasswordInput: React.FC<{
 };
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="wl-auth-page">
-    <div className="wl-auth-theme">
-      <ThemeToggleButton />
-    </div>
-    {children}
-  </div>
+  <main className="wl-auth-page">
+    <section className="wl-auth-hero" aria-label="WebLens 控制台入口">
+      <video className="wl-auth-hero-video" autoPlay muted loop playsInline aria-hidden="true">
+        <source src={AUTH_VIDEO_SRC} type="video/mp4" />
+      </video>
+      <div className="wl-auth-hero-content">
+        <div className="wl-auth-hero-brand">
+          <span className="wl-auth-hero-mark" aria-hidden="true" />
+          <span>WebLens</span>
+        </div>
+        <div className="wl-auth-hero-title">Kubernetes operations console</div>
+        <div className="wl-auth-hero-subtitle">聚焦集群资源、日志、终端与 YAML 操作</div>
+      </div>
+    </section>
+    <section className="wl-auth-panel">{children}</section>
+  </main>
 );
 
 const LoginPage: React.FC = () => {
@@ -86,12 +96,9 @@ const LoginPage: React.FC = () => {
   return (
     <AuthShell>
       <form className="wl-auth-card" onSubmit={submit}>
-        <div className="wl-auth-brand">
-          <img src="/favicon.svg" alt="" className="wl-auth-logo" />
-          <div>
-            <div className="wl-auth-title">WebLens</div>
-            <div className="wl-auth-subtitle">Kubernetes operations console</div>
-          </div>
+        <div className="wl-auth-heading">
+          <div className="wl-auth-title">登录 WebLens</div>
+          <div className="wl-auth-subtitle">输入账号密码进入 Kubernetes operations console</div>
         </div>
         <label className="wl-auth-label">
           用户名
@@ -113,7 +120,7 @@ const LoginPage: React.FC = () => {
             {error || notice?.message}
           </div>
         )}
-        <button type="submit" className="wl-auth-submit" disabled={submitting || !username.trim() || !password}>
+        <button type="submit" className="wl-auth-submit wl-btn--no-hover-overlay" disabled={submitting || !username.trim() || !password}>
           {submitting ? "登录中..." : "登录"}
         </button>
       </form>
@@ -123,7 +130,6 @@ const LoginPage: React.FC = () => {
 
 const ForcePasswordPage: React.FC = () => {
   const { auth, changePassword, logout, notice } = useAuth();
-  const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -139,43 +145,36 @@ const ForcePasswordPage: React.FC = () => {
     setSubmitting(true);
     setError(null);
     try {
-      await changePassword(oldPassword, newPassword);
+      await changePassword("", newPassword);
     } catch (err: any) {
       setError(err?.response?.data?.error ?? err?.message ?? "修改密码失败");
     } finally {
       setSubmitting(false);
     }
-  }, [changePassword, confirmPassword, newPassword, oldPassword, submitting]);
+  }, [changePassword, confirmPassword, newPassword, submitting]);
 
   return (
     <AuthShell>
       <form className="wl-auth-card wl-auth-card--wide" onSubmit={submit}>
-        <div className="wl-auth-brand">
-          <img src="/favicon.svg" alt="" className="wl-auth-logo" />
-          <div>
-            <div className="wl-auth-title">首次修改密码</div>
-            <div className="wl-auth-subtitle">{auth?.user.username} 需要先设置个人密码</div>
-          </div>
+        <div className="wl-auth-heading">
+          <div className="wl-auth-title">首次修改密码</div>
+          <div className="wl-auth-subtitle">{auth?.user.username} 需要先设置个人密码。</div>
         </div>
         <label className="wl-auth-label">
-          当前密码
-          <PasswordInput value={oldPassword} onChange={setOldPassword} autoComplete="current-password" />
-        </label>
-        <label className="wl-auth-label">
           新密码
-          <PasswordInput value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
+          <PasswordInput value={newPassword} onChange={setNewPassword} placeholder="请输入新密码" autoComplete="new-password" />
         </label>
         <label className="wl-auth-label">
           确认新密码
-          <PasswordInput value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
+          <PasswordInput value={confirmPassword} onChange={setConfirmPassword} placeholder="请再次输入新密码" autoComplete="new-password" />
         </label>
         <div className="wl-auth-hint">至少 8 位，不能使用默认密码，不能与旧密码相同。</div>
         {(error || notice) && <div className="wl-auth-message">{error || notice?.message}</div>}
         <div className="wl-auth-actions">
-          <button type="button" className="wl-auth-secondary" onClick={() => void logout()}>
+          <button type="button" className="wl-auth-secondary wl-btn--no-hover-overlay" onClick={() => void logout()}>
             登出
           </button>
-          <button type="submit" className="wl-auth-submit" disabled={submitting || !oldPassword || !newPassword || !confirmPassword}>
+          <button type="submit" className="wl-auth-submit wl-btn--no-hover-overlay" disabled={submitting || !newPassword || !confirmPassword}>
             {submitting ? "保存中..." : "保存并进入"}
           </button>
         </div>
@@ -274,12 +273,9 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
     return (
       <AuthShell>
         <div className="wl-auth-card">
-          <div className="wl-auth-brand">
-            <img src="/favicon.svg" alt="" className="wl-auth-logo" />
-            <div>
-              <div className="wl-auth-title">WebLens</div>
-              <div className="wl-auth-subtitle">正在检查登录状态...</div>
-            </div>
+          <div className="wl-auth-heading">
+            <div className="wl-auth-title">WebLens</div>
+            <div className="wl-auth-subtitle">正在检查登录状态...</div>
           </div>
         </div>
       </AuthShell>

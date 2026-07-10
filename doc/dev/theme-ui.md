@@ -9,6 +9,12 @@
 - **持久化**：`web/src/theme/themeStorage.ts`（localStorage 偏好；未保存时可跟随系统 `prefers-color-scheme`）。
 - **样式变量**：`web/src/theme/tokens.css` 在 `[data-theme="dark"]` / `[data-theme="light"]` 下定义 `--wl-*` 语义色；业务组件优先使用变量，避免硬编码十六进制。
 
+## 认证入口
+
+- **登录 / 首次改密页**：`AuthGate.tsx` 使用固定深色双栏布局，不跟随工作台深浅主题，也不显示主题切换按钮。左侧 `wl-auth-hero` 为视频背景与居中品牌文案；右侧 `wl-auth-panel` 承载登录或首次改密表单。
+- **视频舒适度**：`wl-auth-hero-video` 使用轻量 `filter` 降低亮度、对比度与饱和度，并通过 `wl-auth-video-breathe` 做约 4 秒的亮度/缩放呼吸，避免高频闪烁造成不适。
+- **表单可读性**：认证页输入框复用 `.wl-auth-input`，显式设置深色表面、白色文字和白色 `caret-color`，避免被全局主题 token 覆盖后光标不可见。
+
 ## 顶栏右上角
 
 - **形态**：右上角为 **轻量 icon 操作区**（无大块文字按钮区）。

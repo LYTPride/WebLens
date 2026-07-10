@@ -22,7 +22,7 @@ export const UserMenu: React.FC = () => {
       <button
         ref={triggerRef}
         type="button"
-        className="wl-header-settings-action"
+        className="wl-header-settings-action wl-header-settings-action--soft"
         title={auth?.user.username ? `用户配置：${auth.user.username}` : "用户配置"}
         aria-label="用户配置"
         onClick={() => {
@@ -49,10 +49,7 @@ export const UserMenu: React.FC = () => {
           <button
             type="button"
             className="wl-menu-item"
-            style={{
-              ...menuItemStyle,
-              borderBottom: "1px solid var(--wl-border-subtle)",
-            }}
+            style={menuItemStyle}
             onClick={() => {
               setOpen(false);
               setPasswordOpen(true);

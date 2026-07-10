@@ -4707,7 +4707,7 @@ export const App: React.FC = () => {
               <button
                 ref={accessMenuTriggerRef}
                 type="button"
-                className="wl-header-settings-action"
+                className="wl-header-settings-action wl-header-settings-action--soft"
                 title="权限配置"
                 aria-label="权限配置"
                 onClick={() => {
@@ -4717,8 +4717,8 @@ export const App: React.FC = () => {
                 onAnimationEnd={() => setAccessGearSpinning(false)}
                 data-spinning={accessGearSpinning ? "true" : "false"}
               >
-                <span className="wl-header-settings-action__icon" aria-hidden>
-                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <span className="wl-header-settings-action__icon wl-header-settings-action__icon--shield" aria-hidden>
+                  <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 3l7 3v5c0 4.2-2.7 7.3-7 10-4.3-2.7-7-5.8-7-10V6l7-3z" />
                     <path d="M9.5 12l1.7 1.7 3.6-3.9" />
                   </svg>
