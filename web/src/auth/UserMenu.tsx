@@ -4,10 +4,13 @@ import { useAuth } from "./AuthContext";
 import { PasswordChangeDialog } from "./PasswordChangeDialog";
 
 const menuItemStyle: React.CSSProperties = {
+  display: "block",
   width: "100%",
-  justifyContent: "flex-start",
-  padding: "7px 10px",
+  padding: "8px 12px",
+  border: "none",
+  cursor: "pointer",
   fontSize: 13,
+  textAlign: "left",
 };
 
 export const UserMenu: React.FC = () => {
@@ -49,7 +52,10 @@ export const UserMenu: React.FC = () => {
           <button
             type="button"
             className="wl-menu-item"
-            style={menuItemStyle}
+            style={{
+              ...menuItemStyle,
+              borderBottom: "1px solid var(--wl-border-subtle)",
+            }}
             onClick={() => {
               setOpen(false);
               setPasswordOpen(true);
