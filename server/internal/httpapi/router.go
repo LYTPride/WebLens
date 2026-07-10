@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"weblens/server/internal/auth"
 	"weblens/server/internal/cluster"
 	"weblens/server/internal/config"
 
@@ -12,13 +13,8 @@ import (
 )
 
 // NewRouter builds the HTTP router.
-func NewRouter(reg *cluster.Registry) *gin.Engine {
+func NewRouter(reg *cluster.Registry, store *auth.Store) *gin.Engine {
 	r := gin.Default()
-
-	// Optional Basic Auth (when WEBLENS_AUTH_USER and WEBLENS_AUTH_PASSWORD are set)
-	if user, pass := config.BasicAuth(); user != "" && pass != "" {
-		r.Use(gin.BasicAuth(gin.Accounts{user: pass}))
-	}
 
 	// Serve frontend (web/dist) from the same port to avoid CORS issues.
 	registerStaticFrontend(r, config.WebDistDir())
@@ -28,10 +24,19 @@ func NewRouter(reg *cluster.Registry) *gin.Engine {
 		c.String(http.StatusOK, "ok")
 	})
 
+	registerAuthPublicRoutes(r, store)
+	r.Use(authRequired(store))
+	registerAuthProtectedRoutes(r, store)
+
 	// list clusters
 	r.GET("/api/clusters", func(c *gin.Context) {
+		items, err := filterClustersForUser(c, store, reg.List())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
-			"items": reg.List(),
+			"items": items,
 		})
 	})
 
@@ -50,8 +55,16 @@ func NewRouter(reg *cluster.Registry) *gin.Engine {
 
 	// platform config: get/set kubeconfig directory (no need to export on server)
 	r.GET("/api/config", func(c *gin.Context) {
+		dir, err := store.GetConfig(c.Request.Context(), "kubeconfig_dir")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if dir == "" {
+			dir = config.KubeconfigDir()
+		}
 		c.JSON(http.StatusOK, gin.H{
-			"kubeconfigDir": config.KubeconfigDir(),
+			"kubeconfigDir": dir,
 		})
 	})
 	r.POST("/api/config", func(c *gin.Context) {
@@ -84,10 +97,11 @@ func NewRouter(reg *cluster.Registry) *gin.Engine {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "路径不是目录"})
 			return
 		}
-		if err := config.SetKubeconfigDirOverride(dir); err != nil {
+		if err := store.SetConfig(c.Request.Context(), "kubeconfig_dir", dir); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存配置失败: " + err.Error()})
 			return
 		}
+		config.SetKubeconfigDirRuntime(dir)
 		if err := reg.LoadFromDir(config.KubeconfigDir()); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -99,7 +113,7 @@ func NewRouter(reg *cluster.Registry) *gin.Engine {
 	})
 
 	// resource routes (pods, deployments, nodes, etc.)
-	registerResourceRoutes(r, reg)
+	registerResourceRoutes(r, reg, store)
 
 	// pod logs
 	registerLogRoutes(r, reg)
@@ -111,7 +125,7 @@ func NewRouter(reg *cluster.Registry) *gin.Engine {
 	registerFileRoutes(r, reg)
 
 	// cluster combos (preset cluster + namespace)
-	registerClusterComboRoutes(r, reg)
+	registerClusterComboRoutes(r, reg, store)
 
 	registerAnalyticsRoutes(r)
 

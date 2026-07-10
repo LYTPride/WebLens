@@ -430,6 +430,109 @@ const api = axios.create({
   baseURL,
 });
 
+export const WEBLENS_AUTH_EVENT = "weblens-auth-state";
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  role: "admin" | "user";
+  disabled: boolean;
+  mustChangePassword: boolean;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface AuthEnvelope {
+  user: AuthUser;
+  scopes: ClusterCombo[];
+  idleTimeoutMs: number;
+  idleWarningMs: number;
+  sessionExpiresAt: number;
+  mustChangePassword: boolean;
+}
+
+export interface AdminUserRow extends AuthUser {
+  scopeCount: number;
+}
+
+export function emitAuthEvent(code: string, message: string): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(WEBLENS_AUTH_EVENT, { detail: { code, message } }));
+}
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    const status = err?.response?.status;
+    const code = err?.response?.data?.code as string | undefined;
+    const message = err?.response?.data?.error || err?.message || "会话已失效，请重新登录";
+    const url = String(err?.config?.url || "");
+    const skip = url.includes("/api/auth/login") || url.includes("/api/auth/change-password");
+    if (!skip && status === 401) {
+      emitAuthEvent(code || "SESSION_EXPIRED", message);
+    } else if (code === "USER_DISABLED" || code === "PASSWORD_CHANGE_REQUIRED") {
+      emitAuthEvent(code, message);
+    }
+    return Promise.reject(err);
+  },
+);
+
+export async function login(username: string, password: string): Promise<AuthEnvelope> {
+  const res = await api.post<AuthEnvelope>("/api/auth/login", { username, password });
+  return res.data;
+}
+
+export async function fetchAuthMe(): Promise<AuthEnvelope> {
+  const res = await api.get<AuthEnvelope>("/api/auth/me");
+  return res.data;
+}
+
+export async function renewAuthSession(): Promise<AuthEnvelope> {
+  const res = await api.post<AuthEnvelope>("/api/auth/renew", {});
+  return res.data;
+}
+
+export async function logoutApi(): Promise<void> {
+  await api.post("/api/auth/logout", {});
+}
+
+export async function changeOwnPassword(oldPassword: string, newPassword: string): Promise<AuthEnvelope> {
+  const res = await api.post<AuthEnvelope>("/api/auth/change-password", { oldPassword, newPassword });
+  return res.data;
+}
+
+export async function fetchAdminUsers(): Promise<AdminUserRow[]> {
+  const res = await api.get<{ items: AdminUserRow[] }>("/api/auth/admin/users");
+  return res.data.items;
+}
+
+export async function createAdminUser(username: string): Promise<{ user: AuthUser; defaultPassword: string }> {
+  const res = await api.post<{ user: AuthUser; defaultPassword: string }>("/api/auth/admin/users", { username });
+  return res.data;
+}
+
+export async function setAdminUserEnabled(id: number, enabled: boolean): Promise<void> {
+  await api.patch(`/api/auth/admin/users/${encodeURIComponent(String(id))}/enabled`, { enabled });
+}
+
+export async function resetAdminUserPassword(id: number): Promise<{ defaultPassword: string }> {
+  const res = await api.post<{ defaultPassword: string }>(`/api/auth/admin/users/${encodeURIComponent(String(id))}/reset-password`, {});
+  return res.data;
+}
+
+export async function deleteAdminUser(id: number): Promise<void> {
+  await api.delete(`/api/auth/admin/users/${encodeURIComponent(String(id))}`);
+}
+
+export async function fetchAdminUserScopes(id: number): Promise<string[]> {
+  const res = await api.get<{ scopeIds: string[] }>(`/api/auth/admin/users/${encodeURIComponent(String(id))}/scopes`);
+  return res.data.scopeIds;
+}
+
+export async function saveAdminUserScopes(id: number, scopeIds: string[]): Promise<void> {
+  await api.put(`/api/auth/admin/users/${encodeURIComponent(String(id))}/scopes`, { scopeIds });
+}
+
 export async function fetchClusters() {
   const res = await api.get<{ items: ClusterSummary[] }>("/api/clusters");
   return res.data.items;
@@ -755,10 +858,11 @@ export function watchPods(
     if (cancelled) return;
     fetchAbort = new AbortController();
     const sig = fetchAbort.signal;
-    fetch(url.toString(), { signal: sig })
+    fetch(url.toString(), { credentials: "same-origin", signal: sig })
       .then(async (res) => {
         if (!res.ok) {
-          throw new Error(res.statusText || `HTTP ${res.status}`);
+          if (res.status === 401 || res.status === 403) emitAuthEvent(res.status === 401 ? "SESSION_EXPIRED" : "SCOPE_FORBIDDEN", res.statusText || `HTTP ${res.status}`);
+          throw new Error(`HTTP ${res.status}`);
         }
         const reader = res.body?.getReader();
         if (!reader) throw new Error("No response body");
@@ -851,10 +955,11 @@ export function watchResourceList<T = any>(
     if (cancelled) return;
     let suppressReconnect = false;
     fetchAbort = new AbortController();
-    fetch(url.toString(), { signal: fetchAbort.signal })
+    fetch(url.toString(), { credentials: "same-origin", signal: fetchAbort.signal })
       .then(async (res) => {
         if (!res.ok) {
-          throw new Error(res.statusText || `HTTP ${res.status}`);
+          if (res.status === 401 || res.status === 403) emitAuthEvent(res.status === 401 ? "SESSION_EXPIRED" : "SCOPE_FORBIDDEN", res.statusText || `HTTP ${res.status}`);
+          throw new Error(`HTTP ${res.status}`);
         }
         const reader = res.body?.getReader();
         if (!reader) throw new Error("No response body");
@@ -979,9 +1084,12 @@ export function streamPodLogs(
   if (opts.timestamps) url.searchParams.set("timestamps", "true");
    if (opts.sinceTime) url.searchParams.set("sinceTime", opts.sinceTime);
 
-  fetch(url.toString(), { signal: ac.signal })
+  fetch(url.toString(), { credentials: "same-origin", signal: ac.signal })
     .then(async (res) => {
-      if (!res.ok) throw new Error(res.statusText);
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) emitAuthEvent(res.status === 401 ? "SESSION_EXPIRED" : "SCOPE_FORBIDDEN", res.statusText || `HTTP ${res.status}`);
+        throw new Error(`HTTP ${res.status}`);
+      }
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No body");
       const decoder = new TextDecoder();

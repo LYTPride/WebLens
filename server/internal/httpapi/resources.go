@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"weblens/server/internal/auth"
 	"weblens/server/internal/cluster"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -463,10 +464,20 @@ func listPodsAllNamespacesFallback(ctx context.Context, client *kubernetes.Clien
 }
 
 // registerResourceRoutes adds resource-related routes (pods, deployments, etc.).
-func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
+func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.Store) {
 	// Namespaces（无集群级 list namespaces 权限时返回 200 空列表，避免 500）
 	r.GET("/api/clusters/:id/namespaces", func(c *gin.Context) {
 		id := c.Param("id")
+		if user, ok := currentUser(c); ok {
+			if items, handled, err := namespacesForUser(c, store, user, id); handled {
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"items": items, "serverTimeMs": time.Now().UnixMilli()})
+				return
+			}
+		}
 		client, ok := reg.Client(id)
 		if !ok {
 			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
@@ -1650,7 +1661,7 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry) {
 	RegisterStatefulSetRoutes(r, reg)
 	RegisterIngressRoutes(r, reg)
 	RegisterServiceRoutes(r, reg)
-	RegisterConfigMapRoutes(r, reg)
+	RegisterConfigMapRoutes(r, reg, store)
 	RegisterPVCRoutes(r, reg)
 	RegisterNodeRoutes(r, reg)
 }

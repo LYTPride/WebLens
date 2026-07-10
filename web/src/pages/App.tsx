@@ -53,6 +53,9 @@ import {
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
 import { ThemeToggleButton } from "../components/ThemeToggleButton";
+import { AdminAccessModal } from "../auth/AdminAccessModal";
+import { UserMenu } from "../auth/UserMenu";
+import { useAuth } from "../auth/AuthContext";
 import { ResourceTable, type Column } from "../components/ResourceTable";
 import { BottomPanel, type PanelTab } from "../components/BottomPanel";
 import { ResizableTh } from "../components/ResizableTh";
@@ -765,6 +768,8 @@ const DeploymentConditionsCell: React.FC<{ d: DeploymentRow }> = ({ d }) => {
 };
 
 export const App: React.FC = () => {
+  const { auth } = useAuth();
+  const isAdmin = auth?.user.role === "admin";
   const [clusters, setClusters] = useState<ClusterSummary[]>([]);
   /** 集群下拉当前选中的集群（待应用） */
   const [activeClusterId, setActiveClusterId] = useState<string | null>(null);
@@ -830,6 +835,10 @@ export const App: React.FC = () => {
   const [configSaving, setConfigSaving] = useState(false);
   const [platformMenuOpen, setPlatformMenuOpen] = useState(false);
   const [platformGearSpinning, setPlatformGearSpinning] = useState(false);
+  const [accessMenuOpen, setAccessMenuOpen] = useState(false);
+  const [accessGearSpinning, setAccessGearSpinning] = useState(false);
+  const [accessModalOpen, setAccessModalOpen] = useState(false);
+  const [accessModalTab, setAccessModalTab] = useState<"users" | "scopes">("users");
   /** 集群作用域预设（cluster + namespace） */
   const [clusterCombos, setClusterCombos] = useState<ClusterCombo[]>([]);
   const [clusterCombosLoading, setClusterCombosLoading] = useState(false);
@@ -846,6 +855,7 @@ export const App: React.FC = () => {
   const configClusterSearchRef = useRef<HTMLInputElement>(null);
   const clusterComboSearchRef = useRef<HTMLInputElement>(null);
   const platformMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const accessMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const clusterScopeTriggerRef = useRef<HTMLButtonElement>(null);
   const configClusterPickTriggerRef = useRef<HTMLButtonElement>(null);
   const podMenuTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1223,6 +1233,38 @@ export const App: React.FC = () => {
       return text.includes(k);
     });
   }, [clusterCombos, clusters, clusterSearchKeyword]);
+
+  const noAuthorizedScopes = auth?.user.role === "user" && (auth.scopes || []).length === 0;
+
+  useEffect(() => {
+    if (auth?.user.role !== "user") return;
+    setClusterCombos(auth.scopes || []);
+  }, [auth?.user.role, auth?.scopes]);
+
+  useEffect(() => {
+    if (auth?.user.role !== "user") return;
+    const allowed = new Set((auth.scopes || []).map((scope) => scope.id));
+    if (activeComboId && !allowed.has(activeComboId)) {
+      setActiveComboId(null);
+    }
+    if (effectiveComboId && !allowed.has(effectiveComboId)) {
+      setEffectiveComboId(null);
+      setEffectiveClusterId(null);
+      setEffectiveNamespace(ALL_NAMESPACES);
+      setActiveClusterId(null);
+      setActiveNamespace(ALL_NAMESPACES);
+      setPods([]);
+      setResourceItems([]);
+      setDeploymentItems([]);
+      setStatefulsetItems([]);
+      setIngressItems([]);
+      setServiceItems([]);
+      setPvcItems([]);
+      setConfigMapItems([]);
+      setEventItems([]);
+      setToastMessage("当前作用域授权已变更，请重新选择");
+    }
+  }, [activeComboId, auth?.user.role, auth?.scopes, effectiveComboId]);
 
   useEffect(() => {
     currentViewRef.current = currentView;
@@ -2099,7 +2141,7 @@ export const App: React.FC = () => {
   const reloadClusters = async () => {
     setReloading(true);
     try {
-      const items = await reloadClustersFromBackend();
+      const items = isAdmin ? await reloadClustersFromBackend() : await fetchClusters();
       setClusters(items);
       setError(null);
     } catch (err: any) {
@@ -2549,14 +2591,6 @@ export const App: React.FC = () => {
       // 过期保护：超过 30 分钟视为无效
       if (!parsed || !parsed.ts || Date.now() - parsed.ts > 30 * 60 * 1000) {
         return;
-      }
-      if (parsed.clusterId != null) {
-        setActiveClusterId(parsed.clusterId);
-        setEffectiveClusterId(parsed.clusterId);
-      }
-      if (parsed.namespace != null) {
-        setActiveNamespace(parsed.namespace);
-        setEffectiveNamespace(parsed.namespace);
       }
       if (parsed.view) {
         setCurrentView(normalizeSessionViewForV1(parsed.view as string));
@@ -4668,90 +4702,158 @@ export const App: React.FC = () => {
           }}
         >
           <ThemeToggleButton />
-          <button
-            ref={platformMenuTriggerRef}
-            type="button"
-            className="wl-header-settings-action"
-            title="平台配置"
-            aria-label="平台配置"
-            onClick={() => {
-              setPlatformGearSpinning(true);
-              setPlatformMenuOpen((o) => !o);
-            }}
-            onAnimationEnd={() => setPlatformGearSpinning(false)}
-            data-spinning={platformGearSpinning ? "true" : "false"}
-          >
-            <span className="wl-header-settings-action__icon" aria-hidden>
-              <svg
-                width={18}
-                height={18}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.75"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+          {isAdmin && (
+            <>
+              <button
+                ref={accessMenuTriggerRef}
+                type="button"
+                className="wl-header-settings-action"
+                title="权限配置"
+                aria-label="权限配置"
+                onClick={() => {
+                  setAccessGearSpinning(true);
+                  setAccessMenuOpen((o) => !o);
+                }}
+                onAnimationEnd={() => setAccessGearSpinning(false)}
+                data-spinning={accessGearSpinning ? "true" : "false"}
               >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 0 1 0 2.82 2 2 0 0 1-2.82 0l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 0 1-2.82 0 2 2 0 0 1 0-2.82l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 0 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 0 1 0-2.82 2 2 0 0 1 2.82 0l.06.06a1.7 1.7 0 0 0 1.87.34h0A1.7 1.7 0 0 0 10.03 3.1V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56h0a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 0 1 2.82 0 2 2 0 0 1 0 2.82l-.06.06a1.7 1.7 0 0 0-.34 1.87v0A1.7 1.7 0 0 0 20.97 10H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1z" />
-              </svg>
-            </span>
-          </button>
-          {platformMenuOpen && (
-          <DropdownMenuPortal
-            onClose={() => setPlatformMenuOpen(false)}
-            triggerRef={platformMenuTriggerRef}
-            align="right"
-            surfaceStyle={{ padding: 4, minWidth: 180 }}
-          >
-            <button
-              type="button"
-              className="wl-menu-item"
-              onClick={() => {
-                setPlatformMenuOpen(false);
-                setConfigActiveTab("kubeconfig");
-                setConfigModalOpen(true);
-                setConfigError(null);
-                fetchConfig()
-                  .then((c) => setConfigKubeconfigDir(c.kubeconfigDir))
-                  .catch(() => setConfigKubeconfigDir(""));
-              }}
-              style={{
-                ...menuItemStyleForDropdown,
-                borderBottom: "1px solid rgba(248,250,252,0.12)",
-              }}
-            >
-              kubeconfig目录
-            </button>
-            <button
-              type="button"
-              className="wl-menu-item"
-              onClick={async () => {
-                setPlatformMenuOpen(false);
-                setConfigActiveTab("combos");
-                setConfigModalOpen(true);
-                setConfigError(null);
-                // 如果已加载过作用域列表，优先展示现有列表，再后台刷新，避免长时间空白
-                if (clusterCombos.length === 0) {
-                  setClusterCombosLoading(true);
-                }
-                try {
-                  const items = await fetchClusterCombos();
-                  setClusterCombos(items);
-                } catch (e: any) {
-                  setConfigError(e?.message || "加载作用域列表失败");
-                } finally {
-                  setClusterCombosLoading(false);
-                }
-              }}
-              style={menuItemStyleForDropdown}
-            >
-              集群设置
-            </button>
-          </DropdownMenuPortal>
+                <span className="wl-header-settings-action__icon" aria-hidden>
+                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 3l7 3v5c0 4.2-2.7 7.3-7 10-4.3-2.7-7-5.8-7-10V6l7-3z" />
+                    <path d="M9.5 12l1.7 1.7 3.6-3.9" />
+                  </svg>
+                </span>
+              </button>
+              {accessMenuOpen && (
+                <DropdownMenuPortal
+                  onClose={() => setAccessMenuOpen(false)}
+                  triggerRef={accessMenuTriggerRef}
+                  align="right"
+                  surfaceStyle={{ padding: 4, minWidth: 160 }}
+                >
+                  <button
+                    type="button"
+                    className="wl-menu-item"
+                    onClick={() => {
+                      setAccessMenuOpen(false);
+                      setAccessModalTab("users");
+                      setAccessModalOpen(true);
+                    }}
+                    style={{
+                      ...menuItemStyleForDropdown,
+                      borderBottom: "1px solid var(--wl-border-subtle)",
+                    }}
+                  >
+                    用户管理
+                  </button>
+                  <button
+                    type="button"
+                    className="wl-menu-item"
+                    onClick={() => {
+                      setAccessMenuOpen(false);
+                      setAccessModalTab("scopes");
+                      setAccessModalOpen(true);
+                    }}
+                    style={menuItemStyleForDropdown}
+                  >
+                    作用域授权
+                  </button>
+                </DropdownMenuPortal>
+              )}
+              <button
+                ref={platformMenuTriggerRef}
+                type="button"
+                className="wl-header-settings-action"
+                title="平台配置"
+                aria-label="平台配置"
+                onClick={() => {
+                  setPlatformGearSpinning(true);
+                  setPlatformMenuOpen((o) => !o);
+                }}
+                onAnimationEnd={() => setPlatformGearSpinning(false)}
+                data-spinning={platformGearSpinning ? "true" : "false"}
+              >
+                <span className="wl-header-settings-action__icon" aria-hidden>
+                  <svg
+                    width={18}
+                    height={18}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 0 1 0 2.82 2 2 0 0 1-2.82 0l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 0 1-2.82 0 2 2 0 0 1 0-2.82l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 0 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 0 1 0-2.82 2 2 0 0 1 2.82 0l.06.06a1.7 1.7 0 0 0 1.87.34h0A1.7 1.7 0 0 0 10.03 3.1V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56h0a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 0 1 2.82 0 2 2 0 0 1 0 2.82l-.06.06a1.7 1.7 0 0 0-.34 1.87v0A1.7 1.7 0 0 0 20.97 10H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1z" />
+                  </svg>
+                </span>
+              </button>
+              {platformMenuOpen && (
+                <DropdownMenuPortal
+                  onClose={() => setPlatformMenuOpen(false)}
+                  triggerRef={platformMenuTriggerRef}
+                  align="right"
+                  surfaceStyle={{ padding: 4, minWidth: 180 }}
+                >
+                  <button
+                    type="button"
+                    className="wl-menu-item"
+                    onClick={() => {
+                      setPlatformMenuOpen(false);
+                      setConfigActiveTab("kubeconfig");
+                      setConfigModalOpen(true);
+                      setConfigError(null);
+                      fetchConfig()
+                        .then((c) => setConfigKubeconfigDir(c.kubeconfigDir))
+                        .catch(() => setConfigKubeconfigDir(""));
+                    }}
+                    style={{
+                      ...menuItemStyleForDropdown,
+                      borderBottom: "1px solid var(--wl-border-subtle)",
+                    }}
+                  >
+                    kubeconfig目录
+                  </button>
+                  <button
+                    type="button"
+                    className="wl-menu-item"
+                    onClick={async () => {
+                      setPlatformMenuOpen(false);
+                      setConfigActiveTab("combos");
+                      setConfigModalOpen(true);
+                      setConfigError(null);
+                      if (clusterCombos.length === 0) {
+                        setClusterCombosLoading(true);
+                      }
+                      try {
+                        const items = await fetchClusterCombos();
+                        setClusterCombos(items);
+                      } catch (e: any) {
+                        setConfigError(e?.message || "加载作用域列表失败");
+                      } finally {
+                        setClusterCombosLoading(false);
+                      }
+                    }}
+                    style={menuItemStyleForDropdown}
+                  >
+                    集群设置
+                  </button>
+                </DropdownMenuPortal>
+              )}
+            </>
           )}
+          <UserMenu />
         </div>
       </header>
+
+      <AdminAccessModal
+        open={accessModalOpen}
+        initialTab={accessModalTab}
+        onClose={() => setAccessModalOpen(false)}
+        clusterCombos={clusterCombos}
+        clusters={clusters}
+      />
 
       {configModalOpen && (
         <div
@@ -5250,6 +5352,42 @@ export const App: React.FC = () => {
         </div>
       )}
 
+      {noAuthorizedScopes ? (
+        <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <main
+            style={{
+              flex: 1,
+              minWidth: 0,
+              minHeight: 0,
+              padding: 20,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--wl-text-primary)",
+            }}
+          >
+            <div
+              style={{
+                width: 420,
+                maxWidth: "92vw",
+                padding: 20,
+                borderRadius: 8,
+                border: "1px solid var(--wl-border-sidebar)",
+                background: "var(--wl-bg-elevated)",
+                boxShadow: "var(--wl-shadow-modal)",
+              }}
+            >
+              <div style={{ color: "var(--wl-text-heading)", fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
+                暂无授权作用域
+              </div>
+              <div style={{ color: "var(--wl-text-secondary)", fontSize: 13, lineHeight: 1.6 }}>
+                当前账号还没有可操作的集群与命名空间作用域，请联系管理员授权后重新选择作用域。
+              </div>
+            </div>
+          </main>
+        </div>
+      ) : (
+      <>
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
         {/* 左侧边栏：全宽导航 + 右缘中部绝对定位凸耳把手；收起时仅窄槽+工作区底，无整列侧栏色条 */}
         <div
@@ -5334,7 +5472,7 @@ export const App: React.FC = () => {
                             if (!combo) return "请选择作用域";
                             const cluster = clusters.find((cl) => cl.id === combo.clusterId);
                             const name = cluster?.name ?? combo.clusterId;
-                            const ns = combo.namespace || "所有命名空间";
+                            const ns = combo.namespace;
                             return combo.alias ? `${combo.alias}（${name} · ${ns}）` : `${name} · ${ns}`;
                           })()
                         : "请选择作用域"}
@@ -5375,7 +5513,7 @@ export const App: React.FC = () => {
                           const fileName = cluster
                             ? kubeconfigDisplayFileName(cluster.filePath)
                             : `集群未找到：${combo.clusterId}`;
-                          const ns = combo.namespace || "所有命名空间";
+                          const ns = combo.namespace;
                           const name = cluster?.name ?? combo.clusterId;
                           const right = combo.alias
                             ? `${combo.alias} · ${name} · ${ns}`
@@ -5443,7 +5581,7 @@ export const App: React.FC = () => {
                         if (!combo) return "未应用";
                         const cluster = clusters.find((c) => c.id === combo.clusterId);
                         const name = cluster?.name ?? combo.clusterId;
-                        const ns = combo.namespace || "所有命名空间";
+                        const ns = combo.namespace;
                         return combo.alias ? `${combo.alias}（${name} · ${ns}）` : `${name} · ${ns}`;
                       })()
                     : "未应用"}
@@ -7915,6 +8053,8 @@ export const App: React.FC = () => {
           }
         }}
       />
+      </>
+      )}
 
       {/* Describe 右侧弹层（Pod / Deployment 共用容器） */}
       {describeTarget && (

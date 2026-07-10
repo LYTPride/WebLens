@@ -29,6 +29,11 @@ if [[ -f "${PID_FILE}" ]] && kill -0 "$(cat "${PID_FILE}")" 2>/dev/null; then
   exit 0
 fi
 
+if ! "${BIN}" is-initialized >/dev/null 2>&1; then
+  echo "WebLens is not initialized. Please run ${BASE_DIR}/scripts/init.sh first." >&2
+  exit 1
+fi
+
 echo "Starting WebLens..."
 nohup "${BIN}" >>"${LOG_DIR}/weblens.log" 2>&1 &
 echo $! >"${PID_FILE}"

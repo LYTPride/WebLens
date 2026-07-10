@@ -1023,3 +1023,214 @@ th.wl-table-select-th input[type="checkbox"] {
   opacity: 1;
   transform: rotate(0deg) scale(1);
 }
+
+/* Auth */
+.wl-auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background:
+    radial-gradient(circle at 28% 18%, var(--wl-bg-elevated), transparent 34%),
+    linear-gradient(135deg, var(--wl-bg-page), var(--wl-bg-table));
+  color: var(--wl-text-primary);
+}
+
+.wl-auth-theme {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  color: var(--wl-text-muted);
+}
+
+.wl-auth-card {
+  width: 380px;
+  max-width: 92vw;
+  padding: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--wl-border-sidebar);
+  background: var(--wl-bg-elevated);
+  box-shadow: var(--wl-shadow-modal);
+}
+
+.wl-auth-card--wide {
+  width: 430px;
+}
+
+.wl-auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.wl-auth-logo {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+}
+
+.wl-auth-title {
+  font-size: 23px;
+  font-weight: 700;
+  color: var(--wl-text-heading);
+  line-height: 1.1;
+}
+
+.wl-auth-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--wl-text-muted);
+}
+
+.wl-auth-label {
+  display: block;
+  margin-bottom: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wl-text-label);
+}
+
+.wl-auth-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--wl-border-strong);
+  background: var(--wl-bg-input);
+  color: var(--wl-text-heading);
+  font-size: 14px;
+  outline: none;
+}
+
+.wl-auth-input:focus {
+  border-color: var(--wl-accent-sky);
+  box-shadow: 0 0 0 2px var(--wl-focus-ring);
+}
+
+.wl-auth-password-wrap {
+  position: relative;
+}
+
+.wl-auth-password-wrap .wl-auth-input {
+  padding-right: 38px;
+}
+
+.wl-auth-eye {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--wl-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.wl-auth-eye:hover {
+  color: var(--wl-text-heading);
+}
+
+.wl-auth-message {
+  margin: 4px 0 14px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--wl-pill-danger-border);
+  background: var(--wl-pill-danger-bg);
+  color: var(--wl-pill-danger-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wl-auth-message--info {
+  border-color: var(--wl-pill-info-border);
+  background: var(--wl-pill-info-bg);
+  color: var(--wl-pill-info-text);
+}
+
+.wl-auth-hint {
+  margin: -4px 0 12px;
+  color: var(--wl-text-muted);
+  font-size: 12px;
+}
+
+.wl-auth-submit,
+.wl-auth-secondary {
+  min-height: 34px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wl-auth-submit {
+  width: 100%;
+  border: none;
+  background: var(--wl-action-primary);
+  color: var(--wl-text-on-primary);
+  font-weight: 600;
+}
+
+.wl-auth-submit:disabled {
+  background: var(--wl-action-primary-locked);
+  cursor: not-allowed;
+}
+
+.wl-auth-secondary {
+  border: 1px solid var(--wl-border-strong);
+  background: transparent;
+  color: var(--wl-text-secondary);
+}
+
+.wl-auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wl-auth-actions .wl-auth-submit {
+  width: auto;
+}
+
+.wl-auth-timeout-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--wl-overlay-scrim);
+}
+
+.wl-auth-timeout-dialog {
+  width: 360px;
+  max-width: 92vw;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid var(--wl-border-strong);
+  background: var(--wl-bg-modal);
+  color: var(--wl-text-primary);
+  box-shadow: var(--wl-shadow-modal);
+}
+
+.wl-auth-timeout-title {
+  margin-bottom: 8px;
+  color: var(--wl-text-heading);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.wl-auth-timeout-body {
+  margin-bottom: 16px;
+  color: var(--wl-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}

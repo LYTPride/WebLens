@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	defaultHTTPAddr       = "0.0.0.0:8080"
+	defaultHTTPAddr = "0.0.0.0:8080"
 	// 未设置 WEBLENS_KUBECONFIG_DIR 且无 UI 覆盖时，不向 UI 暴露默认相对路径，避免与「仅绝对路径」提示矛盾
-	defaultKubeconfigDir = ""
+	defaultKubeconfigDir  = ""
 	defaultWebDistDir     = "./web/dist"
 	kubeconfigDirOverride = "config/kubeconfig-dir.override"
 )
@@ -72,6 +72,13 @@ func SetKubeconfigDirOverride(dir string) error {
 	return os.WriteFile(kubeconfigDirOverride, []byte(dir+"\n"), 0600)
 }
 
+// SetKubeconfigDirRuntime sets the UI-managed kubeconfig directory loaded from SQLite.
+func SetKubeconfigDirRuntime(dir string) {
+	kubeconfigDirMu.Lock()
+	defer kubeconfigDirMu.Unlock()
+	kubeconfigDirOverrideVal = strings.TrimSpace(dir)
+}
+
 // WebDistDir returns directory that stores frontend built assets (Vite dist).
 func WebDistDir() string {
 	if v := os.Getenv("WEBLENS_WEB_DIST_DIR"); v != "" {
@@ -84,16 +91,6 @@ func WebDistDir() string {
 // Set WEBLENS_DEFAULT_NAMESPACE in env or config/weblens.env when kubeconfig cannot be modified.
 func DefaultNamespace() string {
 	return os.Getenv("WEBLENS_DEFAULT_NAMESPACE")
-}
-
-// BasicAuth returns (user, password) if both WEBLENS_AUTH_USER and WEBLENS_AUTH_PASSWORD are set; otherwise ("", "").
-func BasicAuth() (user, password string) {
-	user = os.Getenv("WEBLENS_AUTH_USER")
-	password = os.Getenv("WEBLENS_AUTH_PASSWORD")
-	if user == "" || password == "" {
-		return "", ""
-	}
-	return user, password
 }
 
 func init() {
@@ -110,4 +107,3 @@ func init() {
 		}
 	}
 }
-

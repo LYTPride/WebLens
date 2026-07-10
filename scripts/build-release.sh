@@ -87,7 +87,7 @@ cp -a web/dist/. "${STAGING}/${RELEASE_NAME}/web/dist/"
 
 # 启停脚本（排除测试脚本）
 mkdir -p "${STAGING}/${RELEASE_NAME}/scripts"
-for f in weblens-start.sh weblens-stop.sh weblens-restart.sh; do
+for f in init.sh weblens-start.sh weblens-stop.sh weblens-restart.sh; do
   cp -a "scripts/${f}" "${STAGING}/${RELEASE_NAME}/scripts/"
   chmod +x "${STAGING}/${RELEASE_NAME}/scripts/${f}"
 done
@@ -101,8 +101,7 @@ if [[ ! -f config/weblens.env.example ]]; then
 # WEBLENS_KUBECONFIG_DIR=/path/to/kubeconfigs
 # WEBLENS_WEB_DIST_DIR=  # 可选，默认 ./web/dist
 # WEBLENS_DEFAULT_NAMESPACE=  # 可选
-# WEBLENS_AUTH_USER=     # 可选，与 AUTH_PASSWORD 同时设置启用 Basic 鉴权
-# WEBLENS_AUTH_PASSWORD=
+# WEBLENS_DB_PATH=./data/weblens.db  # 可选，默认 ./data/weblens.db
 EOF
 else
   cp -a config/weblens.env.example "${STAGING}/${RELEASE_NAME}/config/" 2>/dev/null || true
@@ -120,4 +119,4 @@ echo "部署包: ${TARBALL}"
 echo "解压后目录结构:"
 tar -tzf "${TARBALL}" | head -20
 echo "..."
-echo "部署: tar -xzf ${RELEASE_NAME}-${VERSION}.tar.gz && cd ${RELEASE_NAME} && ./scripts/weblens-start.sh"
+echo "部署: tar -xzf ${RELEASE_NAME}-${VERSION}.tar.gz && cd ${RELEASE_NAME} && ./scripts/init.sh && ./scripts/weblens-start.sh"

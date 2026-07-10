@@ -13,6 +13,7 @@
 ## 用户手册（guide）
 
 - [Pods 使用手册](./guide/pods.md)
+- [登录、用户与作用域权限](./guide/authentication.md)
 - [Deployments 使用手册](./guide/deployments.md)
 - [Events（事件）使用手册](./guide/events.md)（list/watch、Describe、关联资源跳转与 v1 隐藏视图约定）
 - [资源列表：筛选、排序与实时更新](./guide/resource-lists.md)（含 **平台配置作用域**、**PVC**、**Events**、**Nodes 与 RBAC 受限态**、**多选批量操作**、**行尾菜单行高亮**、刷新重探测说明）

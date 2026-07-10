@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"weblens/server/internal/auth"
 	"weblens/server/internal/cluster"
 
 	corev1 "k8s.io/api/core/v1"
@@ -133,7 +134,7 @@ func listConfigMapRelatedEvents(ctx context.Context, client *kubernetes.Clientse
 }
 
 // RegisterConfigMapRoutes adds ConfigMap describe / YAML / update / delete operations.
-func RegisterConfigMapRoutes(r *gin.Engine, reg *cluster.Registry) {
+func RegisterConfigMapRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.Store) {
 	r.GET("/api/clusters/:id/configmaps/:namespace/:name/describe", func(c *gin.Context) {
 		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("name")
 		client, ok := reg.Client(id)
@@ -249,6 +250,11 @@ func RegisterConfigMapRoutes(r *gin.Engine, reg *cluster.Registry) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "namespace and name are required"})
 				return
 			}
+		}
+		if !requireBatchConfigMapScopes(c, store, id, req.Items) {
+			return
+		}
+		for _, item := range req.Items {
 			if err := client.CoreV1().ConfigMaps(item.Namespace).Delete(c.Request.Context(), item.Name, metav1.DeleteOptions{}); err != nil {
 				log.Printf("configmap batch delete cluster=%s namespace=%s name=%s error: %v", id, item.Namespace, item.Name, err)
 				writeConfigMapK8sError(c, err)
@@ -271,12 +277,17 @@ func RegisterConfigMapRoutes(r *gin.Engine, reg *cluster.Registry) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		var out bytes.Buffer
-		for i, item := range req.Items {
+		for _, item := range req.Items {
 			if item.Namespace == "" || item.Name == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "namespace and name are required"})
 				return
 			}
+		}
+		if !requireBatchConfigMapScopes(c, store, id, req.Items) {
+			return
+		}
+		var out bytes.Buffer
+		for i, item := range req.Items {
 			cm, err := client.CoreV1().ConfigMaps(item.Namespace).Get(c.Request.Context(), item.Name, metav1.GetOptions{})
 			if err != nil {
 				log.Printf("configmap export get cluster=%s namespace=%s name=%s error: %v", id, item.Namespace, item.Name, err)
