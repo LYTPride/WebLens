@@ -124,6 +124,7 @@ export type ServicesListTableProps = {
   pods: Pod[];
   listAgeNow: number;
   effectiveClusterId: string | null;
+  canWrite: boolean;
   menuOpenKey: string | null;
   setMenuOpenKey: (k: string | null) => void;
   rowBusyKey: string | null;
@@ -161,6 +162,7 @@ export function ServicesListTable({
   pods,
   listAgeNow,
   effectiveClusterId,
+  canWrite,
   menuOpenKey,
   setMenuOpenKey,
   rowBusyKey,
@@ -452,12 +454,15 @@ export function ServicesListTable({
                           openEditTab(svc);
                         }}
                       >
-                        <span style={{ marginRight: 8 }}>✎</span> Edit
+                        <span style={{ marginRight: 8 }}>✎</span> {canWrite ? "Edit" : "View YAML"}
                       </button>
                       <button
                         type="button"
                         className="wl-menu-item wl-menu-item-danger"
-                        style={menuItemStyleForDropdown}
+                        style={{
+                          ...menuItemStyleForDropdown,
+                          display: canWrite ? undefined : "none",
+                        }}
                         disabled={rowBusy || !effectiveClusterId}
                         onClick={() => {
                           setMenuOpenKey(null);

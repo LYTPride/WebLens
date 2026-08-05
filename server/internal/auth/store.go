@@ -165,19 +165,87 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS user_scope_grants (
 			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			combo_id TEXT NOT NULL REFERENCES cluster_combos(id) ON DELETE CASCADE,
+			access_role TEXT NOT NULL DEFAULT 'operator' CHECK (access_role IN ('viewer', 'operator')),
 			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
 			PRIMARY KEY(user_id, combo_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS scope_groups (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+			description TEXT NOT NULL DEFAULT '',
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS scope_group_members (
+			group_id INTEGER NOT NULL REFERENCES scope_groups(id) ON DELETE CASCADE,
+			combo_id TEXT NOT NULL UNIQUE REFERENCES cluster_combos(id) ON DELETE CASCADE,
+			created_at INTEGER NOT NULL,
+			PRIMARY KEY(group_id, combo_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS user_scope_group_grants (
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			group_id INTEGER NOT NULL REFERENCES scope_groups(id) ON DELETE CASCADE,
+			access_role TEXT NOT NULL CHECK (access_role IN ('viewer', 'operator')),
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY(user_id, group_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER,
+			username TEXT NOT NULL,
+			action TEXT NOT NULL,
+			method TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL DEFAULT '',
+			cluster_id TEXT NOT NULL DEFAULT '',
+			namespace TEXT NOT NULL DEFAULT '',
+			resource_kind TEXT NOT NULL DEFAULT '',
+			resource_name TEXT NOT NULL DEFAULT '',
+			result TEXT NOT NULL CHECK (result IN ('success', 'failure', 'denied')),
+			status_code INTEGER NOT NULL DEFAULT 0,
+			source_ip TEXT NOT NULL DEFAULT '',
+			detail TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_scope_grants_combo_id ON user_scope_grants(combo_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_scope_group_members_group_id ON scope_group_members(group_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_group_grants_group_id ON user_scope_group_grants(group_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err
 		}
 	}
+	// Existing installations created user_scope_grants before roles were introduced.
+	// Additive migration preserves every existing grant as operator access.
+	if err := s.ensureColumn("user_scope_grants", "access_role", `TEXT NOT NULL DEFAULT 'operator' CHECK (access_role IN ('viewer', 'operator'))`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("user_scope_grants", "updated_at", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE user_scope_grants SET updated_at = created_at WHERE updated_at = 0`); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *Store) ensureColumn(table, column, definition string) error {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	_, err := s.db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
+	return err
 }
 
 func (s *Store) IsInitialized(ctx context.Context) (bool, error) {
@@ -443,29 +511,45 @@ func (s *Store) CreateNormalUser(ctx context.Context, username string) (User, er
 func (s *Store) ListUsers(ctx context.Context) ([]AdminUserRow, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT u.id, u.username, u.role, u.disabled, u.must_change_password, u.created_at, u.updated_at,
-		        COUNT(g.combo_id) AS scope_count
-		 FROM users u
-		 LEFT JOIN user_scope_grants g ON g.user_id = u.id
-		 GROUP BY u.id
-		 ORDER BY CASE u.role WHEN 'admin' THEN 0 ELSE 1 END, u.username`,
+		`SELECT id, username, role, disabled, must_change_password, created_at, updated_at
+		 FROM users
+		 ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, username`,
 	)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []AdminUserRow{}
 	for rows.Next() {
 		var row AdminUserRow
 		var disabled, mustChange int
-		if err := rows.Scan(&row.ID, &row.Username, &row.Role, &disabled, &mustChange, &row.CreatedAt, &row.UpdatedAt, &row.ScopeCount); err != nil {
+		if err := rows.Scan(&row.ID, &row.Username, &row.Role, &disabled, &mustChange, &row.CreatedAt, &row.UpdatedAt); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
 		row.Disabled = disabled != 0
 		row.MustChangePassword = mustChange != 0
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	allScopes, err := s.ListCombos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].Role == RoleAdmin {
+			out[i].ScopeCount = len(allScopes)
+			continue
+		}
+		scopes, err := s.ListAuthorizedScopesForUser(ctx, out[i].User)
+		if err != nil {
+			return nil, err
+		}
+		out[i].ScopeCount = len(scopes)
+	}
+	return out, nil
 }
 
 func (s *Store) SetUserDisabled(ctx context.Context, id int64, disabled bool) error {
@@ -579,23 +663,15 @@ func (s *Store) ListCombos(ctx context.Context) ([]ClusterCombo, error) {
 }
 
 func (s *Store) ListCombosForUser(ctx context.Context, user User) ([]ClusterCombo, error) {
-	if user.Role == RoleAdmin {
-		return s.ListCombos(ctx)
-	}
-	rows, err := s.db.QueryContext(
-		ctx,
-		`SELECT c.id, c.cluster_id, c.namespace, c.alias
-		 FROM cluster_combos c
-		 JOIN user_scope_grants g ON g.combo_id = c.id
-		 WHERE g.user_id = ?
-		 ORDER BY c.cluster_id, c.namespace`,
-		user.ID,
-	)
+	scopes, err := s.ListAuthorizedScopesForUser(ctx, user)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	return scanCombos(rows)
+	out := make([]ClusterCombo, 0, len(scopes))
+	for _, scope := range scopes {
+		out = append(out, scope.ClusterCombo)
+	}
+	return out, nil
 }
 
 func scanCombos(rows *sql.Rows) ([]ClusterCombo, error) {
@@ -675,41 +751,24 @@ func (s *Store) ComboByID(ctx context.Context, id string) (ClusterCombo, error) 
 }
 
 func (s *Store) UserHasScope(ctx context.Context, user User, clusterID, namespace string) (bool, error) {
-	if user.Role == RoleAdmin {
-		return true, nil
-	}
-	if clusterID == "" || namespace == "" {
-		return false, nil
-	}
-	var n int
-	err := s.db.QueryRowContext(
-		ctx,
-		`SELECT COUNT(*)
-		 FROM user_scope_grants g
-		 JOIN cluster_combos c ON c.id = g.combo_id
-		 WHERE g.user_id = ? AND c.cluster_id = ? AND c.namespace = ?`,
-		user.ID,
-		clusterID,
-		namespace,
-	).Scan(&n)
-	return n > 0, err
+	_, ok, err := s.UserAccessRoleForScope(ctx, user, clusterID, namespace)
+	return ok, err
 }
 
 func (s *Store) UserHasAnyScopeForCluster(ctx context.Context, user User, clusterID string) (bool, error) {
 	if user.Role == RoleAdmin {
 		return true, nil
 	}
-	var n int
-	err := s.db.QueryRowContext(
-		ctx,
-		`SELECT COUNT(*)
-		 FROM user_scope_grants g
-		 JOIN cluster_combos c ON c.id = g.combo_id
-		 WHERE g.user_id = ? AND c.cluster_id = ?`,
-		user.ID,
-		clusterID,
-	).Scan(&n)
-	return n > 0, err
+	scopes, err := s.ListAuthorizedScopesForUser(ctx, user)
+	if err != nil {
+		return false, err
+	}
+	for _, scope := range scopes {
+		if scope.ClusterID == clusterID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Store) AuthorizedNamespacesForCluster(ctx context.Context, user User, clusterID string) ([]string, error) {
@@ -719,10 +778,20 @@ func (s *Store) AuthorizedNamespacesForCluster(ctx context.Context, user User, c
 	rows, err := s.db.QueryContext(
 		ctx,
 		`SELECT c.namespace
-		 FROM user_scope_grants g
-		 JOIN cluster_combos c ON c.id = g.combo_id
-		 WHERE g.user_id = ? AND c.cluster_id = ?
+		 FROM cluster_combos c
+		 JOIN (
+			SELECT combo_id
+			FROM user_scope_grants
+			WHERE user_id = ?
+			UNION
+			SELECT gm.combo_id
+			FROM user_scope_group_grants gg
+			JOIN scope_group_members gm ON gm.group_id = gg.group_id
+			WHERE gg.user_id = ?
+		 ) allowed ON allowed.combo_id = c.id
+		 WHERE c.cluster_id = ?
 		 ORDER BY c.namespace`,
+		user.ID,
 		user.ID,
 		clusterID,
 	)
@@ -793,9 +862,12 @@ func (s *Store) SetUserScopeIDs(ctx context.Context, userID int64, scopeIDs []st
 		}
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO user_scope_grants(user_id, combo_id, created_at) VALUES(?, ?, ?)`,
+			`INSERT INTO user_scope_grants(user_id, combo_id, access_role, created_at, updated_at)
+			 VALUES(?, ?, ?, ?, ?)`,
 			userID,
 			id,
+			AccessRoleOperator,
+			now,
 			now,
 		); err != nil {
 			return err

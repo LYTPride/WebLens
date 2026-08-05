@@ -31,6 +31,8 @@ interface PodYamlEditTabProps {
   onSaved?: (result?: unknown) => void;
   /** 仅当标签激活时才请求 YAML，避免与 Watch 等长连接争抢导致长时间等待 */
   isActive?: boolean;
+  /** Viewer 角色使用只读 YAML 查看模式，不渲染保存入口。 */
+  readOnly?: boolean;
 }
 
 type ApiErrorLike = {
@@ -112,6 +114,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   yamlKind = "pod",
   onClose,
   onSaved,
+  readOnly = false,
   isActive = true,
 }) => {
   const [yaml, setYaml] = useState("");
@@ -209,6 +212,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   };
 
   const save = async (andClose: boolean) => {
+    if (readOnly) return;
     if (!isDirty) {
       if (andClose) onClose();
       return;
@@ -395,40 +399,44 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               fontSize: 11,
             }}
           >
-            Cancel
+            {readOnly ? "Close" : "Cancel"}
           </button>
-          <button
-            type="button"
-            onClick={() => save(false)}
-            disabled={saving || !isDirty}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 4,
-              border: "1px solid var(--wl-border-strong)",
-              backgroundColor: "var(--wl-bg-control)",
-              color: isDirty && !saving ? "var(--wl-text-heading)" : "var(--wl-text-muted)",
-              cursor: isDirty && !saving ? "pointer" : "not-allowed",
-              fontSize: 12,
-            }}
-          >
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={() => save(true)}
-            disabled={saving}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 4,
-              border: "none",
-              backgroundColor: "var(--wl-action-primary)",
-              color: "var(--wl-text-on-primary)",
-              cursor: saving ? "not-allowed" : "pointer",
-              fontSize: 12,
-            }}
-          >
-            Save & Close
-          </button>
+          {!readOnly && (
+            <>
+              <button
+                type="button"
+                onClick={() => save(false)}
+                disabled={saving || !isDirty}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 4,
+                  border: "1px solid var(--wl-border-strong)",
+                  backgroundColor: "var(--wl-bg-control)",
+                  color: isDirty && !saving ? "var(--wl-text-heading)" : "var(--wl-text-muted)",
+                  cursor: isDirty && !saving ? "pointer" : "not-allowed",
+                  fontSize: 12,
+                }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => save(true)}
+                disabled={saving}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 4,
+                  border: "none",
+                  backgroundColor: "var(--wl-action-primary)",
+                  color: "var(--wl-text-on-primary)",
+                  cursor: saving ? "not-allowed" : "pointer",
+                  fontSize: 12,
+                }}
+              >
+                Save & Close
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -454,7 +462,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         </div>
       ) : (
         <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
-          <YamlMonacoEditor ref={editorRef} value={yaml} onChange={setYaml} />
+          <YamlMonacoEditor ref={editorRef} value={yaml} onChange={setYaml} readOnly={readOnly} />
         </div>
       )}
     </div>

@@ -251,7 +251,7 @@ func RegisterConfigMapRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.S
 				return
 			}
 		}
-		if !requireBatchConfigMapScopes(c, store, id, req.Items) {
+		if !requireBatchConfigMapScopes(c, store, id, req.Items, auth.CapabilityResourceWrite) {
 			return
 		}
 		for _, item := range req.Items {
@@ -283,7 +283,7 @@ func RegisterConfigMapRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.S
 				return
 			}
 		}
-		if !requireBatchConfigMapScopes(c, store, id, req.Items) {
+		if !requireBatchConfigMapScopes(c, store, id, req.Items, auth.CapabilityResourceRead) {
 			return
 		}
 		var out bytes.Buffer

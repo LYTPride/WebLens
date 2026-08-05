@@ -132,6 +132,7 @@ export type ConfigMapsListTableProps = {
   risksByKey: Map<string, ConfigMapRisk[]>;
   listAgeNow: number;
   effectiveClusterId: string | null;
+  canWrite: boolean;
   selectedKeys: Set<string>;
   onToggleRow: (key: string, checked: boolean) => void;
   onToggleVisible: (checked: boolean) => void;
@@ -171,6 +172,7 @@ export function ConfigMapsListTable({
   risksByKey,
   listAgeNow,
   effectiveClusterId,
+  canWrite,
   selectedKeys,
   onToggleRow,
   onToggleVisible,
@@ -408,8 +410,9 @@ export function ConfigMapsListTable({
                           openEditYamlTab(row);
                         }}
                       >
-                        <span style={{ marginRight: 8 }}>✎</span> 编辑 YAML
+                        <span style={{ marginRight: 8 }}>✎</span> {canWrite ? "编辑 YAML" : "查看 YAML"}
                       </button>
+                      {canWrite && (
                       <button
                         type="button"
                         className="wl-menu-item"
@@ -422,6 +425,7 @@ export function ConfigMapsListTable({
                       >
                         <span style={{ marginRight: 8 }}>⚙</span> 编辑配置
                       </button>
+                      )}
                       <button
                         type="button"
                         className="wl-menu-item"
@@ -434,6 +438,7 @@ export function ConfigMapsListTable({
                       >
                         <span style={{ marginRight: 8 }}>⇩</span> 下载 YAML
                       </button>
+                      {canWrite && (
                       <button
                         type="button"
                         className="wl-menu-item wl-menu-item-danger"
@@ -471,6 +476,7 @@ export function ConfigMapsListTable({
                       >
                         <span style={{ marginRight: 8 }}>🗑</span> 删除
                       </button>
+                      )}
                     </DropdownMenuPortal>
                   )}
                 </div>

@@ -15,6 +15,7 @@ export type YamlMonacoEditorHandle = {
 export type YamlMonacoEditorProps = {
   value: string;
   onChange: (next: string) => void;
+  readOnly?: boolean;
 };
 
 const THEME_DARK_ID = "weblens-yaml-dark";
@@ -87,7 +88,7 @@ const beforeMount: BeforeMount = (monaco) => {
  * 主题随 WebLens 深浅切换（不丢编辑器状态）。
  */
 export const YamlMonacoEditor = forwardRef<YamlMonacoEditorHandle, YamlMonacoEditorProps>(
-  function YamlMonacoEditor({ value, onChange }, ref) {
+  function YamlMonacoEditor({ value, onChange, readOnly = false }, ref) {
     const { theme: appTheme } = useTheme();
     const monacoThemeId = appTheme === "light" ? THEME_LIGHT_ID : THEME_DARK_ID;
     const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -154,6 +155,7 @@ export const YamlMonacoEditor = forwardRef<YamlMonacoEditorHandle, YamlMonacoEdi
         beforeMount={beforeMount}
         onMount={onMount}
         options={{
+          readOnly,
           fontSize: 12,
           lineHeight: 18,
           fontFamily: FONT,

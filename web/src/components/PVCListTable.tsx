@@ -141,6 +141,7 @@ export type PVCListTableProps = {
   pods: Pod[];
   listAgeNow: number;
   effectiveClusterId: string | null;
+  canWrite: boolean;
   menuOpenKey: string | null;
   setMenuOpenKey: (k: string | null) => void;
   rowBusyKey: string | null;
@@ -174,6 +175,7 @@ export function PVCListTable({
   pods,
   listAgeNow,
   effectiveClusterId,
+  canWrite,
   menuOpenKey,
   setMenuOpenKey,
   rowBusyKey,
@@ -373,12 +375,15 @@ export function PVCListTable({
                         openEditTab(row);
                       }}
                     >
-                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                      <span style={{ marginRight: 8 }}>✎</span> {canWrite ? "Edit" : "View YAML"}
                     </button>
                     <button
                       type="button"
                       className="wl-menu-item wl-menu-item-danger"
-                      style={menuItemStyleForDropdown}
+                      style={{
+                        ...menuItemStyleForDropdown,
+                        display: canWrite ? undefined : "none",
+                      }}
                       disabled={rowBusy || !effectiveClusterId}
                       onClick={() => {
                         setMenuOpenKey(null);

@@ -56,6 +56,7 @@ import { ThemeToggleButton } from "../components/ThemeToggleButton";
 import { AdminAccessModal } from "../auth/AdminAccessModal";
 import { UserMenu } from "../auth/UserMenu";
 import { useAuth } from "../auth/AuthContext";
+import { canInScope, scopeAccessRole, scopeRoleLabel } from "../auth/permissions";
 import { ResourceTable, type Column } from "../components/ResourceTable";
 import { BottomPanel, type PanelTab } from "../components/BottomPanel";
 import { ResizableTh } from "../components/ResizableTh";
@@ -865,6 +866,11 @@ export const App: React.FC = () => {
   /** 作用域选择：当前选中（待应用）与已应用 */
   const [activeComboId, setActiveComboId] = useState<string | null>(null);
   const [effectiveComboId, setEffectiveComboId] = useState<string | null>(null);
+  const effectiveScopeAccessRole = scopeAccessRole(auth, effectiveComboId);
+  const canResourceWrite = canInScope(auth, effectiveComboId, "resource.write");
+  const canPodExec = canInScope(auth, effectiveComboId, "pod.exec");
+  const isEffectiveScopeReadOnly = effectiveScopeAccessRole === "viewer";
+
   /** 当前打开操作菜单的 Pod（namespace/name），null 表示未打开 */
   const [podMenuOpenKey, setPodMenuOpenKey] = useState<string | null>(null);
   /** Deployments 行三点菜单：namespace/name */
@@ -1262,9 +1268,50 @@ export const App: React.FC = () => {
       setPvcItems([]);
       setConfigMapItems([]);
       setEventItems([]);
+      setDescribeTarget(null);
       setToastMessage("当前作用域授权已变更，请重新选择");
     }
   }, [activeComboId, auth?.user.role, auth?.scopes, effectiveComboId]);
+
+  useEffect(() => {
+    if (!auth || auth.user.role !== "user") return;
+    const scopes = auth.scopes || [];
+    setPanelTabs((current) => {
+      let changed = false;
+      const next = current.flatMap((tab) => {
+        const scope = scopes.find(
+          (item) => item.clusterId === tab.clusterId && item.namespace === tab.namespace,
+        );
+        if (!scope) {
+          changed = true;
+          return [];
+        }
+        if (tab.type === "shell" && !canInScope(auth, scope.id, "pod.exec")) {
+          changed = true;
+          return [];
+        }
+        if (tab.type === "config-editor" && !canInScope(auth, scope.id, "resource.write")) {
+          changed = true;
+          return [];
+        }
+        if (tab.type === "edit") {
+          const readOnly = !canInScope(auth, scope.id, "resource.write");
+          if (tab.readOnly !== readOnly) {
+            changed = true;
+            return [{ ...tab, readOnly }];
+          }
+        }
+        return [tab];
+      });
+      return changed ? next : current;
+    });
+  }, [auth]);
+
+  useEffect(() => {
+    if (activePanelTabId && !panelTabs.some((tab) => tab.id === activePanelTabId)) {
+      setActivePanelTabId(panelTabs[0]?.id ?? null);
+    }
+  }, [activePanelTabId, panelTabs]);
 
   useEffect(() => {
     currentViewRef.current = currentView;
@@ -1615,6 +1662,10 @@ export const App: React.FC = () => {
   }, [describeDragging]);
 
   const openPanelTab = (type: "shell" | "logs", pod: Pod, container: string) => {
+    if (type === "shell" && !canPodExec) {
+      setToastMessage("当前作用域角色不允许打开 Shell");
+      return;
+    }
     if (!effectiveClusterId) return;
     const ns = pod.metadata.namespace;
     const name = pod.metadata.name;
@@ -1663,6 +1714,7 @@ export const App: React.FC = () => {
         container: "",
         title: name,
         containers: getPodContainerNames(pod),
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1695,6 +1747,7 @@ export const App: React.FC = () => {
         title: `${name} (Deployment)`,
         containers: [],
         yamlKind: "deployment",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1764,6 +1817,7 @@ export const App: React.FC = () => {
         title: `${name} (StatefulSet)`,
         containers: [],
         yamlKind: "statefulset",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1805,6 +1859,7 @@ export const App: React.FC = () => {
         title: `${name} (Ingress)`,
         containers: [],
         yamlKind: "ingress",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1846,6 +1901,7 @@ export const App: React.FC = () => {
         title: `${name} (Service)`,
         containers: [],
         yamlKind: "service",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1887,6 +1943,7 @@ export const App: React.FC = () => {
         title: `${name} (PVC)`,
         containers: [],
         yamlKind: "pvc",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1928,6 +1985,7 @@ export const App: React.FC = () => {
         title: `${name} (ConfigMap)`,
         containers: [],
         yamlKind: "configmap",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1943,6 +2001,10 @@ export const App: React.FC = () => {
 
   const openConfigMapEditorTab = (cm: ConfigMapListRow) => {
     if (!effectiveClusterId) return;
+    if (!canResourceWrite) {
+      setToastMessage("当前作用域为只读角色，不能打开 Config Editor");
+      return;
+    }
     const ns = cm.metadata.namespace ?? "";
     const name = cm.metadata.name;
     const id = `config-editor-${ns}-${name}`;
@@ -2022,6 +2084,7 @@ export const App: React.FC = () => {
         title: `${name} (Node)`,
         containers: [],
         yamlKind: "node",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -5586,6 +5649,28 @@ export const App: React.FC = () => {
                       })()
                     : "未应用"}
                   {" "}（仅点击「应用」后才生效）
+                  {effectiveComboId && effectiveScopeAccessRole && (
+                    <span
+                      title={
+                        isEffectiveScopeReadOnly
+                          ? "只读角色可查看资源、Logs 与 YAML，但不能编辑、删除、重启、扩缩容或打开 Shell"
+                          : "当前作用域允许读写操作，最终仍受 Kubernetes RBAC 限制"
+                      }
+                      style={{
+                        display: "inline-flex",
+                        marginLeft: 8,
+                        padding: "2px 7px",
+                        borderRadius: 999,
+                        border: `1px solid ${isEffectiveScopeReadOnly ? "var(--wl-pill-info-border)" : "var(--wl-pill-success-border)"}`,
+                        background: isEffectiveScopeReadOnly ? "var(--wl-pill-info-bg)" : "var(--wl-pill-success-bg)",
+                        color: isEffectiveScopeReadOnly ? "var(--wl-pill-info-text)" : "var(--wl-pill-success-text)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {scopeRoleLabel(effectiveScopeAccessRole)}
+                    </span>
+                  )}
                 </div>
 
                 <div
@@ -5700,7 +5785,7 @@ export const App: React.FC = () => {
                         刷新列表
                       </button>
                     )}
-                    {currentView === "pods" && selectedPodKeys.size > 0 && (
+                    {canResourceWrite && currentView === "pods" && selectedPodKeys.size > 0 && (
                       <div className="wl-bulk-action-bar">
                         <span>
                           已选 <span className="wl-bulk-action-bar__count">{selectedPodKeys.size}</span> 项
@@ -5733,7 +5818,7 @@ export const App: React.FC = () => {
                         </button>
                       </div>
                     )}
-                    {currentView === "deployments" && selectedDeploymentKeys.size > 0 && (
+                    {canResourceWrite && currentView === "deployments" && selectedDeploymentKeys.size > 0 && (
                       <div className="wl-bulk-action-bar">
                         <span>
                           已选 <span className="wl-bulk-action-bar__count">{selectedDeploymentKeys.size}</span> 项
@@ -5790,6 +5875,7 @@ export const App: React.FC = () => {
                             </span>
                           )}
                         </span>
+                        {canResourceWrite && (
                         <button
                           type="button"
                           className="wl-bulk-btn wl-bulk-btn--danger"
@@ -5803,6 +5889,7 @@ export const App: React.FC = () => {
                         >
                           删除
                         </button>
+                        )}
                         <button
                           type="button"
                           className="wl-bulk-btn wl-bulk-btn--secondary"
@@ -5984,6 +6071,8 @@ export const App: React.FC = () => {
                       <tr>
                         <SelectionHeaderCell thBase={thStyle} width={LIST_SELECT_COL_WIDTH}>
                           <input
+                            disabled={!canResourceWrite}
+                            style={{ visibility: canResourceWrite ? "visible" : "hidden" }}
                             ref={podTableHeaderSelectRef}
                             type="checkbox"
                             aria-label="全选当前可见 Pod"
@@ -6077,6 +6166,8 @@ export const App: React.FC = () => {
                               onClick={(e) => e.stopPropagation()}
                             >
                               <input
+                                disabled={!canResourceWrite}
+                                style={{ visibility: canResourceWrite ? "visible" : "hidden" }}
                                 type="checkbox"
                                 checked={selectedPodKeys.has(podRowSelectKey)}
                                 aria-label={`选择 Pod ${podRowSelectKey}`}
@@ -6183,7 +6274,7 @@ export const App: React.FC = () => {
                                       className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
                                       style={{
                                         ...menuItemStyleForDropdown,
-                                        display: "flex",
+                                        display: canPodExec ? "flex" : "none",
                                         alignItems: "center",
                                         justifyContent: "space-between",
                                         width: "100%",
@@ -6213,7 +6304,7 @@ export const App: React.FC = () => {
                                       className="wl-menu-item"
                                       style={menuItemStyleForDropdown}
                                     >
-                                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                                      <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                     </button>
                                     <button
                                       type="button"
@@ -6246,12 +6337,15 @@ export const App: React.FC = () => {
                                         });
                                       }}
                                       className="wl-menu-item wl-menu-item-danger"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                     >
                                       <span style={{ marginRight: 8 }}>🗑</span> Delete
                                     </button>
                                   </div>
-                                  {podMenuSubmenu && (
+                                  {podMenuSubmenu && (podMenuSubmenu !== "shell" || canPodExec) && (
                                     <div style={{ minWidth: 100, padding: "4px 0" }}>
                                       {containers.map((c) => (
                                         <button
@@ -6297,6 +6391,8 @@ export const App: React.FC = () => {
                       <tr>
                         <SelectionHeaderCell thBase={thStyle} width={LIST_SELECT_COL_WIDTH}>
                           <input
+                            disabled={!canResourceWrite}
+                            style={{ visibility: canResourceWrite ? "visible" : "hidden" }}
                             ref={deployTableHeaderSelectRef}
                             type="checkbox"
                             aria-label="全选当前可见 Deployment"
@@ -6393,6 +6489,8 @@ export const App: React.FC = () => {
                               onClick={(e) => e.stopPropagation()}
                             >
                               <input
+                                disabled={!canResourceWrite}
+                                style={{ visibility: canResourceWrite ? "visible" : "hidden" }}
                                 type="checkbox"
                                 checked={selectedDeploymentKeys.has(deployRowSelectKey)}
                                 aria-label={`选择 Deployment ${deployRowSelectKey}`}
@@ -6489,7 +6587,10 @@ export const App: React.FC = () => {
                                   <button
                                     type="button"
                                     className="wl-menu-item"
-                                    style={menuItemStyleForDropdown}
+                                    style={{
+                                      ...menuItemStyleForDropdown,
+                                      display: canResourceWrite ? undefined : "none",
+                                    }}
                                     disabled={rowBusy}
                                     onClick={() => {
                                       setDeploymentMenuOpenKey(null);
@@ -6507,7 +6608,10 @@ export const App: React.FC = () => {
                                   <button
                                     type="button"
                                     className="wl-menu-item"
-                                    style={menuItemStyleForDropdown}
+                                    style={{
+                                      ...menuItemStyleForDropdown,
+                                      display: canResourceWrite ? undefined : "none",
+                                    }}
                                     disabled={rowBusy || !effectiveClusterId}
                                     onClick={() => {
                                       setDeploymentMenuOpenKey(null);
@@ -6551,12 +6655,15 @@ export const App: React.FC = () => {
                                     disabled={rowBusy}
                                     onClick={() => openEditDeploymentTab(d)}
                                   >
-                                    <span style={{ marginRight: 8 }}>✎</span> Edit
+                                    <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                   </button>
                                   <button
                                     type="button"
                                     className="wl-menu-item wl-menu-item-danger"
-                                    style={menuItemStyleForDropdown}
+                                    style={{
+                                      ...menuItemStyleForDropdown,
+                                      display: canResourceWrite ? undefined : "none",
+                                    }}
                                     disabled={rowBusy || !effectiveClusterId}
                                     onClick={() => {
                                       setDeploymentMenuOpenKey(null);
@@ -6875,7 +6982,10 @@ export const App: React.FC = () => {
                                     <button
                                       type="button"
                                       className="wl-menu-item"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                       disabled={rowBusy}
                                       onClick={() => {
                                         setStatefulsetMenuOpenKey(null);
@@ -6893,7 +7003,10 @@ export const App: React.FC = () => {
                                     <button
                                       type="button"
                                       className="wl-menu-item"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                       disabled={rowBusy || !effectiveClusterId}
                                       onClick={() => {
                                         setStatefulsetMenuOpenKey(null);
@@ -6943,12 +7056,15 @@ export const App: React.FC = () => {
                                       disabled={rowBusy}
                                       onClick={() => openEditStatefulSetTab(s)}
                                     >
-                                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                                      <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                     </button>
                                     <button
                                       type="button"
                                       className="wl-menu-item wl-menu-item-danger"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                       disabled={rowBusy || !effectiveClusterId}
                                       onClick={() => {
                                         setStatefulsetMenuOpenKey(null);
@@ -7268,7 +7384,7 @@ export const App: React.FC = () => {
                                                         className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
                                                         style={{
                                                           ...menuItemStyleForDropdown,
-                                                          display: "flex",
+                                                          display: canPodExec ? "flex" : "none",
                                                           alignItems: "center",
                                                           justifyContent: "space-between",
                                                           width: "100%",
@@ -7306,7 +7422,7 @@ export const App: React.FC = () => {
                                                         className="wl-menu-item"
                                                         style={menuItemStyleForDropdown}
                                                       >
-                                                        <span style={{ marginRight: 8 }}>✎</span> Edit
+                                                        <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                                       </button>
                                                       <button
                                                         type="button"
@@ -7347,12 +7463,15 @@ export const App: React.FC = () => {
                                                           });
                                                         }}
                                                         className="wl-menu-item wl-menu-item-danger"
-                                                        style={menuItemStyleForDropdown}
+                                                        style={{
+                                                          ...menuItemStyleForDropdown,
+                                                          display: canResourceWrite ? undefined : "none",
+                                                        }}
                                                       >
                                                         <span style={{ marginRight: 8 }}>🗑</span> Delete
                                                       </button>
                                                     </div>
-                                                    {podMenuSubmenu && (
+                                                    {podMenuSubmenu && (podMenuSubmenu !== "shell" || canPodExec) && (
                                                       <div style={{ minWidth: 100, padding: "4px 0" }}>
                                                         {pContainers.map((c) => (
                                                           <button
@@ -7653,12 +7772,15 @@ export const App: React.FC = () => {
                                       disabled={rowBusy}
                                       onClick={() => openEditIngressTab(ing)}
                                     >
-                                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                                      <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                     </button>
                                     <button
                                       type="button"
                                       className="wl-menu-item wl-menu-item-danger"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                       disabled={rowBusy || !effectiveClusterId}
                                       onClick={() => {
                                         setIngressMenuOpenKey(null);
@@ -7834,6 +7956,7 @@ export const App: React.FC = () => {
                     pods={pods}
                     listAgeNow={listAgeNow}
                     effectiveClusterId={effectiveClusterId}
+                    canWrite={canResourceWrite}
                     menuOpenKey={serviceMenuOpenKey}
                     setMenuOpenKey={setServiceMenuOpenKey}
                     rowBusyKey={serviceRowBusyKey}
@@ -7868,6 +7991,7 @@ export const App: React.FC = () => {
                     pods={pods}
                     listAgeNow={listAgeNow}
                     effectiveClusterId={effectiveClusterId}
+                    canWrite={canResourceWrite}
                     menuOpenKey={pvcMenuOpenKey}
                     setMenuOpenKey={setPvcMenuOpenKey}
                     rowBusyKey={pvcRowBusyKey}
@@ -7902,6 +8026,7 @@ export const App: React.FC = () => {
                     risksByKey={configMapRisksByKey}
                     listAgeNow={listAgeNow}
                     effectiveClusterId={effectiveClusterId}
+                    canWrite={canResourceWrite}
                     selectedKeys={selectedConfigMapKeys}
                     onToggleRow={(key, checked) => {
                       setSelectedConfigMapKeys((prev) => {

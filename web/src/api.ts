@@ -407,11 +407,31 @@ export interface NodeDescribe {
   events: K8sEvent[];
 }
 
+export type AccessRole = "viewer" | "operator";
+
+export type ScopeCapability =
+  | "resource.read"
+  | "resource.write"
+  | "pod.logs"
+  | "pod.exec"
+  | "file.read"
+  | "file.write"
+  | "platform.manage"
+  | "audit.read";
+
+export interface ScopeGroupSummary {
+  id: number;
+  name: string;
+}
+
 export interface ClusterCombo {
   id: string;
   clusterId: string;
   namespace: string;
   alias?: string;
+  group?: ScopeGroupSummary;
+  accessRole?: AccessRole;
+  capabilities?: ScopeCapability[];
 }
 
 /** 从 Pod 取容器名列表（用于 Shell/Logs 子菜单），优先 spec.containers，否则 status.containerStatuses */
@@ -454,6 +474,51 @@ export interface AuthEnvelope {
 export interface AdminUserRow extends AuthUser {
   scopeCount: number;
 }
+export interface ScopeGroup {
+  id: number;
+  name: string;
+  description: string;
+  sortOrder: number;
+  scopeIds: string[];
+  scopeCount: number;
+  grantCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ScopeGrant {
+  scopeId: string;
+  role: AccessRole;
+}
+
+export interface GroupGrant {
+  groupId: number;
+  role: AccessRole;
+}
+
+export interface UserGrants {
+  groupGrants: GroupGrant[];
+  scopeGrants: ScopeGrant[];
+}
+
+export interface AuditEntry {
+  id: number;
+  userId?: number;
+  username: string;
+  action: string;
+  method: string;
+  path: string;
+  clusterId?: string;
+  namespace?: string;
+  resourceKind?: string;
+  resourceName?: string;
+  result: "success" | "failure" | "denied";
+  statusCode: number;
+  sourceIp?: string;
+  detail?: string;
+  createdAt: number;
+}
+
 
 export function emitAuthEvent(code: string, message: string): void {
   if (typeof window === "undefined") return;
@@ -532,6 +597,58 @@ export async function fetchAdminUserScopes(id: number): Promise<string[]> {
 export async function saveAdminUserScopes(id: number, scopeIds: string[]): Promise<void> {
   await api.put(`/api/auth/admin/users/${encodeURIComponent(String(id))}/scopes`, { scopeIds });
 }
+export async function fetchAdminScopeGroups(): Promise<ScopeGroup[]> {
+  const res = await api.get<{ items: ScopeGroup[] }>("/api/auth/admin/scope-groups");
+  return res.data.items;
+}
+
+export async function createAdminScopeGroup(name: string, description: string): Promise<ScopeGroup> {
+  const res = await api.post<ScopeGroup>("/api/auth/admin/scope-groups", { name, description });
+  return res.data;
+}
+
+export async function updateAdminScopeGroup(
+  id: number,
+  input: { name: string; description: string; sortOrder: number },
+): Promise<void> {
+  await api.patch(`/api/auth/admin/scope-groups/${encodeURIComponent(String(id))}`, input);
+}
+
+export async function deleteAdminScopeGroup(id: number): Promise<void> {
+  await api.delete(`/api/auth/admin/scope-groups/${encodeURIComponent(String(id))}`);
+}
+
+export async function saveAdminScopeGroupScopes(id: number, scopeIds: string[]): Promise<void> {
+  await api.put(`/api/auth/admin/scope-groups/${encodeURIComponent(String(id))}/scopes`, { scopeIds });
+}
+
+export async function fetchAdminUserGrants(id: number): Promise<UserGrants> {
+  const res = await api.get<UserGrants>(`/api/auth/admin/users/${encodeURIComponent(String(id))}/grants`);
+  return res.data;
+}
+
+export async function saveAdminUserGrants(id: number, grants: UserGrants): Promise<void> {
+  await api.put(`/api/auth/admin/users/${encodeURIComponent(String(id))}/grants`, grants);
+}
+
+export async function fetchAdminAuditLogs(filters?: {
+  userId?: number;
+  action?: string;
+  result?: AuditEntry["result"] | "";
+  limit?: number;
+}): Promise<AuditEntry[]> {
+  const params = new URLSearchParams();
+  if (filters?.userId) params.set("userId", String(filters.userId));
+  if (filters?.action) params.set("action", filters.action);
+  if (filters?.result) params.set("result", filters.result);
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  const query = params.toString();
+  const res = await api.get<{ items: AuditEntry[] }>(
+    `/api/auth/admin/audit-logs${query ? `?${query}` : ""}`,
+  );
+  return res.data.items;
+}
+
 
 export async function fetchClusters() {
   const res = await api.get<{ items: ClusterSummary[] }>("/api/clusters");

@@ -23,12 +23,12 @@ const (
 )
 
 type authEnvelope struct {
-	User               auth.User           `json:"user"`
-	Scopes             []auth.ClusterCombo `json:"scopes"`
-	IdleTimeoutMs      int64               `json:"idleTimeoutMs"`
-	IdleWarningMs      int64               `json:"idleWarningMs"`
-	SessionExpiresAt   int64               `json:"sessionExpiresAt"`
-	MustChangePassword bool                `json:"mustChangePassword"`
+	User               auth.User              `json:"user"`
+	Scopes             []auth.AuthorizedScope `json:"scopes"`
+	IdleTimeoutMs      int64                  `json:"idleTimeoutMs"`
+	IdleWarningMs      int64                  `json:"idleWarningMs"`
+	SessionExpiresAt   int64                  `json:"sessionExpiresAt"`
+	MustChangePassword bool                   `json:"mustChangePassword"`
 }
 
 func setSessionCookie(c *gin.Context, token string, expiresAt time.Time) {
@@ -76,7 +76,7 @@ func currentSessionTokenHash(c *gin.Context) string {
 }
 
 func buildAuthEnvelope(c *gin.Context, store *auth.Store, user auth.User, expiresAt time.Time) (authEnvelope, error) {
-	scopes, err := store.ListCombosForUser(c.Request.Context(), user)
+	scopes, err := store.ListAuthorizedScopesForUser(c.Request.Context(), user)
 	if err != nil {
 		return authEnvelope{}, err
 	}
@@ -160,7 +160,11 @@ func authRequired(store *auth.Store) gin.HandlerFunc {
 		if !authorizeRequest(c, store, user) {
 			return
 		}
+		auditAction := auditActionForRequest(c)
 		c.Next()
+		if auditAction != "" {
+			recordRequestAudit(store, c, user, auditAction, "")
+		}
 	}
 }
 
@@ -177,6 +181,7 @@ func authorizeRequest(c *gin.Context, store *auth.Store, user auth.User) bool {
 	}
 	path := c.Request.URL.Path
 	method := c.Request.Method
+	capability := requiredCapabilityForRequest(c)
 
 	if strings.HasPrefix(path, "/api/auth/admin") {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要管理员权限", "code": "ADMIN_REQUIRED"})
@@ -201,6 +206,10 @@ func authorizeRequest(c *gin.Context, store *auth.Store, user auth.User) bool {
 	}
 	if strings.HasPrefix(path, "/api/analytics/") {
 		return true
+	}
+	if capability == "" {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "接口未配置权限策略", "code": "PERMISSION_POLICY_REQUIRED"})
+		return false
 	}
 
 	clusterID, namespace, kind, batchScoped := clusterScopeFromPath(c)
@@ -231,13 +240,23 @@ func authorizeRequest(c *gin.Context, store *auth.Store, user auth.User) bool {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "普通用户必须在已授权命名空间内操作", "code": "SCOPE_REQUIRED"})
 		return false
 	}
-	ok, err := store.UserHasScope(c.Request.Context(), user, clusterID, namespace)
+	role, ok, err := store.UserAccessRoleForScope(c.Request.Context(), user, clusterID, namespace)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return false
 	}
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "当前账号没有该作用域权限", "code": "SCOPE_FORBIDDEN"})
+		return false
+	}
+	if !auth.RoleAllows(role, capability) {
+		recordDeniedRequestAudit(store, c, user, capability, "accessRole="+string(role))
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error":              "当前作用域角色不允许执行此操作",
+			"code":               "WEBLENS_ROLE_FORBIDDEN",
+			"requiredCapability": capability,
+			"accessRole":         role,
+		})
 		return false
 	}
 	return true
@@ -522,7 +541,7 @@ func namespacesForUser(c *gin.Context, store *auth.Store, user auth.User, cluste
 	return items, true, nil
 }
 
-func requireBatchConfigMapScopes(c *gin.Context, store *auth.Store, clusterID string, items []configMapBatchItem) bool {
+func requireBatchConfigMapScopes(c *gin.Context, store *auth.Store, clusterID string, items []configMapBatchItem, capability auth.Capability) bool {
 	user, ok := currentUser(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录"})
@@ -532,13 +551,23 @@ func requireBatchConfigMapScopes(c *gin.Context, store *auth.Store, clusterID st
 		return true
 	}
 	for _, item := range items {
-		ok, err := store.UserHasScope(c.Request.Context(), user, clusterID, item.Namespace)
+		role, ok, err := store.UserAccessRoleForScope(c.Request.Context(), user, clusterID, item.Namespace)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return false
 		}
 		if !ok {
 			c.JSON(http.StatusForbidden, gin.H{"error": "当前账号没有该作用域权限", "code": "SCOPE_FORBIDDEN"})
+			return false
+		}
+		if !auth.RoleAllows(role, capability) {
+			recordDeniedRequestAudit(store, c, user, capability, "accessRole="+string(role))
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":              "当前作用域角色不允许执行此操作",
+				"code":               "WEBLENS_ROLE_FORBIDDEN",
+				"requiredCapability": capability,
+				"accessRole":         role,
+			})
 			return false
 		}
 	}

@@ -1,9 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"io"
 	"net/http"
+	"sync"
+	"time"
 
+	"weblens/server/internal/auth"
 	"weblens/server/internal/cluster"
 
 	corev1 "k8s.io/api/core/v1"
@@ -19,7 +23,7 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 // registerExecRoutes adds Pod exec WebSocket endpoint.
-func registerExecRoutes(r *gin.Engine, reg *cluster.Registry) {
+func registerExecRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.Store) {
 	r.GET("/api/clusters/:id/pods/:namespace/:pod/exec", func(c *gin.Context) {
 		id := c.Param("id")
 		ns := c.Param("namespace")
@@ -49,16 +53,16 @@ func registerExecRoutes(r *gin.Engine, reg *cluster.Registry) {
 					"export TERM=xterm-256color; " +
 					"export PS1='root@$(hostname 2>/dev/null || true):\\w# '; " +
 					"exec bash -li; " +
-				"else " +
+					"else " +
 					"export TERM=xterm-256color; " +
 					"export PS1='root@$(hostname 2>/dev/null || true):\\w# '; " +
 					"exec /bin/sh -i; " +
-				"fi",
+					"fi",
 			},
-			Stdin:     true,
-			Stdout:    true,
-			Stderr:    true,
-			TTY:       true,
+			Stdin:  true,
+			Stdout: true,
+			Stderr: true,
+			TTY:    true,
 		}
 		req.VersionedParams(opts, scheme.ParameterCodec)
 
@@ -73,6 +77,47 @@ func registerExecRoutes(r *gin.Engine, reg *cluster.Registry) {
 			return
 		}
 		defer conn.Close()
+		streamCtx, cancelStream := context.WithCancel(c.Request.Context())
+		defer cancelStream()
+		revocationWatchDone := make(chan struct{})
+		defer close(revocationWatchDone)
+
+		user, hasUser := currentUser(c)
+		if !hasUser {
+			_ = conn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "authentication required"),
+				time.Now().Add(time.Second),
+			)
+			return
+		}
+		if user.Role != auth.RoleAdmin {
+			go func() {
+				ticker := time.NewTicker(5 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-revocationWatchDone:
+						return
+					case <-ticker.C:
+						checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						allowed, err := store.UserHasCapability(checkCtx, user, id, ns, auth.CapabilityPodExec)
+						cancel()
+						if err == nil && allowed {
+							continue
+						}
+						cancelStream()
+						_ = conn.WriteControl(
+							websocket.CloseMessage,
+							websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Shell permission revoked"),
+							time.Now().Add(time.Second),
+						)
+						_ = conn.Close()
+						return
+					}
+				}
+			}()
+		}
 
 		pipeR, pipeW := io.Pipe()
 		defer pipeW.Close()
@@ -86,12 +131,13 @@ func registerExecRoutes(r *gin.Engine, reg *cluster.Registry) {
 			},
 		}
 
+		writer := &wsWriter{conn: conn, mu: &sync.Mutex{}}
 		go func() {
 			defer pipeR.Close()
-			_ = exec.StreamWithContext(c.Request.Context(), remotecommand.StreamOptions{
+			_ = exec.StreamWithContext(streamCtx, remotecommand.StreamOptions{
 				Stdin:             pipeR,
-				Stdout:            &wsWriter{conn: conn},
-				Stderr:            &wsWriter{conn: conn},
+				Stdout:            writer,
+				Stderr:            writer,
 				Tty:               true,
 				TerminalSizeQueue: sizeQueue,
 			})
@@ -109,9 +155,14 @@ func registerExecRoutes(r *gin.Engine, reg *cluster.Registry) {
 	})
 }
 
-type wsWriter struct{ conn *websocket.Conn }
+type wsWriter struct {
+	conn *websocket.Conn
+	mu   *sync.Mutex
+}
 
 func (w *wsWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	err = w.conn.WriteMessage(websocket.BinaryMessage, p)
 	if err != nil {
 		return 0, err

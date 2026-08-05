@@ -28,6 +28,7 @@ func NewRouter(reg *cluster.Registry, store *auth.Store) *gin.Engine {
 	r.Use(authRequired(store))
 	registerAuthProtectedRoutes(r, store)
 
+	registerAccessV2Routes(r, store)
 	// list clusters
 	r.GET("/api/clusters", func(c *gin.Context) {
 		items, err := filterClustersForUser(c, store, reg.List())
@@ -119,7 +120,7 @@ func NewRouter(reg *cluster.Registry, store *auth.Store) *gin.Engine {
 	registerLogRoutes(r, reg)
 
 	// pod exec (WebSocket)
-	registerExecRoutes(r, reg)
+	registerExecRoutes(r, reg, store)
 
 	// container files (exec based)
 	registerFileRoutes(r, reg)
