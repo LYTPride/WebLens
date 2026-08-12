@@ -234,6 +234,16 @@ button.wl-confirm-btn-danger:active:not(:disabled) {
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
+/* 权限盾牌菜单：用整行底色表达键盘焦点，避免浏览器默认轮廓在末项显示为粗黑底线。 */
+.wl-access-menu-item:focus {
+  outline: none;
+}
+
+.wl-access-menu-item:focus-visible {
+  background-color: var(--wl-menu-item-hover);
+}
+
+
 /* 当前展开子菜单的一级项（Shell/Logs）弱高亮 */
 .wl-menu-item.is-active {
   background-color: var(--wl-menu-item-active);

@@ -88,6 +88,37 @@ function formatTime(ms: number): string {
   return new Date(ms).toLocaleString("zh-CN", { hour12: false });
 }
 
+async function copyTextToClipboard(value: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // HTTP deployments and some browser policies reject Clipboard API access.
+    }
+  }
+
+  const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+    previousFocus?.focus();
+  }
+}
+
 const RoleSelect: React.FC<{
   value: GrantRole;
   disabled?: boolean;
@@ -164,11 +195,13 @@ export const AdminAccessModal: React.FC<{
   const [newUsername, setNewUsername] = useState("");
   const [defaultPassword, setDefaultPassword] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
-  const [userSearch, setUserSearch] = useState("");
+  const [userManagementSearch, setUserManagementSearch] = useState("");
+  const [grantUserSearch, setGrantUserSearch] = useState("");
 
   const [grants, setGrants] = useState<UserGrants>(emptyGrants);
   const [initialGrants, setInitialGrants] = useState<UserGrants>(emptyGrants);
-  const [grantSearch, setGrantSearch] = useState("");
+  const [groupGrantSearch, setGroupGrantSearch] = useState("");
+  const [directScopeSearch, setDirectScopeSearch] = useState("");
   const [grantsLoading, setGrantsLoading] = useState(false);
 
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
@@ -176,6 +209,8 @@ export const AdminAccessModal: React.FC<{
   const [groupDescription, setGroupDescription] = useState("");
   const [groupScopeIDs, setGroupScopeIDs] = useState<Set<string>>(() => new Set());
   const [groupScopeSearch, setGroupScopeSearch] = useState("");
+  const [groupListSearch, setGroupListSearch] = useState("");
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupDescription, setNewGroupDescription] = useState("");
 
@@ -220,6 +255,13 @@ export const AdminAccessModal: React.FC<{
     setMessageIsError(isError);
   }, []);
 
+  const switchTab = (nextTab: Tab) => {
+    if (nextTab === tab) return;
+    setTab(nextTab);
+    setMessage(null);
+    setDefaultPassword(null);
+  };
+
   const reloadUsers = useCallback(async () => {
     const items = await fetchAdminUsers();
     setUsers(items);
@@ -254,8 +296,12 @@ export const AdminAccessModal: React.FC<{
     if (!open) return;
     setTab(normalizeTab(initialTab));
     setDefaultPassword(null);
-    setUserSearch("");
-    setGrantSearch("");
+    setUserManagementSearch("");
+    setGrantUserSearch("");
+    setGroupGrantSearch("");
+    setDirectScopeSearch("");
+    setGroupListSearch("");
+    setCreatingGroup(false);
     setGroupScopeSearch("");
     void reloadBaseData();
   }, [initialTab, open, reloadBaseData]);
@@ -365,20 +411,42 @@ export const AdminAccessModal: React.FC<{
     return items;
   }, [clusterCombos, grants, groups, initialGrants]);
 
+  const filteredAllUsers = useMemo(() => {
+    const term = userManagementSearch.trim().toLowerCase();
+    if (!term) return users;
+    return users.filter((item) => item.username.toLowerCase().includes(term));
+  }, [userManagementSearch, users]);
+
   const filteredUsers = useMemo(() => {
-    const term = userSearch.trim().toLowerCase();
+    const term = grantUserSearch.trim().toLowerCase();
     if (!term) return normalUsers;
     return normalUsers.filter((item) => item.username.toLowerCase().includes(term));
-  }, [normalUsers, userSearch]);
+  }, [grantUserSearch, normalUsers]);
+
+  const filteredGroups = useMemo(() => {
+    const term = groupListSearch.trim().toLowerCase();
+    if (!term) return groups;
+    return groups.filter((group) =>
+      [group.name, group.description].some((text) => text.toLowerCase().includes(term)),
+    );
+  }, [groupListSearch, groups]);
+
+  const filteredGrantGroups = useMemo(() => {
+    const term = groupGrantSearch.trim().toLowerCase();
+    if (!term) return groups;
+    return groups.filter((group) =>
+      [group.name, group.description].some((text) => text.toLowerCase().includes(term)),
+    );
+  }, [groupGrantSearch, groups]);
 
   const filteredCombos = useMemo(() => {
-    const term = grantSearch.trim().toLowerCase();
+    const term = directScopeSearch.trim().toLowerCase();
     if (!term) return clusterCombos;
     return clusterCombos.filter((combo) =>
       [combo.alias ?? "", combo.clusterId, combo.namespace, comboLabel(combo)]
         .some((text) => text.toLowerCase().includes(term)),
     );
-  }, [clusterCombos, comboLabel, grantSearch]);
+  }, [clusterCombos, comboLabel, directScopeSearch]);
 
   const groupByScopeID = useMemo(() => {
     const map = new Map<string, ScopeGroup>();
@@ -474,6 +542,7 @@ export const AdminAccessModal: React.FC<{
       await reloadGroups();
       setSelectedGroupId(item.id);
       showMessage("作用域分组已创建");
+      setCreatingGroup(false);
     } catch (error: any) {
       showMessage(error?.response?.data?.error ?? error?.message ?? "创建分组失败", true);
     } finally {
@@ -544,7 +613,7 @@ export const AdminAccessModal: React.FC<{
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setTab(item.id)}
+                onClick={() => switchTab(item.id)}
                 style={{
                   ...buttonStyle,
                   background: tab === item.id ? "var(--wl-bg-control)" : "var(--wl-bg-elevated)",
@@ -577,10 +646,9 @@ export const AdminAccessModal: React.FC<{
               {defaultPassword && (
                 <button
                   type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(defaultPassword)
-                      .then(() => showMessage("默认密码已复制"))
-                      .catch(() => showMessage("复制默认密码失败", true));
+                  onClick={async () => {
+                    const copied = await copyTextToClipboard(defaultPassword);
+                    showMessage(copied ? "默认密码已复制" : "复制默认密码失败", !copied);
                   }}
                   style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", gap: 4 }}
                 >
@@ -596,7 +664,7 @@ export const AdminAccessModal: React.FC<{
               <div style={{ color: "var(--wl-text-muted)", fontSize: 13 }}>加载权限配置中…</div>
             ) : tab === "users" ? (
               <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
                   <input
                     value={newUsername}
                     onChange={(event) => setNewUsername(event.target.value)}
@@ -612,6 +680,13 @@ export const AdminAccessModal: React.FC<{
                   <span style={{ color: "var(--wl-text-muted)", fontSize: 12, alignSelf: "center" }}>
                     默认密码 WebLens@2026，首次登录强制修改
                   </span>
+                  <ClearableSearchInput
+                    value={userManagementSearch}
+                    onChange={setUserManagementSearch}
+                    placeholder="搜索用户名"
+                    style={{ width: 260, marginLeft: "auto" }}
+                    inputStyle={inputStyle}
+                  />
                 </div>
                 <div style={{ overflow: "auto", border: "1px solid var(--wl-border-sidebar)", borderRadius: 8 }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
@@ -625,7 +700,7 @@ export const AdminAccessModal: React.FC<{
                       </tr>
                     </thead>
                     <tbody className="wl-table-body">
-                      {users.map((user) => (
+                      {filteredAllUsers.map((user) => (
                         <tr key={user.id} className="wl-table-row">
                           <td style={tdStyle}>{user.username}</td>
                           <td style={tdStyle}>{user.role === "admin" ? "管理员" : "普通用户"}</td>
@@ -656,7 +731,7 @@ export const AdminAccessModal: React.FC<{
                                   style={buttonStyle}
                                   onClick={() => {
                                     setSelectedUserId(user.id);
-                                    setTab("grants");
+                                    switchTab("grants");
                                   }}
                                 >
                                   配置角色
@@ -706,6 +781,11 @@ export const AdminAccessModal: React.FC<{
                           </td>
                         </tr>
                       ))}
+                      {filteredAllUsers.length === 0 && (
+                        <tr>
+                          <td colSpan={5} style={{ ...tdStyle, padding: 14, color: "var(--wl-text-muted)" }}>没有匹配的用户</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -714,7 +794,11 @@ export const AdminAccessModal: React.FC<{
               <div style={{ display: "grid", gridTemplateColumns: "230px minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
                 <div style={{ border: "1px solid var(--wl-border-sidebar)", borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                   <div style={{ padding: 10, borderBottom: "1px solid var(--wl-border-table-row)" }}>
-                    <ClearableSearchInput value={userSearch} onChange={setUserSearch} placeholder="搜索用户" style={{ width: "100%" }} inputStyle={inputStyle} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      <strong style={{ color: "var(--wl-text-heading)", fontSize: 13 }}>授权用户</strong>
+                      <span style={{ marginLeft: "auto", color: "var(--wl-text-muted)", fontSize: 11 }}>{filteredUsers.length} / {normalUsers.length}</span>
+                    </div>
+                    <ClearableSearchInput value={grantUserSearch} onChange={setGrantUserSearch} placeholder="按用户名搜索" style={{ width: "100%" }} inputStyle={inputStyle} />
                   </div>
                   <div style={{ overflow: "auto" }}>
                     {filteredUsers.map((user) => (
@@ -739,6 +823,9 @@ export const AdminAccessModal: React.FC<{
                         </div>
                       </button>
                     ))}
+                    {filteredUsers.length === 0 && (
+                      <div style={{ padding: 12, color: "var(--wl-text-muted)", fontSize: 12 }}>没有匹配的用户</div>
+                    )}
                   </div>
                 </div>
 
@@ -773,46 +860,61 @@ export const AdminAccessModal: React.FC<{
                           </span>
                         </div>
                       </div>
-                      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
+                      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: 12, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
                         {grantsLoading ? (
-                          <div style={{ color: "var(--wl-text-muted)", fontSize: 13 }}>加载授权中…</div>
+                          <div style={{ gridColumn: "1 / -1", color: "var(--wl-text-muted)", fontSize: 13 }}>加载授权中…</div>
                         ) : (
                           <>
-                            <div style={{ color: "var(--wl-text-label)", fontSize: 12, fontWeight: 700, marginBottom: 7 }}>作用域组授权</div>
-                            <div style={{ display: "grid", gap: 6 }}>
-                              {groups.length === 0 ? (
-                                <div style={{ color: "var(--wl-text-muted)", fontSize: 12 }}>暂无作用域分组</div>
-                              ) : groups.map((group) => (
-                                <div key={group.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 10px", border: "1px solid var(--wl-border-subtle)", borderRadius: 6, background: "var(--wl-bg-table)" }}>
-                                  <div style={{ minWidth: 0, flex: 1 }}>
-                                    <div style={{ color: "var(--wl-text-primary)", fontSize: 13, fontWeight: 700 }}>{group.name}</div>
-                                    <div style={{ color: "var(--wl-text-muted)", fontSize: 11 }}>{group.scopeCount} 个作用域 · {group.description || "无说明"}</div>
-                                  </div>
-                                  <RoleSelect value={groupRole(group.id)} disabled={busy} onChange={(role) => setGroupRole(group.id, role)} />
+                            <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid var(--wl-border-sidebar)", borderRadius: 8, background: "var(--wl-bg-table)" }}>
+                              <div style={{ padding: 10, borderBottom: "1px solid var(--wl-border-table-row)", background: "var(--wl-bg-elevated)" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <strong style={{ color: "var(--wl-text-heading)", fontSize: 13 }}>作用域组授权</strong>
+                                  <span style={{ marginLeft: "auto", color: "var(--wl-text-muted)", fontSize: 11 }}>{filteredGrantGroups.length} / {groups.length}</span>
                                 </div>
-                              ))}
-                            </div>
-
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16, marginBottom: 7 }}>
-                              <div style={{ color: "var(--wl-text-label)", fontSize: 12, fontWeight: 700 }}>单独作用域授权</div>
-                              <ClearableSearchInput value={grantSearch} onChange={setGrantSearch} placeholder="搜索作用域" style={{ width: 300, marginLeft: "auto" }} inputStyle={inputStyle} />
-                            </div>
-                            <div style={{ display: "grid", gap: 6 }}>
-                              {filteredCombos.map((combo) => {
-                                const owner = groupByScopeID.get(combo.id);
-                                return (
-                                  <div key={combo.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 10px", border: "1px solid var(--wl-border-subtle)", borderRadius: 6, background: "var(--wl-bg-table)" }}>
+                                <div style={{ marginTop: 3, color: "var(--wl-text-muted)", fontSize: 11 }}>按分组批量授予，适合团队或环境的常规权限。</div>
+                                <ClearableSearchInput value={groupGrantSearch} onChange={setGroupGrantSearch} placeholder="搜索作用域组" style={{ width: "100%", marginTop: 8 }} inputStyle={inputStyle} />
+                              </div>
+                              <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 8, display: "grid", alignContent: "start", gap: 6 }}>
+                                {filteredGrantGroups.length === 0 ? (
+                                  <div style={{ padding: 6, color: "var(--wl-text-muted)", fontSize: 12 }}>暂无匹配的作用域分组</div>
+                                ) : filteredGrantGroups.map((group) => (
+                                  <div key={group.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 9px", border: "1px solid var(--wl-border-subtle)", borderRadius: 6, background: "var(--wl-bg-elevated)" }}>
                                     <div style={{ minWidth: 0, flex: 1 }}>
-                                      <div style={{ color: "var(--wl-text-primary)", fontSize: 13 }}>{comboLabel(combo)}</div>
-                                      <div style={{ color: "var(--wl-text-muted)", fontSize: 11 }}>
-                                        {owner ? `所属分组：${owner.name}；这里可配置更高的例外权限` : "未分组作用域"}
-                                      </div>
+                                      <div style={{ color: "var(--wl-text-primary)", fontSize: 13, fontWeight: 700 }}>{group.name}</div>
+                                      <div style={{ color: "var(--wl-text-muted)", fontSize: 11 }}>{group.scopeCount} 个作用域 · {group.description || "无说明"}</div>
                                     </div>
-                                    <RoleSelect value={scopeRole(combo.id)} disabled={busy} onChange={(role) => setScopeRole(combo.id, role)} />
+                                    <RoleSelect value={groupRole(group.id)} disabled={busy} onChange={(role) => setGroupRole(group.id, role)} />
                                   </div>
-                                );
-                              })}
-                            </div>
+                                ))}
+                              </div>
+                            </section>
+
+                            <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid var(--wl-border-sidebar)", borderRadius: 8, background: "var(--wl-bg-table)" }}>
+                              <div style={{ padding: 10, borderBottom: "1px solid var(--wl-border-table-row)", background: "var(--wl-bg-elevated)" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <strong style={{ color: "var(--wl-text-heading)", fontSize: 13 }}>单独作用域授权</strong>
+                                  <span style={{ marginLeft: "auto", color: "var(--wl-text-muted)", fontSize: 11 }}>{filteredCombos.length} / {clusterCombos.length}</span>
+                                </div>
+                                <div style={{ marginTop: 3, color: "var(--wl-text-muted)", fontSize: 11 }}>只用于个别例外；与组授权同时存在时取较高角色。</div>
+                                <ClearableSearchInput value={directScopeSearch} onChange={setDirectScopeSearch} placeholder="搜索集群、命名空间或别名" style={{ width: "100%", marginTop: 8 }} inputStyle={inputStyle} />
+                              </div>
+                              <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 8, display: "grid", alignContent: "start", gap: 6 }}>
+                                {filteredCombos.length === 0 ? (
+                                  <div style={{ padding: 6, color: "var(--wl-text-muted)", fontSize: 12 }}>暂无匹配的作用域</div>
+                                ) : filteredCombos.map((combo) => {
+                                  const owner = groupByScopeID.get(combo.id);
+                                  return (
+                                    <div key={combo.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 9px", border: "1px solid var(--wl-border-subtle)", borderRadius: 6, background: "var(--wl-bg-elevated)" }}>
+                                      <div style={{ minWidth: 0, flex: 1 }}>
+                                        <div style={{ color: "var(--wl-text-primary)", fontSize: 13 }}>{comboLabel(combo)}</div>
+                                        <div style={{ color: "var(--wl-text-muted)", fontSize: 11 }}>{owner ? `所属分组：${owner.name}` : "未分组作用域"}</div>
+                                      </div>
+                                      <RoleSelect value={scopeRole(combo.id)} disabled={busy} onChange={(role) => setScopeRole(combo.id, role)} />
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </section>
                           </>
                         )}
                       </div>
@@ -821,100 +923,157 @@ export const AdminAccessModal: React.FC<{
                 </div>
               </div>
             ) : tab === "groups" ? (
-              <div style={{ display: "grid", gridTemplateColumns: "260px minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "250px minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
                 <div style={{ border: "1px solid var(--wl-border-sidebar)", borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                  <div style={{ padding: 10, borderBottom: "1px solid var(--wl-border-table-row)" }}>
-                    <input value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="新分组名称" style={inputStyle} />
-                    <input value={newGroupDescription} onChange={(event) => setNewGroupDescription(event.target.value)} placeholder="说明（可选）" style={{ ...inputStyle, marginTop: 6 }} />
-                    <button type="button" disabled={busy || !newGroupName.trim()} onClick={() => void createGroup()} style={{ ...buttonStyle, width: "100%", marginTop: 6 }}>
-                      新建分组
-                    </button>
+                  <div style={{ padding: 10, borderBottom: "1px solid var(--wl-border-table-row)", background: "var(--wl-bg-table)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <strong style={{ color: "var(--wl-text-heading)", fontSize: 13 }}>作用域分组</strong>
+                      <span style={{ color: "var(--wl-text-muted)", fontSize: 11 }}>{filteredGroups.length} / {groups.length}</span>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setCreatingGroup(true);
+                          setNewGroupName("");
+                          setNewGroupDescription("");
+                          setGroupScopeSearch("");
+                        }}
+                        style={{ ...buttonStyle, marginLeft: "auto" }}
+                      >
+                        新建
+                      </button>
+                    </div>
+                    <ClearableSearchInput value={groupListSearch} onChange={setGroupListSearch} placeholder="搜索分组名称或说明" style={{ width: "100%", marginTop: 8 }} inputStyle={inputStyle} />
                   </div>
-                  <div style={{ overflow: "auto" }}>
-                    {groups.map((group) => (
+                  <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+                    {filteredGroups.map((group) => (
                       <button
                         key={group.id}
                         type="button"
-                        onClick={() => setSelectedGroupId(group.id)}
+                        onClick={() => {
+                          setCreatingGroup(false);
+                          setSelectedGroupId(group.id);
+                          setGroupScopeSearch("");
+                        }}
                         style={{
                           width: "100%",
-                          padding: "9px 10px",
+                          padding: "10px",
                           border: "none",
                           borderBottom: "1px solid var(--wl-border-table-row)",
-                          background: selectedGroupId === group.id ? "var(--wl-bg-control)" : "transparent",
+                          background: !creatingGroup && selectedGroupId === group.id ? "var(--wl-bg-control)" : "transparent",
                           color: "var(--wl-text-primary)",
                           textAlign: "left",
                           cursor: "pointer",
                         }}
                       >
                         <div style={{ fontSize: 13, fontWeight: 700 }}>{group.name}</div>
-                        <div style={{ marginTop: 2, fontSize: 11, color: "var(--wl-text-muted)" }}>
+                        <div style={{ marginTop: 3, fontSize: 11, color: "var(--wl-text-muted)" }}>
                           {group.scopeCount} 个作用域 · {group.grantCount} 名授权用户
                         </div>
+                        {group.description && <div style={{ marginTop: 3, fontSize: 11, color: "var(--wl-text-secondary)" }}>{group.description}</div>}
                       </button>
                     ))}
+                    {filteredGroups.length === 0 && (
+                      <div style={{ padding: 12, color: "var(--wl-text-muted)", fontSize: 12 }}>没有匹配的作用域分组</div>
+                    )}
                   </div>
                 </div>
 
                 <div style={{ border: "1px solid var(--wl-border-sidebar)", borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column", minWidth: 0 }}>
-                  {!selectedGroup ? (
-                    <div style={{ padding: 14, color: "var(--wl-text-muted)", fontSize: 13 }}>请选择或新建作用域分组</div>
+                  {creatingGroup ? (
+                    <div style={{ padding: 18, maxWidth: 620 }}>
+                      <div style={{ color: "var(--wl-text-heading)", fontSize: 15, fontWeight: 700 }}>新建作用域分组</div>
+                      <div style={{ marginTop: 4, color: "var(--wl-text-muted)", fontSize: 12 }}>先创建分组，再从详情页加入集群作用域并配置用户角色。</div>
+                      <label style={{ display: "block", marginTop: 18, color: "var(--wl-text-label)", fontSize: 12, fontWeight: 700 }}>
+                        分组名称
+                        <input value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="例如：生产环境" style={{ ...inputStyle, marginTop: 6 }} autoFocus />
+                      </label>
+                      <label style={{ display: "block", marginTop: 12, color: "var(--wl-text-label)", fontSize: 12, fontWeight: 700 }}>
+                        分组说明
+                        <input value={newGroupDescription} onChange={(event) => setNewGroupDescription(event.target.value)} placeholder="描述团队、项目或环境（可选）" style={{ ...inputStyle, marginTop: 6 }} />
+                      </label>
+                      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                        <button type="button" disabled={busy || !newGroupName.trim()} onClick={() => void createGroup()} style={buttonStyle}>创建分组</button>
+                        <button type="button" disabled={busy} onClick={() => setCreatingGroup(false)} style={buttonStyle}>取消</button>
+                      </div>
+                    </div>
+                  ) : !selectedGroup ? (
+                    <div style={{ padding: 18, color: "var(--wl-text-muted)", fontSize: 13 }}>请选择一个作用域分组，或新建分组。</div>
                   ) : (
                     <>
-                      <div style={{ padding: 12, borderBottom: "1px solid var(--wl-border-table-row)" }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(240px, 2fr) auto auto", gap: 8, alignItems: "center" }}>
-                          <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="分组名称" style={inputStyle} />
-                          <input value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="分组说明" style={inputStyle} />
-                          <button type="button" disabled={busy || !groupName.trim()} onClick={() => void saveGroup()} style={buttonStyle}>保存分组</button>
-                          <button
-                            type="button"
-                            disabled={busy || selectedGroup.scopeCount > 0}
-                            title={selectedGroup.scopeCount > 0 ? "请先移出分组中的全部作用域" : "删除分组"}
-                            style={{ ...buttonStyle, color: "var(--wl-pill-danger-text)" }}
-                            onClick={() =>
-                              setConfirm({
-                                title: `删除分组 ${selectedGroup.name}？`,
-                                description: "该分组的用户组授权会一并删除。",
-                                items: [selectedGroup.name],
-                                variant: "danger",
-                                onConfirm: async () => {
-                                  await deleteAdminScopeGroup(selectedGroup.id);
-                                  await reloadGroups();
-                                  showMessage("作用域分组已删除");
-                                },
-                              })
-                            }
-                          >
-                            删除
-                          </button>
+                      <div style={{ padding: 12, borderBottom: "1px solid var(--wl-border-table-row)", background: "var(--wl-bg-table)" }}>
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                          <div>
+                            <div style={{ color: "var(--wl-text-heading)", fontSize: 14, fontWeight: 700 }}>分组详情</div>
+                            <div style={{ marginTop: 3, color: "var(--wl-text-muted)", fontSize: 11 }}>管理分组信息和所包含的集群作用域。</div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+                            <button type="button" disabled={busy || !groupName.trim()} onClick={() => void saveGroup()} style={buttonStyle}>保存变更</button>
+                            <button
+                              type="button"
+                              disabled={busy || selectedGroup.scopeCount > 0}
+                              title={selectedGroup.scopeCount > 0 ? "请先移出分组中的全部作用域" : "删除分组"}
+                              style={{ ...buttonStyle, color: "var(--wl-pill-danger-text)" }}
+                              onClick={() =>
+                                setConfirm({
+                                  title: `删除分组 ${selectedGroup.name}？`,
+                                  description: "该分组的用户组授权会一并删除。",
+                                  items: [selectedGroup.name],
+                                  variant: "danger",
+                                  onConfirm: async () => {
+                                    await deleteAdminScopeGroup(selectedGroup.id);
+                                    await reloadGroups();
+                                    showMessage("作用域分组已删除");
+                                  },
+                                })
+                              }
+                            >
+                              删除
+                            </button>
+                          </div>
                         </div>
-                        <div style={{ marginTop: 8, color: "var(--wl-text-muted)", fontSize: 12 }}>
-                          将作用域加入此分组后，已有的 {selectedGroup.grantCount} 名组授权用户会立即获得对应权限。
+                        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(240px, 2fr)", gap: 10, marginTop: 12 }}>
+                          <label style={{ color: "var(--wl-text-label)", fontSize: 11, fontWeight: 700 }}>
+                            分组名称
+                            <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="分组名称" style={{ ...inputStyle, marginTop: 5 }} />
+                          </label>
+                          <label style={{ color: "var(--wl-text-label)", fontSize: 11, fontWeight: 700 }}>
+                            分组说明
+                            <input value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="分组说明（可选）" style={{ ...inputStyle, marginTop: 5 }} />
+                          </label>
                         </div>
-                        <ClearableSearchInput value={groupScopeSearch} onChange={setGroupScopeSearch} placeholder="搜索未分组或当前分组作用域" style={{ width: "100%", marginTop: 9 }} inputStyle={inputStyle} />
                       </div>
-                      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
-                        <div style={{ display: "grid", gap: 6 }}>
-                          {groupScopeCandidates.length === 0 ? (
-                            <div style={{ color: "var(--wl-text-muted)", fontSize: 13 }}>没有可加入的作用域</div>
-                          ) : groupScopeCandidates.map((combo) => (
-                            <label key={combo.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 10px", borderRadius: 6, border: "1px solid var(--wl-border-subtle)", background: groupScopeIDs.has(combo.id) ? "var(--wl-bg-control)" : "var(--wl-bg-table)", color: "var(--wl-text-primary)", fontSize: 13 }}>
-                              <input
-                                type="checkbox"
-                                checked={groupScopeIDs.has(combo.id)}
-                                onChange={(event) => {
-                                  setGroupScopeIDs((current) => {
-                                    const next = new Set(current);
-                                    if (event.target.checked) next.add(combo.id);
-                                    else next.delete(combo.id);
-                                    return next;
-                                  });
-                                }}
-                              />
-                              <span>{comboLabel(combo)}</span>
-                            </label>
-                          ))}
+                      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--wl-border-table-row)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <strong style={{ color: "var(--wl-text-heading)", fontSize: 13 }}>分组内作用域</strong>
+                          <span style={{ color: "var(--wl-text-muted)", fontSize: 11 }}>{groupScopeIDs.size} 个已选</span>
+                          <span style={{ marginLeft: "auto", color: "var(--wl-text-muted)", fontSize: 11 }}>{selectedGroup.grantCount} 名用户通过该组获得授权</span>
                         </div>
+                        <ClearableSearchInput value={groupScopeSearch} onChange={setGroupScopeSearch} placeholder="搜索未分组或当前分组作用域" style={{ width: "100%", marginTop: 8 }} inputStyle={inputStyle} />
+                      </div>
+                      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 10, display: "grid", alignContent: "start", gap: 6 }}>
+                        {groupScopeCandidates.length === 0 ? (
+                          <div style={{ padding: 4, color: "var(--wl-text-muted)", fontSize: 12 }}>没有匹配的可用作用域</div>
+                        ) : groupScopeCandidates.map((combo) => (
+                          <label key={combo.id} style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "9px 10px", borderRadius: 6, border: "1px solid var(--wl-border-subtle)", background: groupScopeIDs.has(combo.id) ? "var(--wl-bg-control)" : "var(--wl-bg-table)", color: "var(--wl-text-primary)", fontSize: 13 }}>
+                            <input
+                              type="checkbox"
+                              checked={groupScopeIDs.has(combo.id)}
+                              onChange={(event) => {
+                                setGroupScopeIDs((current) => {
+                                  const next = new Set(current);
+                                  if (event.target.checked) next.add(combo.id);
+                                  else next.delete(combo.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span style={{ minWidth: 0 }}>
+                              <span style={{ display: "block" }}>{comboLabel(combo)}</span>
+                              <span style={{ display: "block", marginTop: 2, color: "var(--wl-text-muted)", fontSize: 11 }}>{groupScopeIDs.has(combo.id) ? "当前分组" : "未分组"}</span>
+                            </span>
+                          </label>
+                        ))}
                       </div>
                     </>
                   )}
@@ -958,7 +1117,7 @@ export const AdminAccessModal: React.FC<{
                         <th style={thStyle}>用户</th>
                         <th style={thStyle}>操作</th>
                         <th style={thStyle}>作用域 / 资源</th>
-                        <th style={thStyle}>结果</th>
+                        <th style={{ ...thStyle, width: 92 }}>结果</th>
                         <th style={thStyle}>来源 IP</th>
                       </tr>
                     </thead>
@@ -975,9 +1134,12 @@ export const AdminAccessModal: React.FC<{
                             {[item.clusterId, item.namespace].filter(Boolean).join(" / ") || "平台"}
                             {item.resourceName ? <div style={{ color: "var(--wl-text-muted)", fontSize: 11 }}>{item.resourceKind}/{item.resourceName}</div> : null}
                           </td>
-                          <td style={tdStyle}>
+                          <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
                             <span
                               style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                whiteSpace: "nowrap",
                                 padding: "2px 6px",
                                 borderRadius: 999,
                                 background: item.result === "success" ? "var(--wl-pill-success-bg)" : "var(--wl-event-warning-bg)",

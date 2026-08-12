@@ -839,7 +839,7 @@ export const App: React.FC = () => {
   const [accessMenuOpen, setAccessMenuOpen] = useState(false);
   const [accessGearSpinning, setAccessGearSpinning] = useState(false);
   const [accessModalOpen, setAccessModalOpen] = useState(false);
-  const [accessModalTab, setAccessModalTab] = useState<"users" | "scopes">("users");
+  const [accessModalTab, setAccessModalTab] = useState<"users" | "grants" | "groups" | "audit">("users");
   /** 集群作用域预设（cluster + namespace） */
   const [clusterCombos, setClusterCombos] = useState<ClusterCombo[]>([]);
   const [clusterCombosLoading, setClusterCombosLoading] = useState(false);
@@ -4796,7 +4796,7 @@ export const App: React.FC = () => {
                 >
                   <button
                     type="button"
-                    className="wl-menu-item"
+                    className="wl-menu-item wl-access-menu-item"
                     onClick={() => {
                       setAccessMenuOpen(false);
                       setAccessModalTab("users");
@@ -4809,18 +4809,28 @@ export const App: React.FC = () => {
                   >
                     用户管理
                   </button>
-                  <button
-                    type="button"
-                    className="wl-menu-item"
-                    onClick={() => {
-                      setAccessMenuOpen(false);
-                      setAccessModalTab("scopes");
-                      setAccessModalOpen(true);
-                    }}
-                    style={menuItemStyleForDropdown}
-                  >
-                    作用域授权
-                  </button>
+                  {([
+                    ["grants", "角色授权"],
+                    ["groups", "作用域分组"],
+                    ["audit", "审计记录"],
+                  ] as const).map(([tab, label]) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      className="wl-menu-item wl-access-menu-item"
+                      onClick={() => {
+                        setAccessMenuOpen(false);
+                        setAccessModalTab(tab);
+                        setAccessModalOpen(true);
+                      }}
+                      style={{
+                        ...menuItemStyleForDropdown,
+                        borderBottom: tab === "audit" ? "none" : "1px solid var(--wl-border-subtle)",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </DropdownMenuPortal>
               )}
               <button
