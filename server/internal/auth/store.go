@@ -205,7 +205,7 @@ func (s *Store) migrate() error {
 			resource_name TEXT NOT NULL DEFAULT '',
 			result TEXT NOT NULL CHECK (result IN ('success', 'failure', 'denied')),
 			status_code INTEGER NOT NULL DEFAULT 0,
-			source_ip TEXT NOT NULL DEFAULT '',
+			operation_log TEXT NOT NULL DEFAULT '',
 			detail TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL
 		)`,
@@ -231,6 +231,11 @@ func (s *Store) migrate() error {
 		return err
 	}
 	if _, err := s.db.Exec(`UPDATE user_scope_grants SET updated_at = created_at WHERE updated_at = 0`); err != nil {
+		return err
+	}
+	// Older databases predate mandatory resource-operation logs. Keep the
+	// migration additive so existing audit records remain available.
+	if err := s.ensureColumn("audit_logs", "operation_log", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
 	return nil

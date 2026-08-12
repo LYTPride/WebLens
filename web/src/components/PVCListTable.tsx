@@ -1,4 +1,5 @@
 import React, { useRef } from "react";
+import type { AuditedActionConfirmRequest } from "./AuditReasonDialog";
 import { ResizableTh } from "./ResizableTh";
 import { ResourceSortArrows } from "./ResourceSortArrows";
 import {
@@ -149,19 +150,11 @@ export type PVCListTableProps = {
   openDescribe: (row: PvcListRow) => void;
   openEditTab: (row: PvcListRow) => void;
   copyName: (name: string) => void;
-  setActionConfirm: React.Dispatch<
-    React.SetStateAction<{
-      title: string;
-      description?: string;
-      items: string[];
-      variant: "danger" | "primary";
-      onConfirm: () => Promise<void>;
-    } | null>
-  >;
+  setActionConfirm: (request: AuditedActionConfirmRequest) => void;
   onDeletedOne: (ns: string, name: string) => void;
   setToastMessage: (m: string | null) => void;
   setError: (e: string | null) => void;
-  deletePvcApi: (clusterId: string, ns: string, name: string) => Promise<void>;
+  deletePvcApi: (clusterId: string, ns: string, name: string, auditReason: string) => Promise<void>;
 };
 
 export function PVCListTable({
@@ -393,10 +386,10 @@ export function PVCListTable({
                           description: "删除后不可恢复。",
                           items: [`${ns}/${pname}`],
                           variant: "danger",
-                          onConfirm: async () => {
+                          onConfirm: async (auditReason) => {
                             setRowBusyKey(menuKey);
                             try {
-                              await deletePvcApi(effectiveClusterId, ns, pname);
+                              await deletePvcApi(effectiveClusterId, ns, pname, auditReason);
                               onDeletedOne(ns, pname);
                               setToastMessage("已删除 PVC");
                               setError(null);

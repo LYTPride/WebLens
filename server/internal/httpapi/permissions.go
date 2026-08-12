@@ -2,13 +2,26 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"weblens/server/internal/auth"
 
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	auditReasonHeader       = "X-WebLens-Audit-Reason"
+	maxAuditOperationLogLen = 500
+)
+
+var (
+	errAuditReasonRequired = errors.New("本次资源操作的原因是强制必填项")
+	errAuditReasonTooLong  = errors.New("资源操作原因不能超过 500 个字符")
+	errAuditReasonInvalid  = errors.New("资源操作原因格式不合法")
 )
 
 func requiredCapabilityForRequest(c *gin.Context) auth.Capability {
@@ -77,6 +90,33 @@ func auditActionForRequest(c *gin.Context) string {
 	}
 }
 
+func auditActionRequiresOperationLog(action string) bool {
+	switch action {
+	case "resource.write", "resource.delete", "resource.restart", "resource.scale":
+		return true
+	default:
+		return false
+	}
+}
+
+func auditOperationLogForRequest(c *gin.Context, action string) (string, error) {
+	if !auditActionRequiresOperationLog(action) {
+		return "", nil
+	}
+	decoded, err := url.QueryUnescape(c.GetHeader(auditReasonHeader))
+	if err != nil {
+		return "", errAuditReasonInvalid
+	}
+	log := strings.TrimSpace(decoded)
+	if log == "" {
+		return "", errAuditReasonRequired
+	}
+	if len([]rune(log)) > maxAuditOperationLogLen {
+		return "", errAuditReasonTooLong
+	}
+	return log, nil
+}
+
 func recordDeniedRequestAudit(store *auth.Store, c *gin.Context, user auth.User, capability auth.Capability, detail string) {
 	action := auditActionForRequest(c)
 	if action == "" {
@@ -122,8 +162,12 @@ func recordRequestAuditWithResult(
 		ResourceName: resourceName,
 		Result:       result,
 		StatusCode:   status,
-		SourceIP:     c.ClientIP(),
 		Detail:       detail,
+	}
+	if result != "denied" && auditActionRequiresOperationLog(action) {
+		if log, err := auditOperationLogForRequest(c, action); err == nil {
+			record.OperationLog = log
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

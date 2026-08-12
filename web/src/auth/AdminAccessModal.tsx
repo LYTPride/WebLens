@@ -21,6 +21,7 @@ import {
   type ScopeGroup,
   type UserGrants,
 } from "../api";
+import { AuditLogDialog } from "../components/AuditLogDialog";
 import { ClearableSearchInput } from "../components/ClearableSearchInput";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyIcon } from "../components/icons/CopyIcon";
@@ -215,6 +216,7 @@ export const AdminAccessModal: React.FC<{
   const [newGroupDescription, setNewGroupDescription] = useState("");
 
   const [auditItems, setAuditItems] = useState<AuditEntry[]>([]);
+  const [selectedAuditLog, setSelectedAuditLog] = useState<string | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditUserId, setAuditUserId] = useState<number | "">("");
   const [auditAction, setAuditAction] = useState("");
@@ -295,6 +297,7 @@ export const AdminAccessModal: React.FC<{
   useEffect(() => {
     if (!open) return;
     setTab(normalizeTab(initialTab));
+    setSelectedAuditLog(null);
     setDefaultPassword(null);
     setUserManagementSearch("");
     setGrantUserSearch("");
@@ -1118,7 +1121,7 @@ export const AdminAccessModal: React.FC<{
                         <th style={thStyle}>操作</th>
                         <th style={thStyle}>作用域 / 资源</th>
                         <th style={{ ...thStyle, width: 92 }}>结果</th>
-                        <th style={thStyle}>来源 IP</th>
+                        <th style={{ ...thStyle, width: 72 }}>日志</th>
                       </tr>
                     </thead>
                     <tbody className="wl-table-body">
@@ -1149,7 +1152,17 @@ export const AdminAccessModal: React.FC<{
                               {item.result === "success" ? "成功" : item.result === "denied" ? "拒绝" : "失败"} · {item.statusCode}
                             </span>
                           </td>
-                          <td style={tdStyle}>{item.sourceIp || "—"}</td>
+                          <td style={tdStyle}>
+                            {item.operationLog ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedAuditLog(item.operationLog ?? null)}
+                                style={{ ...buttonStyle, color: "var(--wl-pill-info-text)" }}
+                              >
+                                查看
+                              </button>
+                            ) : "—"}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1176,6 +1189,11 @@ export const AdminAccessModal: React.FC<{
           await confirm.onConfirm();
           setConfirm(null);
         }}
+      />
+      <AuditLogDialog
+        open={selectedAuditLog !== null}
+        content={selectedAuditLog ?? ""}
+        onClose={() => setSelectedAuditLog(null)}
       />
     </>
   );

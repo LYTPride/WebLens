@@ -183,7 +183,7 @@ func TestAuditLogFilters(t *testing.T) {
 	store := newTestStore(t)
 	userID := int64(7)
 	for _, record := range []AuditRecord{
-		{UserID: &userID, Username: "dev01", Action: "resource.write", Result: "success", StatusCode: 200},
+		{UserID: &userID, Username: "dev01", Action: "resource.write", Result: "success", StatusCode: 200, OperationLog: "发布新配置"},
 		{UserID: &userID, Username: "dev01", Action: "pod.exec", Result: "denied", StatusCode: 403},
 	} {
 		if err := store.RecordAudit(ctx, record); err != nil {
@@ -196,5 +196,12 @@ func TestAuditLogFilters(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].StatusCode != 403 || items[0].Username != "dev01" {
 		t.Fatalf("filtered audit items = %#v", items)
+	}
+	writeItems, err := store.ListAuditLogs(ctx, AuditFilter{Action: "resource.write", Result: "success", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListAuditLogs resource.write: %v", err)
+	}
+	if len(writeItems) != 1 || writeItems[0].OperationLog != "发布新配置" {
+		t.Fatalf("operation log items = %#v", writeItems)
 	}
 }

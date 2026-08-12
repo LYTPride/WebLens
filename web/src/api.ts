@@ -1,4 +1,5 @@
 import axios from "axios";
+import { auditReasonHeaders } from "./constants/audit";
 
 export interface ClusterSummary {
   id: string;
@@ -514,7 +515,7 @@ export interface AuditEntry {
   resourceName?: string;
   result: "success" | "failure" | "denied";
   statusCode: number;
-  sourceIp?: string;
+  operationLog?: string;
   detail?: string;
   createdAt: number;
 }
@@ -1243,18 +1244,20 @@ export async function applyPodYaml(
   namespace: string,
   pod: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<void> {
   await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
 }
 
 /** 删除 Pod */
-export async function deletePod(clusterId: string, namespace: string, pod: string): Promise<void> {
+export async function deletePod(clusterId: string, namespace: string, pod: string, auditReason: string): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1277,11 +1280,12 @@ export async function applyDeploymentYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
@@ -1291,10 +1295,12 @@ export async function scaleDeployment(
   namespace: string,
   name: string,
   replicas: number,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.patch(
     `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
     { replicas },
+    { headers: auditReasonHeaders(auditReason) },
   );
   return res.data;
 }
@@ -1303,9 +1309,12 @@ export async function restartDeployment(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.post(
     `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+    undefined,
+    { headers: auditReasonHeaders(auditReason) },
   );
   return res.data;
 }
@@ -1314,9 +1323,11 @@ export async function deleteDeployment(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1348,11 +1359,12 @@ export async function applyStatefulSetYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
@@ -1362,10 +1374,12 @@ export async function scaleStatefulSet(
   namespace: string,
   name: string,
   replicas: number,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.patch(
     `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
     { replicas },
+    { headers: auditReasonHeaders(auditReason) },
   );
   return res.data;
 }
@@ -1374,9 +1388,12 @@ export async function restartStatefulSet(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.post(
     `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+    undefined,
+    { headers: auditReasonHeaders(auditReason) },
   );
   return res.data;
 }
@@ -1385,9 +1402,11 @@ export async function deleteStatefulSet(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1419,11 +1438,12 @@ export async function applyIngressYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
@@ -1432,9 +1452,11 @@ export async function deleteIngress(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1466,11 +1488,12 @@ export async function applyServiceYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
@@ -1479,9 +1502,11 @@ export async function deleteService(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1509,18 +1534,20 @@ export async function applyPvcYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/persistentvolumeclaims/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
 
-export async function deletePvc(clusterId: string, namespace: string, name: string): Promise<void> {
+export async function deletePvc(clusterId: string, namespace: string, name: string, auditReason: string): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/persistentvolumeclaims/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1548,25 +1575,31 @@ export async function applyConfigMapYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<ConfigMap> {
   const res = await api.put<ConfigMap>(
     `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
 
-export async function deleteConfigMap(clusterId: string, namespace: string, name: string): Promise<void> {
+export async function deleteConfigMap(clusterId: string, namespace: string, name: string, auditReason: string): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
 export type ConfigMapBatchItem = { namespace: string; name: string };
 
-export async function batchDeleteConfigMaps(clusterId: string, items: ConfigMapBatchItem[]): Promise<void> {
-  await api.post(`/api/clusters/${encodeURIComponent(clusterId)}/configmaps/batch-delete`, { items });
+export async function batchDeleteConfigMaps(clusterId: string, items: ConfigMapBatchItem[], auditReason: string): Promise<void> {
+  await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/batch-delete`,
+    { items },
+    { headers: auditReasonHeaders(auditReason) },
+  );
 }
 
 export async function exportConfigMapsYaml(clusterId: string, items: ConfigMapBatchItem[]): Promise<string> {
@@ -1593,11 +1626,11 @@ export async function fetchNodeYaml(clusterId: string, name: string): Promise<st
   return res.data;
 }
 
-export async function applyNodeYaml(clusterId: string, name: string, yamlBody: string): Promise<unknown> {
+export async function applyNodeYaml(clusterId: string, name: string, yamlBody: string, auditReason: string): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/nodes/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }

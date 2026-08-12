@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"weblens/server/internal/auth"
@@ -62,6 +64,35 @@ func TestAuditActionClassifiesSensitiveOperations(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("%s %s action = %q, want %q", tt.method, tt.path, got, tt.want)
 		}
+	}
+}
+
+func TestAuditOperationLogRequiredForResourceWrites(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := permissionTestContext(http.MethodDelete, "/api/clusters/c1/pods/default/p1")
+	if _, err := auditOperationLogForRequest(c, auditActionForRequest(c)); !errors.Is(err, errAuditReasonRequired) {
+		t.Fatalf("missing operation log error = %v, want %v", err, errAuditReasonRequired)
+	}
+
+	c.Request.Header.Set(auditReasonHeader, "%E4%BF%AE%E5%A4%8D%E7%BA%BF%E4%B8%8A%E5%BC%82%E5%B8%B8")
+	got, err := auditOperationLogForRequest(c, auditActionForRequest(c))
+	if err != nil || got != "修复线上异常" {
+		t.Fatalf("operation log = %q, err = %v", got, err)
+	}
+
+	c.Request.Header.Set(auditReasonHeader, strings.Repeat("a", maxAuditOperationLogLen+1))
+	if _, err := auditOperationLogForRequest(c, auditActionForRequest(c)); !errors.Is(err, errAuditReasonTooLong) {
+		t.Fatalf("long operation log error = %v, want %v", err, errAuditReasonTooLong)
+	}
+
+	c.Request.Header.Set(auditReasonHeader, "%ZZ")
+	if _, err := auditOperationLogForRequest(c, auditActionForRequest(c)); !errors.Is(err, errAuditReasonInvalid) {
+		t.Fatalf("invalid operation log error = %v, want %v", err, errAuditReasonInvalid)
+	}
+
+	read := permissionTestContext(http.MethodGet, "/api/clusters/c1/pods/default")
+	if got, err := auditOperationLogForRequest(read, auditActionForRequest(read)); err != nil || got != "" {
+		t.Fatalf("read operation log = %q, err = %v", got, err)
 	}
 }
 

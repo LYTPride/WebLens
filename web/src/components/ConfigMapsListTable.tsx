@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import type { AuditedActionConfirmRequest } from "./AuditReasonDialog";
 import { ResizableTh } from "./ResizableTh";
 import { ResourceSortArrows } from "./ResourceSortArrows";
 import { SelectionHeaderCell } from "./SelectionHeaderCell";
@@ -145,19 +146,11 @@ export type ConfigMapsListTableProps = {
   openConfigEditorTab: (row: ConfigMapListRow) => void;
   downloadYaml: (row: ConfigMapListRow) => Promise<void> | void;
   copyName: (name: string) => void;
-  setActionConfirm: React.Dispatch<
-    React.SetStateAction<{
-      title: string;
-      description?: string;
-      items: string[];
-      variant: "danger" | "primary";
-      onConfirm: () => Promise<void>;
-    } | null>
-  >;
+  setActionConfirm: (request: AuditedActionConfirmRequest) => void;
   onDeletedOne: (ns: string, name: string) => void;
   setToastMessage: (m: string | null) => void;
   setError: (e: string | null) => void;
-  deleteConfigMapApi: (clusterId: string, ns: string, name: string) => Promise<void>;
+  deleteConfigMapApi: (clusterId: string, ns: string, name: string, auditReason: string) => Promise<void>;
 };
 
 export function ConfigMapsListTable({
@@ -456,10 +449,10 @@ export function ConfigMapsListTable({
                                 : "当前未发现引用资源。删除后不可恢复。",
                             items: [`${ns}/${name}`],
                             variant: "danger",
-                            onConfirm: async () => {
+                            onConfirm: async (auditReason) => {
                               setRowBusyKey(rowKey);
                               try {
-                                await deleteConfigMapApi(effectiveClusterId, ns, name);
+                                await deleteConfigMapApi(effectiveClusterId, ns, name, auditReason);
                                 onDeletedOne(ns, name);
                                 setToastMessage("已删除 ConfigMap");
                                 setError(null);

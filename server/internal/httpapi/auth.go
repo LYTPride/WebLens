@@ -161,6 +161,16 @@ func authRequired(store *auth.Store) gin.HandlerFunc {
 			return
 		}
 		auditAction := auditActionForRequest(c)
+		if _, err := auditOperationLogForRequest(c, auditAction); err != nil {
+			code := "AUDIT_REASON_REQUIRED"
+			if errors.Is(err, errAuditReasonTooLong) {
+				code = "AUDIT_REASON_TOO_LONG"
+			} else if errors.Is(err, errAuditReasonInvalid) {
+				code = "AUDIT_REASON_INVALID"
+			}
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
+			return
+		}
 		c.Next()
 		if auditAction != "" {
 			recordRequestAudit(store, c, user, auditAction, "")

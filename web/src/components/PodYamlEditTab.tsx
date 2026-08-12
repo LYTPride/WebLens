@@ -17,7 +17,9 @@ import {
   fetchConfigMapYaml,
   applyConfigMapYaml,
 } from "../api";
+import { AuditReasonDialog } from "./AuditReasonDialog";
 import { ClearableSearchInput } from "./ClearableSearchInput";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { YamlMonacoEditor, type YamlMonacoEditorHandle } from "./YamlMonacoEditor";
 
 interface PodYamlEditTabProps {
@@ -123,6 +125,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [errorHint, setErrorHint] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveIntent, setSaveIntent] = useState<{ andClose: boolean; auditReason?: string } | null>(null);
   const [search, setSearch] = useState("");
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const editorRef = useRef<YamlMonacoEditorHandle>(null);
@@ -211,46 +214,42 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
     });
   };
 
-  const save = async (andClose: boolean) => {
+  const save = async (andClose: boolean, auditReason: string) => {
     if (readOnly) return;
-    if (!isDirty) {
-      if (andClose) onClose();
-      return;
-    }
     setSaving(true);
     setError(null);
     setErrorHint(null);
     try {
       if (yamlKind === "deployment") {
-        const data = await applyDeploymentYaml(clusterId, namespace, podName, yaml);
+        const data = await applyDeploymentYaml(clusterId, namespace, podName, yaml, auditReason);
         setInitialYaml(yaml);
         onSaved?.(data);
       } else if (yamlKind === "statefulset") {
-        const data = await applyStatefulSetYaml(clusterId, namespace, podName, yaml);
+        const data = await applyStatefulSetYaml(clusterId, namespace, podName, yaml, auditReason);
         setInitialYaml(yaml);
         onSaved?.(data);
       } else if (yamlKind === "ingress") {
-        const data = await applyIngressYaml(clusterId, namespace, podName, yaml);
+        const data = await applyIngressYaml(clusterId, namespace, podName, yaml, auditReason);
         setInitialYaml(yaml);
         onSaved?.(data);
       } else if (yamlKind === "service") {
-        const data = await applyServiceYaml(clusterId, namespace, podName, yaml);
+        const data = await applyServiceYaml(clusterId, namespace, podName, yaml, auditReason);
         setInitialYaml(yaml);
         onSaved?.(data);
       } else if (yamlKind === "pvc") {
-        const data = await applyPvcYaml(clusterId, namespace, podName, yaml);
+        const data = await applyPvcYaml(clusterId, namespace, podName, yaml, auditReason);
         setInitialYaml(yaml);
         onSaved?.(data);
       } else if (yamlKind === "node") {
-        const data = await applyNodeYaml(clusterId, podName, yaml);
+        const data = await applyNodeYaml(clusterId, podName, yaml, auditReason);
         setInitialYaml(yaml);
         onSaved?.(data);
       } else if (yamlKind === "configmap") {
-        const data = await applyConfigMapYaml(clusterId, namespace, podName, yaml);
+        const data = await applyConfigMapYaml(clusterId, namespace, podName, yaml, auditReason);
         setInitialYaml(yaml);
         onSaved?.(data);
       } else {
-        await applyPodYaml(clusterId, namespace, podName, yaml);
+        await applyPodYaml(clusterId, namespace, podName, yaml, auditReason);
         setInitialYaml(yaml);
         onSaved?.();
       }
@@ -259,9 +258,19 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
       const parsed = extractApiError(e, "保存失败");
       setError(`${yamlKindLabel(yamlKind)} ${yamlKind === "node" ? podName : `${namespace}/${podName}`} YAML 保存失败：${parsed.message}`);
       setErrorHint(buildYamlErrorHint(parsed.status, yamlKind));
+      throw e;
     } finally {
       setSaving(false);
     }
+  };
+
+  const requestSave = (andClose: boolean) => {
+    if (readOnly) return;
+    if (!isDirty) {
+      if (andClose) onClose();
+      return;
+    }
+    setSaveIntent({ andClose });
   };
 
   const cancel = () => {
@@ -278,6 +287,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
   }
 
   return (
+    <>
     <div
       style={{
         display: "flex",
@@ -405,7 +415,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => save(false)}
+                onClick={() => requestSave(false)}
                 disabled={saving || !isDirty}
                 style={{
                   padding: "6px 12px",
@@ -421,7 +431,7 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => save(true)}
+                onClick={() => requestSave(true)}
                 disabled={saving}
                 style={{
                   padding: "6px 12px",
@@ -466,5 +476,30 @@ export const PodYamlEditTab: React.FC<PodYamlEditTabProps> = ({
         </div>
       )}
     </div>
+    <AuditReasonDialog
+      open={!!saveIntent && !saveIntent.auditReason}
+      actionLabel="编辑 YAML"
+      items={[`${yamlKindLabel(yamlKind)} ${yamlKind === "node" ? podName : `${namespace}/${podName}`}`]}
+      onClose={() => setSaveIntent(null)}
+      onConfirm={(auditReason) => {
+        setSaveIntent((current) => current ? { ...current, auditReason } : null);
+      }}
+    />
+    <ConfirmDialog
+      open={!!saveIntent?.auditReason}
+      title={`确认保存 1 个 ${yamlKindLabel(yamlKind)} 的 YAML？`}
+      description="保存后配置会立即提交到当前集群，请确认目标资源与改动内容。"
+      items={[yamlKind === "node" ? podName : `${namespace}/${podName}`]}
+      variant="primary"
+      busy={saving}
+      busyText="保存中…"
+      onClose={() => setSaveIntent(null)}
+      onConfirm={async () => {
+        const intent = saveIntent;
+        if (!intent?.auditReason) return;
+        await save(intent.andClose, intent.auditReason);
+      }}
+    />
+    </>
   );
 };

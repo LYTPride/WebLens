@@ -195,6 +195,7 @@ import { EVENT_COLUMN_KEYS, EVENT_COLUMN_DEFAULTS, EventsListTable } from "../co
 import { EventDescribeContent } from "../components/describe/EventDescribeContent";
 import { ResourceJumpChip } from "../components/ResourceJumpChip";
 import { ResourceNameWithCopy } from "../components/ResourceNameWithCopy";
+import { AuditReasonDialog, type AuditedActionConfirmRequest } from "../components/AuditReasonDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useResourceListColumnResize } from "../resourceList/useResourceListColumnResize";
 import {
@@ -892,6 +893,7 @@ export const App: React.FC = () => {
     name: string;
     current: number;
     resource: "deployment" | "statefulset";
+    auditReason: string;
   } | null>(null);
   const [deployScaleInput, setDeployScaleInput] = useState("");
   const [deployScaleSaving, setDeployScaleSaving] = useState(false);
@@ -904,6 +906,7 @@ export const App: React.FC = () => {
   const [batchConfirm, setBatchConfirm] = useState<{
     kind: "pods-delete" | "deployments-delete" | "deployments-restart" | "configmaps-delete";
     keys: string[];
+    auditReason: string;
   } | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
   /** 单行/单次危险操作统一确认（替代 window.confirm） */
@@ -914,8 +917,45 @@ export const App: React.FC = () => {
     variant: "danger" | "primary";
     onConfirm: () => Promise<void>;
   } | null>(null);
+  const [auditReasonRequest, setAuditReasonRequest] = useState<{
+    actionLabel: string;
+    items: string[];
+    onConfirm: (auditReason: string) => void;
+  } | null>(null);
   const actionConfirmRef = useRef(actionConfirm);
   actionConfirmRef.current = actionConfirm;
+
+  const requestAuditReason = useCallback((
+    actionLabel: string,
+    items: string[],
+    onConfirm: (auditReason: string) => void,
+  ) => {
+    setAuditReasonRequest({ actionLabel, items, onConfirm });
+  }, []);
+
+  const openAuditedActionConfirm = useCallback((request: AuditedActionConfirmRequest) => {
+    requestAuditReason(
+      request.variant === "danger" ? "删除" : "重启",
+      request.items,
+      (auditReason) => {
+        setActionConfirm({
+          ...request,
+          onConfirm: () => request.onConfirm(auditReason),
+        });
+      },
+    );
+  }, [requestAuditReason]);
+
+  const openAuditedBatchConfirm = useCallback((request: {
+    kind: "pods-delete" | "deployments-delete" | "deployments-restart" | "configmaps-delete";
+    keys: string[];
+  }) => {
+    requestAuditReason(
+      request.kind === "deployments-restart" ? "批量重启" : "批量删除",
+      request.keys,
+      (auditReason) => setBatchConfirm({ ...request, auditReason }),
+    );
+  }, [requestAuditReason]);
   /** Deployment 行上异步操作（restart/delete） */
   const [deploymentRowBusyKey, setDeploymentRowBusyKey] = useState<string | null>(null);
   const [statefulsetRowBusyKey, setStatefulsetRowBusyKey] = useState<string | null>(null);
@@ -2293,6 +2333,7 @@ export const App: React.FC = () => {
     if (!batchConfirm || !effectiveClusterId) return;
     const keys = batchConfirm.keys;
     const kind = batchConfirm.kind;
+    const auditReason = batchConfirm.auditReason;
     setBatchBusy(true);
     setError(null);
     try {
@@ -2300,7 +2341,7 @@ export const App: React.FC = () => {
       if (kind === "pods-delete") {
         for (const key of keys) {
           const { namespace, name } = parseNsNameRowKey(key);
-          await deletePod(effectiveClusterId, namespace, name);
+          await deletePod(effectiveClusterId, namespace, name, auditReason);
         }
         trackUsage({
           event: "delete_pod",
@@ -2315,7 +2356,7 @@ export const App: React.FC = () => {
       } else if (kind === "deployments-delete") {
         for (const key of keys) {
           const { namespace, name } = parseNsNameRowKey(key);
-          await deleteDeployment(effectiveClusterId, namespace, name);
+          await deleteDeployment(effectiveClusterId, namespace, name, auditReason);
         }
         trackUsage({
           event: "delete_deployment",
@@ -2333,7 +2374,7 @@ export const App: React.FC = () => {
           }),
         );
       } else if (kind === "configmaps-delete") {
-        await batchDeleteConfigMaps(effectiveClusterId, keys.map((key) => parseNsNameRowKey(key)));
+        await batchDeleteConfigMaps(effectiveClusterId, keys.map((key) => parseNsNameRowKey(key)), auditReason);
         trackUsage({
           event: "delete_configmap",
           resource: "configmap",
@@ -2347,7 +2388,7 @@ export const App: React.FC = () => {
       } else {
         for (const key of keys) {
           const { namespace, name } = parseNsNameRowKey(key);
-          await restartDeployment(effectiveClusterId, namespace, name);
+          await restartDeployment(effectiveClusterId, namespace, name, auditReason);
         }
         trackUsage({
           event: "restart_deployment",
@@ -4632,12 +4673,14 @@ export const App: React.FC = () => {
                           deployScaleModal.namespace,
                           deployScaleModal.name,
                           n,
+                          deployScaleModal.auditReason,
                         )
                       : scaleDeployment(
                           effectiveClusterId,
                           deployScaleModal.namespace,
                           deployScaleModal.name,
                           n,
+                          deployScaleModal.auditReason,
                         );
                   scaleFn
                     .then((data) => {
@@ -4671,6 +4714,18 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
+      <AuditReasonDialog
+        open={!!auditReasonRequest}
+        actionLabel={auditReasonRequest?.actionLabel ?? "资源操作"}
+        items={auditReasonRequest?.items ?? []}
+        onClose={() => setAuditReasonRequest(null)}
+        onConfirm={(auditReason) => {
+          const request = auditReasonRequest;
+          if (!request) return;
+          request.onConfirm(auditReason);
+          setAuditReasonRequest(null);
+        }}
+      />
       <ConfirmDialog
         open={!!batchConfirm && !!effectiveClusterId}
         title={
@@ -5811,7 +5866,7 @@ export const App: React.FC = () => {
                           className="wl-bulk-btn wl-bulk-btn--danger"
                           disabled={!effectiveClusterId}
                           onClick={() =>
-                            setBatchConfirm({
+                            openAuditedBatchConfirm({
                               kind: "pods-delete",
                               keys: [...selectedPodKeys].sort(),
                             })
@@ -5844,7 +5899,7 @@ export const App: React.FC = () => {
                           className="wl-bulk-btn wl-bulk-btn--danger"
                           disabled={!effectiveClusterId}
                           onClick={() =>
-                            setBatchConfirm({
+                            openAuditedBatchConfirm({
                               kind: "deployments-delete",
                               keys: [...selectedDeploymentKeys].sort(),
                             })
@@ -5857,7 +5912,7 @@ export const App: React.FC = () => {
                           className="wl-bulk-btn wl-bulk-btn--secondary"
                           disabled={!effectiveClusterId}
                           onClick={() =>
-                            setBatchConfirm({
+                            openAuditedBatchConfirm({
                               kind: "deployments-restart",
                               keys: [...selectedDeploymentKeys].sort(),
                             })
@@ -5891,7 +5946,7 @@ export const App: React.FC = () => {
                           className="wl-bulk-btn wl-bulk-btn--danger"
                           disabled={!effectiveClusterId}
                           onClick={() =>
-                            setBatchConfirm({
+                            openAuditedBatchConfirm({
                               kind: "configmaps-delete",
                               keys: [...selectedConfigMapKeys].sort(),
                             })
@@ -6324,14 +6379,14 @@ export const App: React.FC = () => {
                                         if (!effectiveClusterId) return;
                                         const ns = p.metadata.namespace;
                                         const name = p.metadata.name;
-                                        setActionConfirm({
+                                        openAuditedActionConfirm({
                                           title: "确认删除 1 个 Pod？",
                                           description: "删除后 Pod 将终止并从集群移除。",
                                           items: [`${ns}/${name}`],
                                           variant: "danger",
-                                          onConfirm: async () => {
+                                          onConfirm: async (auditReason) => {
                                             try {
-                                              await deletePod(effectiveClusterId, ns, name);
+                                              await deletePod(effectiveClusterId, ns, name, auditReason);
                                               trackUsage({
                                                 event: "delete_pod",
                                                 resource: "pod",
@@ -6605,11 +6660,14 @@ export const App: React.FC = () => {
                                     onClick={() => {
                                       setDeploymentMenuOpenKey(null);
                                       setDeployScaleInput(String(d.spec?.replicas ?? 0));
-                                      setDeployScaleModal({
-                                        namespace: ns,
-                                        name: dname,
-                                        current: d.spec?.replicas ?? 0,
-                                        resource: "deployment",
+                                      requestAuditReason("扩缩容", [`${ns}/${dname}`], (auditReason) => {
+                                        setDeployScaleModal({
+                                          namespace: ns,
+                                          name: dname,
+                                          current: d.spec?.replicas ?? 0,
+                                          resource: "deployment",
+                                          auditReason,
+                                        });
                                       });
                                     }}
                                   >
@@ -6626,15 +6684,15 @@ export const App: React.FC = () => {
                                     onClick={() => {
                                       setDeploymentMenuOpenKey(null);
                                       if (!effectiveClusterId) return;
-                                      setActionConfirm({
+                                      openAuditedActionConfirm({
                                         title: "确认重启 1 个 Deployment？",
                                         description: "将触发滚动更新，Pod 会按策略逐步重建。",
                                         items: [`${ns}/${dname}`],
                                         variant: "primary",
-                                        onConfirm: async () => {
+                                        onConfirm: async (auditReason) => {
                                           setDeploymentRowBusyKey(menuKey);
                                           try {
-                                            const data = await restartDeployment(effectiveClusterId, ns, dname);
+                                            const data = await restartDeployment(effectiveClusterId, ns, dname, auditReason);
                                             trackUsage({
                                               event: "restart_deployment",
                                               resource: "deployment",
@@ -6678,15 +6736,15 @@ export const App: React.FC = () => {
                                     onClick={() => {
                                       setDeploymentMenuOpenKey(null);
                                       if (!effectiveClusterId) return;
-                                      setActionConfirm({
+                                      openAuditedActionConfirm({
                                         title: "确认删除 1 个 Deployment？",
                                         description: "删除后不可恢复。",
                                         items: [`${ns}/${dname}`],
                                         variant: "danger",
-                                        onConfirm: async () => {
+                                        onConfirm: async (auditReason) => {
                                           setDeploymentRowBusyKey(menuKey);
                                           try {
-                                            await deleteDeployment(effectiveClusterId, ns, dname);
+                                            await deleteDeployment(effectiveClusterId, ns, dname, auditReason);
                                             trackUsage({
                                               event: "delete_deployment",
                                               resource: "deployment",
@@ -7000,11 +7058,14 @@ export const App: React.FC = () => {
                                       onClick={() => {
                                         setStatefulsetMenuOpenKey(null);
                                         setDeployScaleInput(String(s.spec?.replicas ?? 0));
-                                        setDeployScaleModal({
-                                          namespace: ns,
-                                          name: sname,
-                                          current: s.spec?.replicas ?? 0,
-                                          resource: "statefulset",
+                                        requestAuditReason("扩缩容", [`${ns}/${sname}`], (auditReason) => {
+                                          setDeployScaleModal({
+                                            namespace: ns,
+                                            name: sname,
+                                            current: s.spec?.replicas ?? 0,
+                                            resource: "statefulset",
+                                            auditReason,
+                                          });
                                         });
                                       }}
                                     >
@@ -7021,18 +7082,19 @@ export const App: React.FC = () => {
                                       onClick={() => {
                                         setStatefulsetMenuOpenKey(null);
                                         if (!effectiveClusterId) return;
-                                        setActionConfirm({
+                                        openAuditedActionConfirm({
                                           title: "确认重启 1 个 StatefulSet？",
                                           description: "将按策略滚动更新 Pod。",
                                           items: [`${ns}/${sname}`],
                                           variant: "primary",
-                                          onConfirm: async () => {
+                                          onConfirm: async (auditReason) => {
                                             setStatefulsetRowBusyKey(menuKey);
                                             try {
                                               const data = await restartStatefulSet(
                                                 effectiveClusterId,
                                                 ns,
                                                 sname,
+                                                auditReason,
                                               );
                                               trackUsage({
                                                 event: "restart_statefulset",
@@ -7079,15 +7141,15 @@ export const App: React.FC = () => {
                                       onClick={() => {
                                         setStatefulsetMenuOpenKey(null);
                                         if (!effectiveClusterId) return;
-                                        setActionConfirm({
+                                        openAuditedActionConfirm({
                                           title: "确认删除 1 个 StatefulSet？",
                                           description: "删除后不可恢复。",
                                           items: [`${ns}/${sname}`],
                                           variant: "danger",
-                                          onConfirm: async () => {
+                                          onConfirm: async (auditReason) => {
                                             setStatefulsetRowBusyKey(menuKey);
                                             try {
-                                              await deleteStatefulSet(effectiveClusterId, ns, sname);
+                                              await deleteStatefulSet(effectiveClusterId, ns, sname, auditReason);
                                               trackUsage({
                                                 event: "delete_statefulset",
                                                 resource: "statefulset",
@@ -7442,17 +7504,18 @@ export const App: React.FC = () => {
                                                           if (!effectiveClusterId) return;
                                                           const ns0 = p.metadata.namespace;
                                                           const name0 = p.metadata.name;
-                                                          setActionConfirm({
+                                                          openAuditedActionConfirm({
                                                             title: "确认删除 1 个 Pod？",
                                                             description: "删除后 Pod 将终止并从集群移除。",
                                                             items: [`${ns0}/${name0}`],
                                                             variant: "danger",
-                                                            onConfirm: async () => {
+                                                            onConfirm: async (auditReason) => {
                                                               try {
                                                                 await deletePod(
                                                                   effectiveClusterId,
                                                                   ns0,
                                                                   name0,
+                                                                  auditReason,
                                                                 );
                                                                 trackUsage({
                                                                   event: "delete_pod",
@@ -7795,15 +7858,15 @@ export const App: React.FC = () => {
                                       onClick={() => {
                                         setIngressMenuOpenKey(null);
                                         if (!effectiveClusterId) return;
-                                        setActionConfirm({
+                                        openAuditedActionConfirm({
                                           title: "确认删除 1 个 Ingress？",
                                           description: "删除后不可恢复。",
                                           items: [`${ns}/${iname}`],
                                           variant: "danger",
-                                          onConfirm: async () => {
+                                          onConfirm: async (auditReason) => {
                                             setIngressRowBusyKey(menuKey);
                                             try {
-                                              await deleteIngress(effectiveClusterId, ns, iname);
+                                              await deleteIngress(effectiveClusterId, ns, iname, auditReason);
                                               trackUsage({
                                                 event: "delete_ingress",
                                                 resource: "ingress",
@@ -7975,7 +8038,7 @@ export const App: React.FC = () => {
                     openEditTab={openEditServiceTab}
                     jumpToPods={jumpServiceToPods}
                     copyName={copyName}
-                    setActionConfirm={setActionConfirm}
+                    setActionConfirm={openAuditedActionConfirm}
                     onDeletedOne={(ns, name) => {
                       setServiceItems((prev) =>
                         prev.filter(
@@ -8009,7 +8072,7 @@ export const App: React.FC = () => {
                     openDescribe={openDescribeForPvc}
                     openEditTab={openEditPvcTab}
                     copyName={copyName}
-                    setActionConfirm={setActionConfirm}
+                    setActionConfirm={openAuditedActionConfirm}
                     onDeletedOne={(ns, name) => {
                       setPvcItems((prev) =>
                         prev.filter(
@@ -8066,7 +8129,7 @@ export const App: React.FC = () => {
                     openConfigEditorTab={openConfigMapEditorTab}
                     downloadYaml={downloadConfigMapYaml}
                     copyName={copyName}
-                    setActionConfirm={setActionConfirm}
+                    setActionConfirm={openAuditedActionConfirm}
                     onDeletedOne={(ns, name) => {
                       setConfigMapItems((prev) =>
                         prev.filter((it) => !((it.metadata.namespace ?? "") === ns && it.metadata.name === name)),

@@ -95,7 +95,7 @@ type AuditRecord struct {
 	ResourceName string
 	Result       string
 	StatusCode   int
-	SourceIP     string
+	OperationLog string
 	Detail       string
 }
 
@@ -112,7 +112,7 @@ type AuditEntry struct {
 	ResourceName string `json:"resourceName,omitempty"`
 	Result       string `json:"result"`
 	StatusCode   int    `json:"statusCode"`
-	SourceIP     string `json:"sourceIp,omitempty"`
+	OperationLog string `json:"operationLog,omitempty"`
 	Detail       string `json:"detail,omitempty"`
 	CreatedAt    int64  `json:"createdAt"`
 }
@@ -650,7 +650,7 @@ func (s *Store) RecordAudit(ctx context.Context, record AuditRecord) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO audit_logs(
 			user_id, username, action, method, path, cluster_id, namespace,
-			resource_kind, resource_name, result, status_code, source_ip, detail, created_at
+			resource_kind, resource_name, result, status_code, operation_log, detail, created_at
 		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.UserID,
 		record.Username,
@@ -663,7 +663,7 @@ func (s *Store) RecordAudit(ctx context.Context, record AuditRecord) error {
 		record.ResourceName,
 		record.Result,
 		record.StatusCode,
-		record.SourceIP,
+		strings.TrimSpace(record.OperationLog),
 		record.Detail,
 		time.Now().UnixMilli(),
 	)
@@ -680,7 +680,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, filter AuditFilter) ([]AuditE
 	}
 	query := `
 		SELECT id, user_id, username, action, method, path, cluster_id, namespace,
-		       resource_kind, resource_name, result, status_code, source_ip, detail, created_at
+		       resource_kind, resource_name, result, status_code, operation_log, detail, created_at
 		FROM audit_logs
 		WHERE (? = 0 OR user_id = ?)
 		  AND (? = '' OR action = ?)
@@ -721,7 +721,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, filter AuditFilter) ([]AuditE
 			&item.ResourceName,
 			&item.Result,
 			&item.StatusCode,
-			&item.SourceIP,
+			&item.OperationLog,
 			&item.Detail,
 			&item.CreatedAt,
 		); err != nil {
