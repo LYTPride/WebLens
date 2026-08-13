@@ -457,6 +457,7 @@ export interface AuthUser {
   id: number;
   username: string;
   role: "admin" | "user";
+  isRoot: boolean;
   disabled: boolean;
   mustChangePassword: boolean;
   createdAt?: number;
@@ -572,8 +573,8 @@ export async function fetchAdminUsers(): Promise<AdminUserRow[]> {
   return res.data.items;
 }
 
-export async function createAdminUser(username: string): Promise<{ user: AuthUser; defaultPassword: string }> {
-  const res = await api.post<{ user: AuthUser; defaultPassword: string }>("/api/auth/admin/users", { username });
+export async function createAdminUser(username: string, role: AuthUser["role"]): Promise<{ user: AuthUser; temporaryPassword: string }> {
+  const res = await api.post<{ user: AuthUser; temporaryPassword: string }>("/api/auth/admin/users", { username, role });
   return res.data;
 }
 
@@ -581,8 +582,8 @@ export async function setAdminUserEnabled(id: number, enabled: boolean): Promise
   await api.patch(`/api/auth/admin/users/${encodeURIComponent(String(id))}/enabled`, { enabled });
 }
 
-export async function resetAdminUserPassword(id: number): Promise<{ defaultPassword: string }> {
-  const res = await api.post<{ defaultPassword: string }>(`/api/auth/admin/users/${encodeURIComponent(String(id))}/reset-password`, {});
+export async function resetAdminUserPassword(id: number): Promise<{ temporaryPassword: string }> {
+  const res = await api.post<{ temporaryPassword: string }>(`/api/auth/admin/users/${encodeURIComponent(String(id))}/reset-password`, {});
   return res.data;
 }
 

@@ -243,11 +243,23 @@ func (s *Store) ListAuthorizedScopesForUser(ctx context.Context, user User) ([]A
 }
 
 func (s *Store) UserAccessRoleForScope(ctx context.Context, user User, clusterID, namespace string) (AccessRole, bool, error) {
-	if user.Role == RoleAdmin {
-		return AccessRoleOperator, true, nil
-	}
 	if strings.TrimSpace(clusterID) == "" || strings.TrimSpace(namespace) == "" {
 		return "", false, nil
+	}
+	if user.IsRoot {
+		return AccessRoleOperator, true, nil
+	}
+	if user.Role == RoleAdmin {
+		var exists int
+		if err := s.db.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM cluster_combos WHERE cluster_id = ? AND namespace = ?`,
+			clusterID,
+			namespace,
+		).Scan(&exists); err != nil {
+			return "", false, err
+		}
+		return AccessRoleOperator, exists > 0, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT grants.access_role
@@ -289,9 +301,6 @@ func (s *Store) UserAccessRoleForScope(ctx context.Context, user User, clusterID
 }
 
 func (s *Store) UserHasCapability(ctx context.Context, user User, clusterID, namespace string, capability Capability) (bool, error) {
-	if user.Role == RoleAdmin {
-		return true, nil
-	}
 	role, ok, err := s.UserAccessRoleForScope(ctx, user, clusterID, namespace)
 	if err != nil || !ok {
 		return false, err

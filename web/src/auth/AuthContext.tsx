@@ -55,7 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             : prev,
         );
-        setNotice({ type: "error", message: detail.message || "请先修改默认密码" });
+        setNotice({ type: "error", message: detail.message || "请先修改临时密码" });
         return;
       }
       setAuth(null);

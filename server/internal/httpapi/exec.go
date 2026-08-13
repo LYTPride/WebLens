@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
@@ -82,7 +84,8 @@ func registerExecRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.Store)
 		revocationWatchDone := make(chan struct{})
 		defer close(revocationWatchDone)
 
-		user, hasUser := currentUser(c)
+		_, hasUser := currentUser(c)
+		tokenHash := currentSessionTokenHash(c)
 		if !hasUser {
 			_ = conn.WriteControl(
 				websocket.CloseMessage,
@@ -91,33 +94,46 @@ func registerExecRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.Store)
 			)
 			return
 		}
-		if user.Role != auth.RoleAdmin {
-			go func() {
-				ticker := time.NewTicker(5 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-revocationWatchDone:
-						return
-					case <-ticker.C:
-						checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-						allowed, err := store.UserHasCapability(checkCtx, user, id, ns, auth.CapabilityPodExec)
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-revocationWatchDone:
+					return
+				case <-ticker.C:
+					checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					currentUser, _, sessionErr := store.ValidateSession(checkCtx, tokenHash, time.Now())
+					shouldClose := errors.Is(sessionErr, sql.ErrNoRows) ||
+						errors.Is(sessionErr, auth.ErrInvalidCredentials) ||
+						errors.Is(sessionErr, auth.ErrUserDisabled)
+					if sessionErr != nil && !shouldClose {
 						cancel()
-						if err == nil && allowed {
+						continue
+					}
+					if sessionErr == nil {
+						allowed, err := store.UserHasCapability(checkCtx, currentUser, id, ns, auth.CapabilityPodExec)
+						if err != nil {
+							cancel()
 							continue
 						}
-						cancelStream()
-						_ = conn.WriteControl(
-							websocket.CloseMessage,
-							websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Shell permission revoked"),
-							time.Now().Add(time.Second),
-						)
-						_ = conn.Close()
-						return
+						shouldClose = !allowed
 					}
+					cancel()
+					if !shouldClose {
+						continue
+					}
+					cancelStream()
+					_ = conn.WriteControl(
+						websocket.CloseMessage,
+						websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Shell session or permission revoked"),
+						time.Now().Add(time.Second),
+					)
+					_ = conn.Close()
+					return
 				}
-			}()
-		}
+			}
+		}()
 
 		pipeR, pipeW := io.Pipe()
 		defer pipeW.Close()

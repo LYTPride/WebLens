@@ -2,7 +2,7 @@
 # 用法：
 #   ./scripts/build-release.sh            # 使用当天日期作为版本号，例如 weblens-20260309.tar.gz
 #   ./scripts/build-release.sh v1.0.0     # 指定版本号，生成 weblens-v1.0.0.tar.gz
-# 打包内容包含启动 WebLens 所需的 server/bin/weblens-server、web/dist 和 weblens-*.sh 启停脚本，
+# 打包内容包含启动 WebLens 所需的 server/bin/weblens-server、web/dist、启停脚本和 admin 恢复脚本，
 # 排除测试脚本、源码、node_modules 和已有日志等，仅用于部署。
 # 构建并打包 WebLens 部署包 .tar.gz（包含启动服务所需文件，排除测试与日志）
 set -euo pipefail
@@ -87,7 +87,7 @@ cp -a web/dist/. "${STAGING}/${RELEASE_NAME}/web/dist/"
 
 # 启停脚本（排除测试脚本）
 mkdir -p "${STAGING}/${RELEASE_NAME}/scripts"
-for f in init.sh weblens-start.sh weblens-stop.sh weblens-restart.sh; do
+for f in init.sh reset-admin-password.sh weblens-start.sh weblens-stop.sh weblens-restart.sh; do
   cp -a "scripts/${f}" "${STAGING}/${RELEASE_NAME}/scripts/"
   chmod +x "${STAGING}/${RELEASE_NAME}/scripts/${f}"
 done

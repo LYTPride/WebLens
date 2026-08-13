@@ -58,6 +58,7 @@ func TestAuditActionClassifiesSensitiveOperations(t *testing.T) {
 		{method: http.MethodPost, path: "/api/clusters/c1/deployments/default/d1/restart", want: "resource.restart"},
 		{method: http.MethodPost, path: "/api/clusters/c1/deployments/default/d1/scale", want: "resource.scale"},
 		{method: http.MethodPut, path: "/api/auth/admin/users/2/grants", want: "access.manage"},
+		{method: http.MethodPost, path: "/api/auth/change-password", want: "account.password.change"},
 	}
 	for _, tt := range tests {
 		got := auditActionForRequest(permissionTestContext(tt.method, tt.path))

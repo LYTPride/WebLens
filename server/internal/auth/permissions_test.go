@@ -10,12 +10,10 @@ import (
 func TestPermissionsV2CombinesGroupAndDirectGrantsByHighestRole(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	if err := store.BootstrapAdmin(ctx, "AdminPass123"); err != nil {
-		t.Fatalf("BootstrapAdmin: %v", err)
-	}
-	user, err := store.CreateNormalUser(ctx, "viewer01")
+	root := bootstrapRoot(t, store)
+	user, _, err := store.CreateUser(ctx, root, "viewer01", RoleUser)
 	if err != nil {
-		t.Fatalf("CreateNormalUser: %v", err)
+		t.Fatalf("CreateUser: %v", err)
 	}
 	if _, err := store.UpsertCombo(ctx, "cluster-a", "default", "Default"); err != nil {
 		t.Fatalf("UpsertCombo default: %v", err)
@@ -143,6 +141,8 @@ func TestPermissionsV2MigratesLegacyScopeGrantsAsOperator(t *testing.T) {
 		)`,
 		`INSERT INTO users(id, username, password_hash, role, created_at, updated_at)
 		  VALUES(1, 'legacy01', 'unused', 'user', 100, 100)`,
+		`INSERT INTO users(id, username, password_hash, role, created_at, updated_at)
+		  VALUES(2, 'admin', 'unused', 'admin', 100, 100)`,
 		`INSERT INTO cluster_combos(id, cluster_id, namespace, alias, created_at, updated_at)
 		  VALUES('cluster-a::default', 'cluster-a', 'default', '', 100, 100)`,
 		`INSERT INTO user_scope_grants(user_id, combo_id, created_at)
@@ -175,6 +175,35 @@ func TestPermissionsV2MigratesLegacyScopeGrantsAsOperator(t *testing.T) {
 	}
 	if updatedAt != 123 {
 		t.Fatalf("migrated updated_at = %d, want 123", updatedAt)
+	}
+}
+
+func TestPlatformAdminGetsOnlyAddedScopes(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	root := bootstrapRoot(t, store)
+	platformAdmin, _, err := store.CreateUser(ctx, root, "platform01", RoleAdmin)
+	if err != nil {
+		t.Fatalf("CreateUser platform admin: %v", err)
+	}
+	if _, err := store.UpsertCombo(ctx, "cluster-a", "default", ""); err != nil {
+		t.Fatalf("UpsertCombo: %v", err)
+	}
+
+	allowed, err := store.UserHasCapability(ctx, platformAdmin, "cluster-a", "default", CapabilityPodExec)
+	if err != nil || !allowed {
+		t.Fatalf("platform admin added scope capability = %v, %v; want true, nil", allowed, err)
+	}
+	allowed, err = store.UserHasCapability(ctx, platformAdmin, "cluster-a", "kube-system", CapabilityResourceRead)
+	if err != nil {
+		t.Fatalf("platform admin unadded scope capability: %v", err)
+	}
+	if allowed {
+		t.Fatal("platform admin received capability for an unadded scope")
+	}
+	allowed, err = store.UserHasCapability(ctx, root, "cluster-a", "kube-system", CapabilityPodExec)
+	if err != nil || !allowed {
+		t.Fatalf("root fallback capability = %v, %v; want true, nil", allowed, err)
 	}
 }
 

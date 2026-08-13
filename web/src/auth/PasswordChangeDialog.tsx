@@ -147,7 +147,7 @@ export const PasswordChangeDialog: React.FC<{
             确认新密码
             <PasswordBox value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
           </label>
-          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>至少 8 位，不能使用默认密码，不能与旧密码相同。</div>
+          <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>至少 8 位，不能与旧密码相同。</div>
           {error && <div style={{ color: "var(--wl-pill-danger-text)", fontSize: 12 }}>{error}</div>}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>

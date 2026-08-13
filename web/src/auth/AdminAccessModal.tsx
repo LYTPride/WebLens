@@ -26,6 +26,7 @@ import { ClearableSearchInput } from "../components/ClearableSearchInput";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyIcon } from "../components/icons/CopyIcon";
 import { kubeconfigDisplayFileName } from "../components/SearchableDropdownPrimitives";
+import { useAuth } from "./AuthContext";
 
 type PublicTab = "users" | "scopes" | "grants" | "groups" | "audit";
 type Tab = "users" | "grants" | "groups" | "audit";
@@ -185,6 +186,7 @@ export const AdminAccessModal: React.FC<{
   clusterCombos: ClusterCombo[];
   clusters: ClusterSummary[];
 }> = ({ open, initialTab, onClose, clusterCombos, clusters }) => {
+  const { auth } = useAuth();
   const [tab, setTab] = useState<Tab>(() => normalizeTab(initialTab));
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [groups, setGroups] = useState<ScopeGroup[]>([]);
@@ -194,7 +196,8 @@ export const AdminAccessModal: React.FC<{
   const [messageIsError, setMessageIsError] = useState(false);
 
   const [newUsername, setNewUsername] = useState("");
-  const [defaultPassword, setDefaultPassword] = useState<string | null>(null);
+  const [newUserRole, setNewUserRole] = useState<"admin" | "user">("user");
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [userManagementSearch, setUserManagementSearch] = useState("");
   const [grantUserSearch, setGrantUserSearch] = useState("");
@@ -261,7 +264,7 @@ export const AdminAccessModal: React.FC<{
     if (nextTab === tab) return;
     setTab(nextTab);
     setMessage(null);
-    setDefaultPassword(null);
+    setTemporaryPassword(null);
   };
 
   const reloadUsers = useCallback(async () => {
@@ -298,7 +301,7 @@ export const AdminAccessModal: React.FC<{
     if (!open) return;
     setTab(normalizeTab(initialTab));
     setSelectedAuditLog(null);
-    setDefaultPassword(null);
+    setTemporaryPassword(null);
     setUserManagementSearch("");
     setGrantUserSearch("");
     setGroupGrantSearch("");
@@ -470,22 +473,39 @@ export const AdminAccessModal: React.FC<{
     });
   }, [clusterCombos, comboLabel, groupByScopeID, groupScopeSearch, selectedGroupId]);
 
-  const createUser = async () => {
+  const performCreateUser = async (rethrow = false) => {
     const username = newUsername.trim();
     if (!username) return;
     setBusy(true);
-    setDefaultPassword(null);
+                                        setTemporaryPassword(null);
     try {
-      const result = await createAdminUser(username);
+      const result = await createAdminUser(username, newUserRole);
       setNewUsername("");
-      setDefaultPassword(result.defaultPassword);
-      showMessage(`用户 ${result.user.username} 已创建，首次登录必须修改默认密码。`);
+      setTemporaryPassword(result.temporaryPassword);
+      showMessage(`用户 ${result.user.username} 已创建，请安全交付一次性临时密码；首次登录必须修改。`);
       await reloadUsers();
     } catch (error: any) {
       showMessage(error?.response?.data?.error ?? error?.message ?? "创建用户失败", true);
+      if (rethrow) throw error;
     } finally {
       setBusy(false);
     }
+  };
+
+  const createUser = () => {
+    const username = newUsername.trim();
+    if (!username) return;
+    if (newUserRole === "admin") {
+      setConfirm({
+        title: `创建平台管理员 ${username}？`,
+        description: "平台管理员可管理用户、平台配置和审计，并可在全部已添加作用域执行读写运维操作。",
+        items: [username, "平台身份：平台管理员"],
+        variant: "primary",
+        onConfirm: () => performCreateUser(true),
+      });
+      return;
+    }
+    void performCreateUser();
   };
 
   const saveGrants = async () => {
@@ -646,17 +666,30 @@ export const AdminAccessModal: React.FC<{
               }}
             >
               <span>{message}</span>
-              {defaultPassword && (
+              {temporaryPassword && (
+                <code
+                  style={{
+                    padding: "3px 7px",
+                    borderRadius: 4,
+                    background: "var(--wl-bg-input)",
+                    color: "var(--wl-text-heading)",
+                    fontSize: 12,
+                  }}
+                >
+                  {temporaryPassword}
+                </code>
+              )}
+              {temporaryPassword && (
                 <button
                   type="button"
                   onClick={async () => {
-                    const copied = await copyTextToClipboard(defaultPassword);
-                    showMessage(copied ? "默认密码已复制" : "复制默认密码失败", !copied);
+                    const copied = await copyTextToClipboard(temporaryPassword);
+                    showMessage(copied ? "临时密码已复制" : "复制临时密码失败", !copied);
                   }}
                   style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", gap: 4 }}
                 >
                   <CopyIcon size={14} />
-                  复制默认密码
+                  复制临时密码
                 </button>
               )}
             </div>
@@ -672,16 +705,26 @@ export const AdminAccessModal: React.FC<{
                     value={newUsername}
                     onChange={(event) => setNewUsername(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") void createUser();
+                      if (event.key === "Enter") createUser();
                     }}
-                    placeholder="普通用户名"
-                    style={{ ...inputStyle, width: 240 }}
+                    placeholder="用户名"
+                    style={{ ...inputStyle, width: 210 }}
                   />
-                  <button type="button" disabled={busy || !newUsername.trim()} onClick={() => void createUser()} style={buttonStyle}>
-                    创建普通用户
+                  <select
+                    value={newUserRole}
+                    onChange={(event) => setNewUserRole(event.target.value as "admin" | "user")}
+                    disabled={busy}
+                    aria-label="平台身份"
+                    style={{ ...inputStyle, width: 140 }}
+                  >
+                    <option value="user">普通用户</option>
+                    <option value="admin">平台管理员</option>
+                  </select>
+                  <button type="button" disabled={busy || !newUsername.trim()} onClick={createUser} style={buttonStyle}>
+                    创建用户
                   </button>
                   <span style={{ color: "var(--wl-text-muted)", fontSize: 12, alignSelf: "center" }}>
-                    默认密码 WebLens@2026，首次登录强制修改
+                    自动生成一次性临时密码，首次登录强制修改
                   </span>
                   <ClearableSearchInput
                     value={userManagementSearch}
@@ -706,11 +749,11 @@ export const AdminAccessModal: React.FC<{
                       {filteredAllUsers.map((user) => (
                         <tr key={user.id} className="wl-table-row">
                           <td style={tdStyle}>{user.username}</td>
-                          <td style={tdStyle}>{user.role === "admin" ? "管理员" : "普通用户"}</td>
+                          <td style={tdStyle}>{user.isRoot ? "根管理员" : user.role === "admin" ? "平台管理员" : "普通用户"}</td>
                           <td style={tdStyle}>
                             <Switch
                               checked={!user.disabled}
-                              disabled={user.role === "admin" || busy}
+                              disabled={user.isRoot || user.id === auth?.user.id || busy}
                               onChange={async (enabled) => {
                                 setBusy(true);
                                 try {
@@ -725,32 +768,35 @@ export const AdminAccessModal: React.FC<{
                               }}
                             />
                           </td>
-                          <td style={tdStyle}>{user.role === "admin" ? "全部" : user.scopeCount}</td>
+                          <td style={tdStyle}>{user.role === "admin" ? (user.isRoot ? "全部（root）" : "全部已添加") : user.scopeCount}</td>
                           <td style={tdStyle}>
-                            {user.role === "user" && (
+                            {!user.isRoot && user.id !== auth?.user.id ? (
                               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                <button
-                                  type="button"
-                                  style={buttonStyle}
-                                  onClick={() => {
-                                    setSelectedUserId(user.id);
-                                    switchTab("grants");
-                                  }}
-                                >
-                                  配置角色
-                                </button>
+                                {user.role === "user" && (
+                                  <button
+                                    type="button"
+                                    style={buttonStyle}
+                                    onClick={() => {
+                                      setSelectedUserId(user.id);
+                                      switchTab("grants");
+                                    }}
+                                  >
+                                    配置角色
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   style={buttonStyle}
                                   onClick={() =>
                                     setConfirm({
                                       title: `重置 ${user.username} 的密码？`,
-                                      description: "现有会话将失效，下次登录必须修改默认密码。",
+                                      description: "现有会话将失效，下次登录必须修改临时密码。",
                                       items: [user.username],
                                       variant: "primary",
                                       onConfirm: async () => {
+                                        setTemporaryPassword(null);
                                         const result = await resetAdminUserPassword(user.id);
-                                        setDefaultPassword(result.defaultPassword);
+                                        setTemporaryPassword(result.temporaryPassword);
                                         showMessage("密码已重置");
                                       },
                                     })
@@ -780,6 +826,10 @@ export const AdminAccessModal: React.FC<{
                                   删除
                                 </button>
                               </div>
+                            ) : (
+                              <span style={{ color: "var(--wl-text-muted)", fontSize: 12 }}>
+                                {user.isRoot ? "root 账号受保护，仅支持本人修改密码或本机恢复" : "当前账号请通过个人设置修改密码"}
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -1092,6 +1142,8 @@ export const AdminAccessModal: React.FC<{
                   <select value={auditAction} onChange={(event) => setAuditAction(event.target.value)} style={{ ...inputStyle, width: 180 }}>
                     <option value="">全部操作</option>
                     <option value="access.manage">权限管理</option>
+                    <option value="account.password.change">本人修改密码</option>
+                    <option value="root.password.recovery">root 本机恢复</option>
                     <option value="scope.config">作用域配置</option>
                     <option value="platform.config">平台配置</option>
                     <option value="resource.write">资源写入</option>
@@ -1132,6 +1184,7 @@ export const AdminAccessModal: React.FC<{
                           <td style={tdStyle}>
                             <div>{item.action}</div>
                             <div style={{ color: "var(--wl-text-muted)", fontSize: 11 }}>{item.method} {item.path}</div>
+                            {item.detail ? <div style={{ color: "var(--wl-text-muted)", fontSize: 11, overflowWrap: "anywhere" }}>{item.detail}</div> : null}
                           </td>
                           <td style={tdStyle}>
                             {[item.clusterId, item.namespace].filter(Boolean).join(" / ") || "平台"}

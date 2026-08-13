@@ -123,6 +123,12 @@ func registerAccessV2Routes(r *gin.Engine, store *auth.Store) {
 		if !ok {
 			return
 		}
+		target, err := store.UserByID(c.Request.Context(), id)
+		if err != nil {
+			writeUserManagementError(c, err)
+			return
+		}
+		setUserAuditTarget(c, target.User, "update-grants")
 		var body auth.UserGrants
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体不合法"})

@@ -168,7 +168,7 @@ const ForcePasswordPage: React.FC = () => {
           确认新密码
           <PasswordInput value={confirmPassword} onChange={setConfirmPassword} placeholder="请再次输入新密码" autoComplete="new-password" />
         </label>
-        <div className="wl-auth-hint">至少 8 位，不能使用默认密码，不能与旧密码相同。</div>
+        <div className="wl-auth-hint">至少 8 位，不能与旧密码相同。</div>
         {(error || notice) && <div className="wl-auth-message">{error || notice?.message}</div>}
         <div className="wl-auth-actions">
           <button type="button" className="wl-auth-secondary wl-btn--no-hover-overlay" onClick={() => void logout()}>

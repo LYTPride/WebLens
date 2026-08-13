@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	auditReasonHeader       = "X-WebLens-Audit-Reason"
-	maxAuditOperationLogLen = 500
+	auditReasonHeader           = "X-WebLens-Audit-Reason"
+	maxAuditOperationLogLen     = 500
+	auditResourceKindContextKey = "weblensAuditResourceKind"
+	auditResourceNameContextKey = "weblensAuditResourceName"
+	auditDetailContextKey       = "weblensAuditDetail"
 )
 
 var (
@@ -56,13 +59,16 @@ func requiredCapabilityForRequest(c *gin.Context) auth.Capability {
 }
 
 func auditActionForRequest(c *gin.Context) string {
+	path := c.Request.URL.Path
+	if path == "/api/auth/change-password" && c.Request.Method == http.MethodPost {
+		return "account.password.change"
+	}
 	if c.Request.Method == http.MethodGet {
 		if requiredCapabilityForRequest(c) == auth.CapabilityPodExec {
 			return "pod.exec"
 		}
 		return ""
 	}
-	path := c.Request.URL.Path
 	switch {
 	case strings.HasPrefix(path, "/api/auth/admin/"):
 		return "access.manage"
@@ -126,9 +132,16 @@ func recordDeniedRequestAudit(store *auth.Store, c *gin.Context, user auth.User,
 }
 
 func recordRequestAudit(store *auth.Store, c *gin.Context, user auth.User, action, detail string) {
+	if detail == "" {
+		if value, ok := c.Get(auditDetailContextKey); ok {
+			detail, _ = value.(string)
+		}
+	}
 	status := c.Writer.Status()
 	result := "success"
-	if status >= http.StatusBadRequest {
+	if status == http.StatusForbidden {
+		result = "denied"
+	} else if status >= http.StatusBadRequest {
 		result = "failure"
 	}
 	recordRequestAuditWithResult(store, c, user, action, result, status, string(requiredCapabilityForRequest(c)), detail)
@@ -146,6 +159,12 @@ func recordRequestAuditWithResult(
 ) {
 	clusterID, namespace, kind, _ := clusterScopeFromPath(c)
 	resourceName := resourceNameFromPath(c.Request.URL.Path)
+	if value, ok := c.Get(auditResourceKindContextKey); ok {
+		kind, _ = value.(string)
+	}
+	if value, ok := c.Get(auditResourceNameContextKey); ok {
+		resourceName, _ = value.(string)
+	}
 	if detail == "" && capability != "" {
 		detail = "capability=" + capability
 	}
