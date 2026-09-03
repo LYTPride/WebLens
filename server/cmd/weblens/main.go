@@ -103,6 +103,21 @@ func runCommand(cmd string) {
 			os.Exit(2)
 		}
 		fmt.Println("WebLens admin user initialized.")
+	case "reset-admin-password":
+		passwordBytes, err := io.ReadAll(io.LimitReader(os.Stdin, 4096))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read temporary password: %v\n", err)
+			os.Exit(2)
+		}
+		password := strings.TrimRight(string(passwordBytes), "\r\n")
+		revokedSessions, err := store.ResetRootPassword(ctx, password)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "reset admin password: %v\n", err)
+			os.Exit(2)
+		}
+		fmt.Println("WebLens admin password was reset successfully.")
+		fmt.Printf("%d existing admin sessions were revoked.\n", revokedSessions)
+		fmt.Println("The next admin login must change this temporary password.")
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		os.Exit(2)

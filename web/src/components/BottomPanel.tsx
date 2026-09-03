@@ -19,6 +19,8 @@ export interface PanelTab {
   containers: string[];
   /** edit 标签：YAML 资源类型，默认 pod */
   yamlKind?: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "node" | "configmap";
+  /** Viewer 打开的 YAML 标签只允许查看。 */
+  readOnly?: boolean;
   configMap?: ConfigMap;
   configMapReferences?: ConfigMapReferenceSummary;
 }
@@ -550,6 +552,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   onClose={() => onCloseTab(tab.id)}
                   onSaved={(result) => onEditSaved?.(tab, result)}
                   isActive={activeTabId === tab.id}
+                  readOnly={tab.readOnly}
                 />
               ) : tab.configMap && tab.configMapReferences ? (
                 <ConfigMapEditorTab

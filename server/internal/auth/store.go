@@ -20,10 +20,10 @@ import (
 )
 
 const (
-	DefaultDBPath       = "data/weblens.db"
-	DefaultUserPassword = "WebLens@2026"
-	IdleTimeout         = 20 * time.Minute
-	IdleWarningBefore   = 30 * time.Second
+	DefaultDBPath             = "data/weblens.db"
+	LegacyDefaultUserPassword = "WebLens@2026"
+	IdleTimeout               = 20 * time.Minute
+	IdleWarningBefore         = 30 * time.Second
 
 	RoleAdmin = "admin"
 	RoleUser  = "user"
@@ -36,12 +36,18 @@ var (
 	ErrUserDisabled       = errors.New("user is disabled")
 	ErrForbidden          = errors.New("forbidden")
 	ErrPasswordRequired   = errors.New("password change required")
+	ErrRootUserProtected  = errors.New("root user is protected")
+	ErrSelfManagement     = errors.New("cannot manage current user")
+	ErrUserMustBeDisabled = errors.New("user must be disabled before deletion")
+	ErrInvalidUserRole    = errors.New("invalid user role")
+	ErrUsernameReserved   = errors.New("username is reserved")
 )
 
 type User struct {
 	ID                 int64  `json:"id"`
 	Username           string `json:"username"`
 	Role               string `json:"role"`
+	IsRoot             bool   `json:"isRoot"`
 	Disabled           bool   `json:"disabled"`
 	MustChangePassword bool   `json:"mustChangePassword"`
 	CreatedAt          int64  `json:"createdAt"`
@@ -141,6 +147,7 @@ func (s *Store) migrate() error {
 			username TEXT NOT NULL UNIQUE,
 			password_hash TEXT NOT NULL,
 			role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+			is_root INTEGER NOT NULL DEFAULT 0 CHECK (is_root IN (0, 1)),
 			disabled INTEGER NOT NULL DEFAULT 0,
 			must_change_password INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL,
@@ -165,19 +172,145 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS user_scope_grants (
 			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			combo_id TEXT NOT NULL REFERENCES cluster_combos(id) ON DELETE CASCADE,
+			access_role TEXT NOT NULL DEFAULT 'operator' CHECK (access_role IN ('viewer', 'operator')),
 			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
 			PRIMARY KEY(user_id, combo_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS scope_groups (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+			description TEXT NOT NULL DEFAULT '',
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS scope_group_members (
+			group_id INTEGER NOT NULL REFERENCES scope_groups(id) ON DELETE CASCADE,
+			combo_id TEXT NOT NULL UNIQUE REFERENCES cluster_combos(id) ON DELETE CASCADE,
+			created_at INTEGER NOT NULL,
+			PRIMARY KEY(group_id, combo_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS user_scope_group_grants (
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			group_id INTEGER NOT NULL REFERENCES scope_groups(id) ON DELETE CASCADE,
+			access_role TEXT NOT NULL CHECK (access_role IN ('viewer', 'operator')),
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY(user_id, group_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER,
+			username TEXT NOT NULL,
+			action TEXT NOT NULL,
+			method TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL DEFAULT '',
+			cluster_id TEXT NOT NULL DEFAULT '',
+			namespace TEXT NOT NULL DEFAULT '',
+			resource_kind TEXT NOT NULL DEFAULT '',
+			resource_name TEXT NOT NULL DEFAULT '',
+			result TEXT NOT NULL CHECK (result IN ('success', 'failure', 'denied')),
+			status_code INTEGER NOT NULL DEFAULT 0,
+			operation_log TEXT NOT NULL DEFAULT '',
+			detail TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_scope_grants_combo_id ON user_scope_grants(combo_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_scope_group_members_group_id ON scope_group_members(group_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_group_grants_group_id ON user_scope_group_grants(group_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err
 		}
 	}
+	// Existing installations created user_scope_grants before roles were introduced.
+	// Additive migration preserves every existing grant as operator access.
+	if err := s.ensureColumn("user_scope_grants", "access_role", `TEXT NOT NULL DEFAULT 'operator' CHECK (access_role IN ('viewer', 'operator'))`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("user_scope_grants", "updated_at", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE user_scope_grants SET updated_at = created_at WHERE updated_at = 0`); err != nil {
+		return err
+	}
+	// Older databases predate mandatory resource-operation logs. Keep the
+	// migration additive so existing audit records remain available.
+	if err := s.ensureColumn("audit_logs", "operation_log", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	// Keep role=admin for platform administrators and distinguish the built-in
+	// fallback account with an immutable additive marker.
+	if err := s.ensureColumn("users", "is_root", `INTEGER NOT NULL DEFAULT 0 CHECK (is_root IN (0, 1))`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE users SET is_root = 1 WHERE username = 'admin' AND role = 'admin'`); err != nil {
+		return err
+	}
+	rootProtection := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_single_root ON users(is_root) WHERE is_root = 1`,
+		`CREATE TRIGGER IF NOT EXISTS protect_root_user_update
+		 BEFORE UPDATE OF username, role, is_root, disabled ON users
+		 WHEN OLD.is_root = 1 AND (
+			NEW.username <> OLD.username OR NEW.role <> OLD.role OR
+			NEW.is_root <> OLD.is_root OR NEW.disabled <> 0
+		 )
+		 BEGIN
+			SELECT RAISE(ABORT, 'root user protected');
+		 END`,
+		`CREATE TRIGGER IF NOT EXISTS protect_root_user_delete
+		 BEFORE DELETE ON users
+		 WHEN OLD.is_root = 1
+		 BEGIN
+			SELECT RAISE(ABORT, 'root user protected');
+		 END`,
+	}
+	for _, stmt := range rootProtection {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if err := s.validateRootInvariant(); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *Store) validateRootInvariant() error {
+	var userCount, rootCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&userCount); err != nil {
+		return err
+	}
+	if userCount == 0 {
+		return nil
+	}
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM users WHERE is_root = 1 AND username = 'admin' AND role = 'admin' AND disabled = 0`,
+	).Scan(&rootCount); err != nil {
+		return err
+	}
+	if rootCount != 1 {
+		return errors.New("认证数据库必须且只能包含一个根管理员 admin")
+	}
+	return nil
+}
+
+func (s *Store) ensureColumn(table, column, definition string) error {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	_, err := s.db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
+	return err
 }
 
 func (s *Store) IsInitialized(ctx context.Context) (bool, error) {
@@ -214,8 +347,8 @@ func (s *Store) BootstrapAdmin(ctx context.Context, password string) error {
 	now := time.Now().UnixMilli()
 	_, err = s.db.ExecContext(
 		ctx,
-		`INSERT INTO users(username, password_hash, role, disabled, must_change_password, created_at, updated_at)
-		 VALUES('admin', ?, 'admin', 0, 0, ?, ?)`,
+		`INSERT INTO users(username, password_hash, role, is_root, disabled, must_change_password, created_at, updated_at)
+		 VALUES('admin', ?, 'admin', 1, 0, 0, ?, ?)`,
 		hash,
 		now,
 		now,
@@ -239,8 +372,8 @@ func ValidateNewPassword(oldPassword, newPassword string) error {
 	if len(newPassword) < 8 {
 		return errors.New("密码至少需要 8 位")
 	}
-	if newPassword == DefaultUserPassword {
-		return errors.New("新密码不能使用默认密码")
+	if newPassword == LegacyDefaultUserPassword {
+		return errors.New("新密码不能使用系统保留的弱密码")
 	}
 	if oldPassword != "" && newPassword == oldPassword {
 		return errors.New("新密码不能与旧密码相同")
@@ -261,6 +394,25 @@ func ValidateUsername(username string) error {
 	return nil
 }
 
+func ValidateUserRole(role string) error {
+	if role != RoleAdmin && role != RoleUser {
+		return ErrInvalidUserRole
+	}
+	return nil
+}
+
+func IsPlatformAdmin(user User) bool {
+	return user.Role == RoleAdmin
+}
+
+func NewTemporaryPassword() (string, error) {
+	var b [18]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
 func NewSessionToken() (token string, tokenHash string, err error) {
 	var b [32]byte
 	if _, err = rand.Read(b[:]); err != nil {
@@ -278,34 +430,39 @@ func HashSessionToken(token string) string {
 }
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (UserWithPassword, error) {
-	var u UserWithPassword
-	var disabled, mustChange int
-	err := s.db.QueryRowContext(
+	return scanUserWithPassword(s.db.QueryRowContext(
 		ctx,
-		`SELECT id, username, password_hash, role, disabled, must_change_password, created_at, updated_at
+		`SELECT id, username, password_hash, role, is_root, disabled, must_change_password, created_at, updated_at
 		 FROM users WHERE username = ?`,
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &disabled, &mustChange, &u.CreatedAt, &u.UpdatedAt)
-	if err != nil {
-		return u, err
-	}
-	u.Disabled = disabled != 0
-	u.MustChangePassword = mustChange != 0
-	return u, nil
+	))
 }
 
 func (s *Store) UserByID(ctx context.Context, id int64) (UserWithPassword, error) {
-	var u UserWithPassword
-	var disabled, mustChange int
-	err := s.db.QueryRowContext(
+	return userByID(ctx, s.db, id)
+}
+
+type queryRower interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func userByID(ctx context.Context, q queryRower, id int64) (UserWithPassword, error) {
+	return scanUserWithPassword(q.QueryRowContext(
 		ctx,
-		`SELECT id, username, password_hash, role, disabled, must_change_password, created_at, updated_at
+		`SELECT id, username, password_hash, role, is_root, disabled, must_change_password, created_at, updated_at
 		 FROM users WHERE id = ?`,
 		id,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &disabled, &mustChange, &u.CreatedAt, &u.UpdatedAt)
+	))
+}
+
+func scanUserWithPassword(row *sql.Row) (UserWithPassword, error) {
+	var u UserWithPassword
+	var isRoot, disabled, mustChange int
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &isRoot, &disabled, &mustChange, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return u, err
 	}
+	u.IsRoot = isRoot != 0
 	u.Disabled = disabled != 0
 	u.MustChangePassword = mustChange != 0
 	return u, nil
@@ -345,18 +502,19 @@ func (s *Store) CreateSession(ctx context.Context, userID int64, tokenHash strin
 
 func (s *Store) ValidateSession(ctx context.Context, tokenHash string, now time.Time) (User, time.Time, error) {
 	var u User
-	var disabled, mustChange int
+	var isRoot, disabled, mustChange int
 	var expiresMs int64
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT u.id, u.username, u.role, u.disabled, u.must_change_password, u.created_at, u.updated_at, s.expires_at
+		`SELECT u.id, u.username, u.role, u.is_root, u.disabled, u.must_change_password, u.created_at, u.updated_at, s.expires_at
 		 FROM sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.token_hash = ?`,
 		tokenHash,
-	).Scan(&u.ID, &u.Username, &u.Role, &disabled, &mustChange, &u.CreatedAt, &u.UpdatedAt, &expiresMs)
+	).Scan(&u.ID, &u.Username, &u.Role, &isRoot, &disabled, &mustChange, &u.CreatedAt, &u.UpdatedAt, &expiresMs)
 	if err != nil {
 		return User{}, time.Time{}, err
 	}
+	u.IsRoot = isRoot != 0
 	u.Disabled = disabled != 0
 	u.MustChangePassword = mustChange != 0
 	expiresAt := time.UnixMilli(expiresMs)
@@ -407,112 +565,165 @@ func (s *Store) DeleteUserSessionsExcept(ctx context.Context, userID int64, keep
 	return err
 }
 
-func (s *Store) CreateNormalUser(ctx context.Context, username string) (User, error) {
+func (s *Store) CreateUser(ctx context.Context, actor User, username, role string) (User, string, error) {
 	username = strings.TrimSpace(username)
 	if err := ValidateUsername(username); err != nil {
-		return User{}, err
+		return User{}, "", err
 	}
-	hash, err := HashPassword(DefaultUserPassword)
+	if strings.EqualFold(username, "admin") {
+		return User{}, "", ErrUsernameReserved
+	}
+	if err := ValidateUserRole(role); err != nil {
+		return User{}, "", err
+	}
+	currentActor, err := s.UserByID(ctx, actor.ID)
 	if err != nil {
-		return User{}, err
+		return User{}, "", err
+	}
+	if !IsPlatformAdmin(currentActor.User) || currentActor.Disabled {
+		return User{}, "", ErrForbidden
+	}
+	temporaryPassword, err := NewTemporaryPassword()
+	if err != nil {
+		return User{}, "", err
+	}
+	hash, err := HashPassword(temporaryPassword)
+	if err != nil {
+		return User{}, "", err
 	}
 	now := time.Now().UnixMilli()
 	res, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO users(username, password_hash, role, disabled, must_change_password, created_at, updated_at)
-		 VALUES(?, ?, 'user', 0, 1, ?, ?)`,
+		`INSERT INTO users(username, password_hash, role, is_root, disabled, must_change_password, created_at, updated_at)
+		 VALUES(?, ?, ?, 0, 0, 1, ?, ?)`,
 		username,
 		hash,
+		role,
 		now,
 		now,
 	)
 	if err != nil {
-		return User{}, err
+		return User{}, "", err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return User{}, err
+		return User{}, "", err
 	}
 	u, err := s.UserByID(ctx, id)
 	if err != nil {
-		return User{}, err
+		return User{}, "", err
 	}
-	return u.User, nil
+	return u.User, temporaryPassword, nil
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]AdminUserRow, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT u.id, u.username, u.role, u.disabled, u.must_change_password, u.created_at, u.updated_at,
-		        COUNT(g.combo_id) AS scope_count
-		 FROM users u
-		 LEFT JOIN user_scope_grants g ON g.user_id = u.id
-		 GROUP BY u.id
-		 ORDER BY CASE u.role WHEN 'admin' THEN 0 ELSE 1 END, u.username`,
+		`SELECT id, username, role, is_root, disabled, must_change_password, created_at, updated_at
+		 FROM users
+		 ORDER BY is_root DESC, CASE role WHEN 'admin' THEN 0 ELSE 1 END, username`,
 	)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []AdminUserRow{}
 	for rows.Next() {
 		var row AdminUserRow
-		var disabled, mustChange int
-		if err := rows.Scan(&row.ID, &row.Username, &row.Role, &disabled, &mustChange, &row.CreatedAt, &row.UpdatedAt, &row.ScopeCount); err != nil {
+		var isRoot, disabled, mustChange int
+		if err := rows.Scan(&row.ID, &row.Username, &row.Role, &isRoot, &disabled, &mustChange, &row.CreatedAt, &row.UpdatedAt); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
+		row.IsRoot = isRoot != 0
 		row.Disabled = disabled != 0
 		row.MustChangePassword = mustChange != 0
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	allScopes, err := s.ListCombos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].Role == RoleAdmin {
+			out[i].ScopeCount = len(allScopes)
+			continue
+		}
+		scopes, err := s.ListAuthorizedScopesForUser(ctx, out[i].User)
+		if err != nil {
+			return nil, err
+		}
+		out[i].ScopeCount = len(scopes)
+	}
+	return out, nil
 }
 
-func (s *Store) SetUserDisabled(ctx context.Context, id int64, disabled bool) error {
-	u, err := s.UserByID(ctx, id)
+func (s *Store) SetUserDisabled(ctx context.Context, actor User, id int64, disabled bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if u.Role == RoleAdmin {
-		return errors.New("admin 用户不能禁用")
+	defer tx.Rollback()
+
+	target, err := authorizeUserManagement(ctx, tx, actor, id)
+	if err != nil {
+		return err
 	}
 	now := time.Now().UnixMilli()
 	v := 0
 	if disabled {
 		v = 1
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE users SET disabled = ?, updated_at = ? WHERE id = ?`, v, now, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET disabled = ?, updated_at = ? WHERE id = ?`, v, now, target.ID); err != nil {
 		return err
 	}
 	if disabled {
-		return s.DeleteUserSessions(ctx, id)
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, target.ID); err != nil {
+			return err
+		}
 	}
-	return nil
+	return tx.Commit()
 }
 
-func (s *Store) ResetUserPassword(ctx context.Context, id int64) error {
-	u, err := s.UserByID(ctx, id)
+func (s *Store) ResetUserPassword(ctx context.Context, actor User, id int64) (string, error) {
+	temporaryPassword, err := NewTemporaryPassword()
 	if err != nil {
-		return err
+		return "", err
 	}
-	if u.Role == RoleAdmin {
-		return errors.New("admin 密码请通过修改密码功能更新")
-	}
-	hash, err := HashPassword(DefaultUserPassword)
+	hash, err := HashPassword(temporaryPassword)
 	if err != nil {
-		return err
+		return "", err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	target, err := authorizeUserManagement(ctx, tx, actor, id)
+	if err != nil {
+		return "", err
 	}
 	now := time.Now().UnixMilli()
-	if _, err := s.db.ExecContext(
+	if _, err := tx.ExecContext(
 		ctx,
 		`UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ?`,
 		hash,
 		now,
-		id,
+		target.ID,
 	); err != nil {
-		return err
+		return "", err
 	}
-	return s.DeleteUserSessions(ctx, id)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, target.ID); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return temporaryPassword, nil
 }
 
 func (s *Store) ChangePassword(ctx context.Context, id int64, oldPassword, newPassword, currentTokenHash string) error {
@@ -521,7 +732,7 @@ func (s *Store) ChangePassword(ctx context.Context, id int64, oldPassword, newPa
 		return err
 	}
 	if oldPassword == "" {
-		if !u.MustChangePassword || !CheckPassword(u.PasswordHash, DefaultUserPassword) {
+		if !u.MustChangePassword {
 			return ErrInvalidCredentials
 		}
 	} else if !CheckPassword(u.PasswordHash, oldPassword) {
@@ -550,19 +761,45 @@ func (s *Store) ChangePassword(ctx context.Context, id int64, oldPassword, newPa
 	return nil
 }
 
-func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	u, err := s.UserByID(ctx, id)
+func (s *Store) DeleteUser(ctx context.Context, actor User, id int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if u.Role == RoleAdmin {
-		return errors.New("admin 用户不能删除")
+	defer tx.Rollback()
+
+	target, err := authorizeUserManagement(ctx, tx, actor, id)
+	if err != nil {
+		return err
 	}
-	if !u.Disabled {
-		return errors.New("请先禁用用户")
+	if !target.Disabled {
+		return ErrUserMustBeDisabled
 	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
-	return err
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, target.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func authorizeUserManagement(ctx context.Context, tx *sql.Tx, actor User, targetID int64) (UserWithPassword, error) {
+	currentActor, err := userByID(ctx, tx, actor.ID)
+	if err != nil {
+		return UserWithPassword{}, err
+	}
+	if !IsPlatformAdmin(currentActor.User) || currentActor.Disabled {
+		return UserWithPassword{}, ErrForbidden
+	}
+	target, err := userByID(ctx, tx, targetID)
+	if err != nil {
+		return UserWithPassword{}, err
+	}
+	if target.IsRoot {
+		return UserWithPassword{}, ErrRootUserProtected
+	}
+	if target.ID == currentActor.ID {
+		return UserWithPassword{}, ErrSelfManagement
+	}
+	return target, nil
 }
 
 func ComboID(clusterID, namespace string) string {
@@ -579,23 +816,15 @@ func (s *Store) ListCombos(ctx context.Context) ([]ClusterCombo, error) {
 }
 
 func (s *Store) ListCombosForUser(ctx context.Context, user User) ([]ClusterCombo, error) {
-	if user.Role == RoleAdmin {
-		return s.ListCombos(ctx)
-	}
-	rows, err := s.db.QueryContext(
-		ctx,
-		`SELECT c.id, c.cluster_id, c.namespace, c.alias
-		 FROM cluster_combos c
-		 JOIN user_scope_grants g ON g.combo_id = c.id
-		 WHERE g.user_id = ?
-		 ORDER BY c.cluster_id, c.namespace`,
-		user.ID,
-	)
+	scopes, err := s.ListAuthorizedScopesForUser(ctx, user)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	return scanCombos(rows)
+	out := make([]ClusterCombo, 0, len(scopes))
+	for _, scope := range scopes {
+		out = append(out, scope.ClusterCombo)
+	}
+	return out, nil
 }
 
 func scanCombos(rows *sql.Rows) ([]ClusterCombo, error) {
@@ -675,57 +904,62 @@ func (s *Store) ComboByID(ctx context.Context, id string) (ClusterCombo, error) 
 }
 
 func (s *Store) UserHasScope(ctx context.Context, user User, clusterID, namespace string) (bool, error) {
-	if user.Role == RoleAdmin {
-		return true, nil
-	}
-	if clusterID == "" || namespace == "" {
-		return false, nil
-	}
-	var n int
-	err := s.db.QueryRowContext(
-		ctx,
-		`SELECT COUNT(*)
-		 FROM user_scope_grants g
-		 JOIN cluster_combos c ON c.id = g.combo_id
-		 WHERE g.user_id = ? AND c.cluster_id = ? AND c.namespace = ?`,
-		user.ID,
-		clusterID,
-		namespace,
-	).Scan(&n)
-	return n > 0, err
+	_, ok, err := s.UserAccessRoleForScope(ctx, user, clusterID, namespace)
+	return ok, err
 }
 
 func (s *Store) UserHasAnyScopeForCluster(ctx context.Context, user User, clusterID string) (bool, error) {
-	if user.Role == RoleAdmin {
+	if user.IsRoot {
 		return true, nil
 	}
-	var n int
-	err := s.db.QueryRowContext(
-		ctx,
-		`SELECT COUNT(*)
-		 FROM user_scope_grants g
-		 JOIN cluster_combos c ON c.id = g.combo_id
-		 WHERE g.user_id = ? AND c.cluster_id = ?`,
-		user.ID,
-		clusterID,
-	).Scan(&n)
-	return n > 0, err
+	scopes, err := s.ListAuthorizedScopesForUser(ctx, user)
+	if err != nil {
+		return false, err
+	}
+	for _, scope := range scopes {
+		if scope.ClusterID == clusterID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Store) AuthorizedNamespacesForCluster(ctx context.Context, user User, clusterID string) ([]string, error) {
-	if user.Role == RoleAdmin {
+	if user.IsRoot {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(
-		ctx,
-		`SELECT c.namespace
-		 FROM user_scope_grants g
-		 JOIN cluster_combos c ON c.id = g.combo_id
-		 WHERE g.user_id = ? AND c.cluster_id = ?
-		 ORDER BY c.namespace`,
-		user.ID,
-		clusterID,
+	var (
+		rows *sql.Rows
+		err  error
 	)
+	if user.Role == RoleAdmin {
+		rows, err = s.db.QueryContext(
+			ctx,
+			`SELECT namespace FROM cluster_combos WHERE cluster_id = ? ORDER BY namespace`,
+			clusterID,
+		)
+	} else {
+		rows, err = s.db.QueryContext(
+			ctx,
+			`SELECT c.namespace
+			 FROM cluster_combos c
+			 JOIN (
+				SELECT combo_id
+				FROM user_scope_grants
+				WHERE user_id = ?
+				UNION
+				SELECT gm.combo_id
+				FROM user_scope_group_grants gg
+				JOIN scope_group_members gm ON gm.group_id = gg.group_id
+				WHERE gg.user_id = ?
+			 ) allowed ON allowed.combo_id = c.id
+			 WHERE c.cluster_id = ?
+			 ORDER BY c.namespace`,
+			user.ID,
+			user.ID,
+			clusterID,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -793,9 +1027,12 @@ func (s *Store) SetUserScopeIDs(ctx context.Context, userID int64, scopeIDs []st
 		}
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO user_scope_grants(user_id, combo_id, created_at) VALUES(?, ?, ?)`,
+			`INSERT INTO user_scope_grants(user_id, combo_id, access_role, created_at, updated_at)
+			 VALUES(?, ?, ?, ?, ?)`,
 			userID,
 			id,
+			AccessRoleOperator,
+			now,
 			now,
 		); err != nil {
 			return err

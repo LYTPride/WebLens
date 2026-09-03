@@ -1,4 +1,5 @@
 import React, { Fragment, useRef } from "react";
+import type { AuditedActionConfirmRequest } from "./AuditReasonDialog";
 import { useResourceListColumnResize } from "../resourceList/useResourceListColumnResize";
 import {
   SERVICE_EP_EXPAND_COLUMNS,
@@ -124,6 +125,7 @@ export type ServicesListTableProps = {
   pods: Pod[];
   listAgeNow: number;
   effectiveClusterId: string | null;
+  canWrite: boolean;
   menuOpenKey: string | null;
   setMenuOpenKey: (k: string | null) => void;
   rowBusyKey: string | null;
@@ -132,19 +134,11 @@ export type ServicesListTableProps = {
   openEditTab: (svc: ServiceListRow) => void;
   jumpToPods: (name: string) => void;
   copyName: (name: string) => void;
-  setActionConfirm: React.Dispatch<
-    React.SetStateAction<{
-      title: string;
-      description?: string;
-      items: string[];
-      variant: "danger" | "primary";
-      onConfirm: () => Promise<void>;
-    } | null>
-  >;
+  setActionConfirm: (request: AuditedActionConfirmRequest) => void;
   onDeletedOne: (ns: string, name: string) => void;
   setToastMessage: (m: string | null) => void;
   setError: (e: string | null) => void;
-  deleteServiceApi: (clusterId: string, ns: string, name: string) => Promise<void>;
+  deleteServiceApi: (clusterId: string, ns: string, name: string, auditReason: string) => Promise<void>;
 };
 
 export function ServicesListTable({
@@ -161,6 +155,7 @@ export function ServicesListTable({
   pods,
   listAgeNow,
   effectiveClusterId,
+  canWrite,
   menuOpenKey,
   setMenuOpenKey,
   rowBusyKey,
@@ -452,12 +447,15 @@ export function ServicesListTable({
                           openEditTab(svc);
                         }}
                       >
-                        <span style={{ marginRight: 8 }}>✎</span> Edit
+                        <span style={{ marginRight: 8 }}>✎</span> {canWrite ? "Edit" : "View YAML"}
                       </button>
                       <button
                         type="button"
                         className="wl-menu-item wl-menu-item-danger"
-                        style={menuItemStyleForDropdown}
+                        style={{
+                          ...menuItemStyleForDropdown,
+                          display: canWrite ? undefined : "none",
+                        }}
                         disabled={rowBusy || !effectiveClusterId}
                         onClick={() => {
                           setMenuOpenKey(null);
@@ -467,10 +465,10 @@ export function ServicesListTable({
                             description: "删除后不可恢复。",
                             items: [`${ns}/${sname}`],
                             variant: "danger",
-                            onConfirm: async () => {
+                            onConfirm: async (auditReason) => {
                               setRowBusyKey(menuKey);
                               try {
-                                await deleteServiceApi(effectiveClusterId, ns, sname);
+                                await deleteServiceApi(effectiveClusterId, ns, sname, auditReason);
                                 onDeletedOne(ns, sname);
                                 setToastMessage("已删除 Service");
                                 setError(null);

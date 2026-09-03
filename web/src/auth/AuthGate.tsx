@@ -3,7 +3,7 @@ import { useAuth } from "./AuthContext";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_WARNING_MS = 30 * 1000;
-const AUTH_VIDEO_SRC = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260506_081238_406ed0e3-5d83-436e-a512-0bbff7ec5b95.mp4";
+const AUTH_VIDEO_SRC = new URL("../assets/auth-background.mp4", import.meta.url).href;
 
 const eyeIcon = (
   <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -55,7 +55,7 @@ const PasswordInput: React.FC<{
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <main className="wl-auth-page">
     <section className="wl-auth-hero" aria-label="WebLens 控制台入口">
-      <video className="wl-auth-hero-video" autoPlay muted loop playsInline aria-hidden="true">
+      <video className="wl-auth-hero-video" autoPlay muted loop playsInline preload="auto" aria-hidden="true">
         <source src={AUTH_VIDEO_SRC} type="video/mp4" />
       </video>
       <div className="wl-auth-hero-content">
@@ -168,7 +168,7 @@ const ForcePasswordPage: React.FC = () => {
           确认新密码
           <PasswordInput value={confirmPassword} onChange={setConfirmPassword} placeholder="请再次输入新密码" autoComplete="new-password" />
         </label>
-        <div className="wl-auth-hint">至少 8 位，不能使用默认密码，不能与旧密码相同。</div>
+        <div className="wl-auth-hint">至少 8 位，不能与旧密码相同。</div>
         {(error || notice) && <div className="wl-auth-message">{error || notice?.message}</div>}
         <div className="wl-auth-actions">
           <button type="button" className="wl-auth-secondary wl-btn--no-hover-overlay" onClick={() => void logout()}>

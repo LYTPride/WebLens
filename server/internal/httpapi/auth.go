@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,12 +25,12 @@ const (
 )
 
 type authEnvelope struct {
-	User               auth.User           `json:"user"`
-	Scopes             []auth.ClusterCombo `json:"scopes"`
-	IdleTimeoutMs      int64               `json:"idleTimeoutMs"`
-	IdleWarningMs      int64               `json:"idleWarningMs"`
-	SessionExpiresAt   int64               `json:"sessionExpiresAt"`
-	MustChangePassword bool                `json:"mustChangePassword"`
+	User               auth.User              `json:"user"`
+	Scopes             []auth.AuthorizedScope `json:"scopes"`
+	IdleTimeoutMs      int64                  `json:"idleTimeoutMs"`
+	IdleWarningMs      int64                  `json:"idleWarningMs"`
+	SessionExpiresAt   int64                  `json:"sessionExpiresAt"`
+	MustChangePassword bool                   `json:"mustChangePassword"`
 }
 
 func setSessionCookie(c *gin.Context, token string, expiresAt time.Time) {
@@ -76,7 +78,7 @@ func currentSessionTokenHash(c *gin.Context) string {
 }
 
 func buildAuthEnvelope(c *gin.Context, store *auth.Store, user auth.User, expiresAt time.Time) (authEnvelope, error) {
-	scopes, err := store.ListCombosForUser(c.Request.Context(), user)
+	scopes, err := store.ListAuthorizedScopesForUser(c.Request.Context(), user)
 	if err != nil {
 		return authEnvelope{}, err
 	}
@@ -154,13 +156,61 @@ func authRequired(store *auth.Store) gin.HandlerFunc {
 		c.Set(authUserKey, user)
 		c.Set(authSessionKey, tokenHash)
 		if user.MustChangePassword && !isPasswordChangeAllowedPath(c.Request.URL.Path) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "请先修改默认密码", "code": "PASSWORD_CHANGE_REQUIRED"})
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "请先修改临时密码", "code": "PASSWORD_CHANGE_REQUIRED"})
 			return
 		}
 		if !authorizeRequest(c, store, user) {
 			return
 		}
+		auditAction := auditActionForRequest(c)
+		if _, err := auditOperationLogForRequest(c, auditAction); err != nil {
+			code := "AUDIT_REASON_REQUIRED"
+			if errors.Is(err, errAuditReasonTooLong) {
+				code = "AUDIT_REASON_TOO_LONG"
+			} else if errors.Is(err, errAuditReasonInvalid) {
+				code = "AUDIT_REASON_INVALID"
+			}
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
+			return
+		}
+		stopRevocationWatch := attachSessionRevocation(c, store, tokenHash)
+		defer stopRevocationWatch()
 		c.Next()
+		if auditAction != "" {
+			recordRequestAudit(store, c, user, auditAction, "")
+		}
+	}
+}
+
+func attachSessionRevocation(c *gin.Context, store *auth.Store, tokenHash string) func() {
+	path := c.Request.URL.Path
+	if !strings.HasSuffix(path, "/watch") && !strings.HasSuffix(path, "/exec") {
+		return func() {}
+	}
+	requestCtx, cancelRequest := context.WithCancel(c.Request.Context())
+	c.Request = c.Request.WithContext(requestCtx)
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				_, _, err := store.ValidateSession(checkCtx, tokenHash, time.Now())
+				cancel()
+				if errors.Is(err, sql.ErrNoRows) || errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
+					cancelRequest()
+					return
+				}
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		cancelRequest()
 	}
 }
 
@@ -172,28 +222,41 @@ func isPasswordChangeAllowedPath(path string) bool {
 }
 
 func authorizeRequest(c *gin.Context, store *auth.Store, user auth.User) bool {
-	if user.Role == auth.RoleAdmin {
+	if user.IsRoot {
 		return true
 	}
 	path := c.Request.URL.Path
 	method := c.Request.Method
+	capability := requiredCapabilityForRequest(c)
 
 	if strings.HasPrefix(path, "/api/auth/admin") {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要管理员权限", "code": "ADMIN_REQUIRED"})
+		if auth.IsPlatformAdmin(user) {
+			return true
+		}
+		recordDeniedRequestAudit(store, c, user, "", "platformRole="+user.Role)
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要平台管理员权限", "code": "PLATFORM_ADMIN_REQUIRED"})
 		return false
 	}
 	if path == "/api/auth/me" || path == "/api/auth/logout" || path == "/api/auth/change-password" || path == "/api/auth/renew" {
 		return true
 	}
 	if path == "/api/config" || path == "/api/clusters/reload" {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要管理员权限", "code": "ADMIN_REQUIRED"})
+		if auth.IsPlatformAdmin(user) {
+			return true
+		}
+		recordDeniedRequestAudit(store, c, user, "", "platformRole="+user.Role)
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要平台管理员权限", "code": "PLATFORM_ADMIN_REQUIRED"})
 		return false
 	}
 	if strings.HasPrefix(path, "/api/cluster-combos") {
 		if path == "/api/cluster-combos" && method == http.MethodGet {
 			return true
 		}
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要管理员权限", "code": "ADMIN_REQUIRED"})
+		if auth.IsPlatformAdmin(user) {
+			return true
+		}
+		recordDeniedRequestAudit(store, c, user, "", "platformRole="+user.Role)
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要平台管理员权限", "code": "PLATFORM_ADMIN_REQUIRED"})
 		return false
 	}
 	if path == "/api/clusters" && method == http.MethodGet {
@@ -202,6 +265,10 @@ func authorizeRequest(c *gin.Context, store *auth.Store, user auth.User) bool {
 	if strings.HasPrefix(path, "/api/analytics/") {
 		return true
 	}
+	if capability == "" {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "接口未配置权限策略", "code": "PERMISSION_POLICY_REQUIRED"})
+		return false
+	}
 
 	clusterID, namespace, kind, batchScoped := clusterScopeFromPath(c)
 	if clusterID == "" {
@@ -209,13 +276,17 @@ func authorizeRequest(c *gin.Context, store *auth.Store, user auth.User) bool {
 		return false
 	}
 	if kind == "nodes" {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "普通用户不能访问集群级资源", "code": "SCOPE_FORBIDDEN"})
+		recordDeniedRequestAudit(store, c, user, capability, "clusterScoped=true")
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "当前平台身份不能访问集群级资源", "code": "SCOPE_FORBIDDEN"})
 		return false
 	}
 	if batchScoped {
 		return true
 	}
 	if kind == "namespaces" {
+		if auth.IsPlatformAdmin(user) {
+			return true
+		}
 		ok, err := store.UserHasAnyScopeForCluster(c.Request.Context(), user, clusterID)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -228,16 +299,26 @@ func authorizeRequest(c *gin.Context, store *auth.Store, user auth.User) bool {
 		return true
 	}
 	if namespace == "" {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "普通用户必须在已授权命名空间内操作", "code": "SCOPE_REQUIRED"})
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "当前账号必须在已授权命名空间内操作", "code": "SCOPE_REQUIRED"})
 		return false
 	}
-	ok, err := store.UserHasScope(c.Request.Context(), user, clusterID, namespace)
+	role, ok, err := store.UserAccessRoleForScope(c.Request.Context(), user, clusterID, namespace)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return false
 	}
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "当前账号没有该作用域权限", "code": "SCOPE_FORBIDDEN"})
+		return false
+	}
+	if !auth.RoleAllows(role, capability) {
+		recordDeniedRequestAudit(store, c, user, capability, "accessRole="+string(role))
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error":              "当前作用域角色不允许执行此操作",
+			"code":               "WEBLENS_ROLE_FORBIDDEN",
+			"requiredCapability": capability,
+			"accessRole":         role,
+		})
 		return false
 	}
 	return true
@@ -330,6 +411,7 @@ func registerAuthProtectedRoutes(r *gin.Engine, store *auth.Store) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录"})
 			return
 		}
+		setUserAuditTarget(c, user, "change-own-password")
 		var body struct {
 			OldPassword string `json:"oldPassword"`
 			NewPassword string `json:"newPassword"`
@@ -374,17 +456,24 @@ func registerAuthProtectedRoutes(r *gin.Engine, store *auth.Store) {
 	r.POST("/api/auth/admin/users", requireAdmin(store, func(c *gin.Context) {
 		var body struct {
 			Username string `json:"username"`
+			Role     string `json:"role"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体不合法"})
 			return
 		}
-		user, err := store.CreateNormalUser(c.Request.Context(), body.Username)
+		if strings.TrimSpace(body.Role) == "" {
+			// Preserve the existing API default while allowing explicit platform-admin creation.
+			body.Role = auth.RoleUser
+		}
+		actor, _ := currentUser(c)
+		user, temporaryPassword, err := store.CreateUser(c.Request.Context(), actor, body.Username, body.Role)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUserManagementError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"user": user, "defaultPassword": auth.DefaultUserPassword})
+		setUserAuditTarget(c, user, "create")
+		c.JSON(http.StatusCreated, gin.H{"user": user, "temporaryPassword": temporaryPassword})
 	}))
 
 	r.PATCH("/api/auth/admin/users/:id/enabled", requireAdmin(store, func(c *gin.Context) {
@@ -399,8 +488,19 @@ func registerAuthProtectedRoutes(r *gin.Engine, store *auth.Store) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体不合法"})
 			return
 		}
-		if err := store.SetUserDisabled(c.Request.Context(), id, !body.Enabled); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		actor, _ := currentUser(c)
+		target, err := store.UserByID(c.Request.Context(), id)
+		if err != nil {
+			writeUserManagementError(c, err)
+			return
+		}
+		operation := "disable"
+		if body.Enabled {
+			operation = "enable"
+		}
+		setUserAuditTarget(c, target.User, operation)
+		if err := store.SetUserDisabled(c.Request.Context(), actor, id, !body.Enabled); err != nil {
+			writeUserManagementError(c, err)
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -411,11 +511,19 @@ func registerAuthProtectedRoutes(r *gin.Engine, store *auth.Store) {
 		if !ok {
 			return
 		}
-		if err := store.ResetUserPassword(c.Request.Context(), id); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		actor, _ := currentUser(c)
+		target, err := store.UserByID(c.Request.Context(), id)
+		if err != nil {
+			writeUserManagementError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"defaultPassword": auth.DefaultUserPassword})
+		setUserAuditTarget(c, target.User, "reset-password")
+		temporaryPassword, err := store.ResetUserPassword(c.Request.Context(), actor, id)
+		if err != nil {
+			writeUserManagementError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"temporaryPassword": temporaryPassword})
 	}))
 
 	r.DELETE("/api/auth/admin/users/:id", requireAdmin(store, func(c *gin.Context) {
@@ -423,8 +531,15 @@ func registerAuthProtectedRoutes(r *gin.Engine, store *auth.Store) {
 		if !ok {
 			return
 		}
-		if err := store.DeleteUser(c.Request.Context(), id); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		actor, _ := currentUser(c)
+		target, err := store.UserByID(c.Request.Context(), id)
+		if err != nil {
+			writeUserManagementError(c, err)
+			return
+		}
+		setUserAuditTarget(c, target.User, "delete")
+		if err := store.DeleteUser(c.Request.Context(), actor, id); err != nil {
+			writeUserManagementError(c, err)
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -448,6 +563,12 @@ func registerAuthProtectedRoutes(r *gin.Engine, store *auth.Store) {
 		if !ok {
 			return
 		}
+		target, err := store.UserByID(c.Request.Context(), id)
+		if err != nil {
+			writeUserManagementError(c, err)
+			return
+		}
+		setUserAuditTarget(c, target.User, "update-scopes")
 		var body struct {
 			ScopeIDs []string `json:"scopeIds"`
 		}
@@ -466,11 +587,41 @@ func registerAuthProtectedRoutes(r *gin.Engine, store *auth.Store) {
 func requireAdmin(_ *auth.Store, h gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u, ok := currentUser(c)
-		if !ok || u.Role != auth.RoleAdmin {
-			c.JSON(http.StatusForbidden, gin.H{"error": "需要管理员权限", "code": "ADMIN_REQUIRED"})
+		if !ok || !auth.IsPlatformAdmin(u) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "需要平台管理员权限", "code": "PLATFORM_ADMIN_REQUIRED"})
 			return
 		}
 		h(c)
+	}
+}
+
+func setUserAuditTarget(c *gin.Context, target auth.User, operation string) {
+	c.Set(auditResourceKindContextKey, "platform-user")
+	c.Set(auditResourceNameContextKey, target.Username)
+	c.Set(
+		auditDetailContextKey,
+		fmt.Sprintf("operation=%s; targetUserId=%d; targetRole=%s; targetIsRoot=%t", operation, target.ID, target.Role, target.IsRoot),
+	)
+}
+
+func writeUserManagementError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在", "code": "USER_NOT_FOUND"})
+	case errors.Is(err, auth.ErrRootUserProtected):
+		c.JSON(http.StatusForbidden, gin.H{"error": "根管理员 admin 受保护，不能执行此操作", "code": "ROOT_USER_PROTECTED"})
+	case errors.Is(err, auth.ErrSelfManagement):
+		c.JSON(http.StatusForbidden, gin.H{"error": "不能通过用户管理操作当前账号", "code": "SELF_MANAGEMENT_FORBIDDEN"})
+	case errors.Is(err, auth.ErrUserMustBeDisabled):
+		c.JSON(http.StatusConflict, gin.H{"error": "请先禁用用户", "code": "USER_MUST_BE_DISABLED"})
+	case errors.Is(err, auth.ErrUsernameReserved):
+		c.JSON(http.StatusConflict, gin.H{"error": "admin 是系统保留用户名", "code": "USERNAME_RESERVED"})
+	case errors.Is(err, auth.ErrInvalidUserRole):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "平台身份不合法", "code": "INVALID_USER_ROLE"})
+	case errors.Is(err, auth.ErrForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"error": "需要平台管理员权限", "code": "PLATFORM_ADMIN_REQUIRED"})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
 }
 
@@ -522,23 +673,33 @@ func namespacesForUser(c *gin.Context, store *auth.Store, user auth.User, cluste
 	return items, true, nil
 }
 
-func requireBatchConfigMapScopes(c *gin.Context, store *auth.Store, clusterID string, items []configMapBatchItem) bool {
+func requireBatchConfigMapScopes(c *gin.Context, store *auth.Store, clusterID string, items []configMapBatchItem, capability auth.Capability) bool {
 	user, ok := currentUser(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录"})
 		return false
 	}
-	if user.Role == auth.RoleAdmin {
+	if user.IsRoot {
 		return true
 	}
 	for _, item := range items {
-		ok, err := store.UserHasScope(c.Request.Context(), user, clusterID, item.Namespace)
+		role, ok, err := store.UserAccessRoleForScope(c.Request.Context(), user, clusterID, item.Namespace)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return false
 		}
 		if !ok {
 			c.JSON(http.StatusForbidden, gin.H{"error": "当前账号没有该作用域权限", "code": "SCOPE_FORBIDDEN"})
+			return false
+		}
+		if !auth.RoleAllows(role, capability) {
+			recordDeniedRequestAudit(store, c, user, capability, "accessRole="+string(role))
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":              "当前作用域角色不允许执行此操作",
+				"code":               "WEBLENS_ROLE_FORBIDDEN",
+				"requiredCapability": capability,
+				"accessRole":         role,
+			})
 			return false
 		}
 	}

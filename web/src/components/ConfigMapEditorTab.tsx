@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { applyConfigMapYaml, type ConfigMap } from "../api";
+import { AuditReasonDialog } from "./AuditReasonDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 import {
   deriveConfigMapKeyRows,
   formatConfigMapReferenceSummary,
@@ -78,6 +80,7 @@ export const ConfigMapEditorTab: React.FC<ConfigMapEditorTabProps> = ({
   const [valueDraft, setValueDraft] = useState("");
   const [initialValue, setInitialValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveIntent, setSaveIntent] = useState<{ auditReason?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -120,7 +123,7 @@ export const ConfigMapEditorTab: React.FC<ConfigMapEditorTabProps> = ({
   const name = draft.metadata.name;
   const impactText = formatConfigMapReferenceSummary(references);
 
-  const saveCurrentKey = async () => {
+  const saveCurrentKey = async (auditReason: string) => {
     if (!selected || selected.source !== "data" || !isDirty) return;
     setSaving(true);
     setError(null);
@@ -131,7 +134,7 @@ export const ConfigMapEditorTab: React.FC<ConfigMapEditorTabProps> = ({
         data: { ...(draft.data ?? {}), [selected.key]: valueDraft },
         binaryData: draft.binaryData ? { ...draft.binaryData } : undefined,
       };
-      const updated = await applyConfigMapYaml(clusterId, ns, name, JSON.stringify(next, null, 2));
+      const updated = await applyConfigMapYaml(clusterId, ns, name, JSON.stringify(next, null, 2), auditReason);
       setDraft(updated);
       setInitialValue(valueDraft);
       onSaved?.(updated);
@@ -139,12 +142,14 @@ export const ConfigMapEditorTab: React.FC<ConfigMapEditorTabProps> = ({
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string };
       setError(e?.response?.data?.error ?? e?.message ?? "保存失败");
+      throw err;
     } finally {
       setSaving(false);
     }
   };
 
   return (
+    <>
     <div
       style={{
         display: "flex",
@@ -260,7 +265,7 @@ export const ConfigMapEditorTab: React.FC<ConfigMapEditorTabProps> = ({
             </button>
             <button
               type="button"
-              onClick={saveCurrentKey}
+              onClick={() => setSaveIntent({})}
               disabled={!isEditable || !isDirty || saving}
               style={{
                 ...toolbarButtonStyle(!isEditable || !isDirty || saving),
@@ -316,5 +321,30 @@ export const ConfigMapEditorTab: React.FC<ConfigMapEditorTabProps> = ({
         </div>
       </section>
     </div>
+    <AuditReasonDialog
+      open={!!saveIntent && !saveIntent.auditReason}
+      actionLabel="编辑 ConfigMap"
+      items={[`${ns}/${name}${selected ? ` · key: ${selected.key}` : ""}`]}
+      onClose={() => setSaveIntent(null)}
+      onConfirm={(auditReason) => {
+        setSaveIntent((current) => current ? { ...current, auditReason } : null);
+      }}
+    />
+    <ConfirmDialog
+      open={!!saveIntent?.auditReason}
+      title="确认保存 1 个 ConfigMap key？"
+      description="保存后配置会立即提交到当前集群，请确认目标 ConfigMap 与 key。"
+      items={[`${ns}/${name}${selected ? ` · key: ${selected.key}` : ""}`]}
+      variant="primary"
+      busy={saving}
+      busyText="保存中…"
+      onClose={() => setSaveIntent(null)}
+      onConfirm={async () => {
+        const auditReason = saveIntent?.auditReason;
+        if (!auditReason) return;
+        await saveCurrentKey(auditReason);
+      }}
+    />
+    </>
   );
 };

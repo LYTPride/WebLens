@@ -1,4 +1,5 @@
 import React, { useRef } from "react";
+import type { AuditedActionConfirmRequest } from "./AuditReasonDialog";
 import { ResizableTh } from "./ResizableTh";
 import { ResourceSortArrows } from "./ResourceSortArrows";
 import {
@@ -141,6 +142,7 @@ export type PVCListTableProps = {
   pods: Pod[];
   listAgeNow: number;
   effectiveClusterId: string | null;
+  canWrite: boolean;
   menuOpenKey: string | null;
   setMenuOpenKey: (k: string | null) => void;
   rowBusyKey: string | null;
@@ -148,19 +150,11 @@ export type PVCListTableProps = {
   openDescribe: (row: PvcListRow) => void;
   openEditTab: (row: PvcListRow) => void;
   copyName: (name: string) => void;
-  setActionConfirm: React.Dispatch<
-    React.SetStateAction<{
-      title: string;
-      description?: string;
-      items: string[];
-      variant: "danger" | "primary";
-      onConfirm: () => Promise<void>;
-    } | null>
-  >;
+  setActionConfirm: (request: AuditedActionConfirmRequest) => void;
   onDeletedOne: (ns: string, name: string) => void;
   setToastMessage: (m: string | null) => void;
   setError: (e: string | null) => void;
-  deletePvcApi: (clusterId: string, ns: string, name: string) => Promise<void>;
+  deletePvcApi: (clusterId: string, ns: string, name: string, auditReason: string) => Promise<void>;
 };
 
 export function PVCListTable({
@@ -174,6 +168,7 @@ export function PVCListTable({
   pods,
   listAgeNow,
   effectiveClusterId,
+  canWrite,
   menuOpenKey,
   setMenuOpenKey,
   rowBusyKey,
@@ -373,12 +368,15 @@ export function PVCListTable({
                         openEditTab(row);
                       }}
                     >
-                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                      <span style={{ marginRight: 8 }}>✎</span> {canWrite ? "Edit" : "View YAML"}
                     </button>
                     <button
                       type="button"
                       className="wl-menu-item wl-menu-item-danger"
-                      style={menuItemStyleForDropdown}
+                      style={{
+                        ...menuItemStyleForDropdown,
+                        display: canWrite ? undefined : "none",
+                      }}
                       disabled={rowBusy || !effectiveClusterId}
                       onClick={() => {
                         setMenuOpenKey(null);
@@ -388,10 +386,10 @@ export function PVCListTable({
                           description: "删除后不可恢复。",
                           items: [`${ns}/${pname}`],
                           variant: "danger",
-                          onConfirm: async () => {
+                          onConfirm: async (auditReason) => {
                             setRowBusyKey(menuKey);
                             try {
-                              await deletePvcApi(effectiveClusterId, ns, pname);
+                              await deletePvcApi(effectiveClusterId, ns, pname, auditReason);
                               onDeletedOne(ns, pname);
                               setToastMessage("已删除 PVC");
                               setError(null);

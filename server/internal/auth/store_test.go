@@ -49,21 +49,22 @@ func TestPasswordHashCannotBeUsedAsPassword(t *testing.T) {
 func TestDefaultPasswordRequiresChangeAndRejectsDefaultReuse(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	if err := store.BootstrapAdmin(ctx, "AdminPass123"); err != nil {
-		t.Fatalf("BootstrapAdmin: %v", err)
-	}
-	user, err := store.CreateNormalUser(ctx, "dev01")
+	root := bootstrapRoot(t, store)
+	user, temporaryPassword, err := store.CreateUser(ctx, root, "dev01", RoleUser)
 	if err != nil {
-		t.Fatalf("CreateNormalUser: %v", err)
+		t.Fatalf("CreateUser: %v", err)
 	}
-	loggedIn, err := store.Authenticate(ctx, "dev01", DefaultUserPassword)
+	if temporaryPassword == "" || temporaryPassword == LegacyDefaultUserPassword {
+		t.Fatalf("temporary password = %q, want random non-default password", temporaryPassword)
+	}
+	loggedIn, err := store.Authenticate(ctx, "dev01", temporaryPassword)
 	if err != nil {
-		t.Fatalf("Authenticate default password: %v", err)
+		t.Fatalf("Authenticate temporary password: %v", err)
 	}
 	if !loggedIn.MustChangePassword {
 		t.Fatal("new normal user must change default password")
 	}
-	if err := store.ChangePassword(ctx, user.ID, "", DefaultUserPassword, ""); err == nil {
+	if err := store.ChangePassword(ctx, user.ID, "", LegacyDefaultUserPassword, ""); err == nil {
 		t.Fatal("ChangePassword accepted the default password as the new password")
 	}
 	if err := store.ChangePassword(ctx, user.ID, "", "UserPass123", ""); err != nil {
@@ -87,12 +88,10 @@ func TestDefaultPasswordRequiresChangeAndRejectsDefaultReuse(t *testing.T) {
 func TestDisableAndResetInvalidateSessions(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	if err := store.BootstrapAdmin(ctx, "AdminPass123"); err != nil {
-		t.Fatalf("BootstrapAdmin: %v", err)
-	}
-	user, err := store.CreateNormalUser(ctx, "dev01")
+	root := bootstrapRoot(t, store)
+	user, _, err := store.CreateUser(ctx, root, "dev01", RoleUser)
 	if err != nil {
-		t.Fatalf("CreateNormalUser: %v", err)
+		t.Fatalf("CreateUser: %v", err)
 	}
 	token, tokenHash, err := NewSessionToken()
 	if err != nil {
@@ -107,14 +106,14 @@ func TestDisableAndResetInvalidateSessions(t *testing.T) {
 	if _, _, err := store.ValidateSession(ctx, tokenHash, time.Now()); err != nil {
 		t.Fatalf("ValidateSession before disable: %v", err)
 	}
-	if err := store.SetUserDisabled(ctx, user.ID, true); err != nil {
+	if err := store.SetUserDisabled(ctx, root, user.ID, true); err != nil {
 		t.Fatalf("SetUserDisabled: %v", err)
 	}
 	if _, _, err := store.ValidateSession(ctx, tokenHash, time.Now()); err == nil {
 		t.Fatal("disabled user session stayed valid")
 	}
 
-	if err := store.SetUserDisabled(ctx, user.ID, false); err != nil {
+	if err := store.SetUserDisabled(ctx, root, user.ID, false); err != nil {
 		t.Fatalf("SetUserDisabled enable: %v", err)
 	}
 	_, tokenHash, err = NewSessionToken()
@@ -124,7 +123,7 @@ func TestDisableAndResetInvalidateSessions(t *testing.T) {
 	if err := store.CreateSession(ctx, user.ID, tokenHash, time.Now().Add(IdleTimeout)); err != nil {
 		t.Fatalf("CreateSession after enable: %v", err)
 	}
-	if err := store.ResetUserPassword(ctx, user.ID); err != nil {
+	if _, err := store.ResetUserPassword(ctx, root, user.ID); err != nil {
 		t.Fatalf("ResetUserPassword: %v", err)
 	}
 	if _, _, err := store.ValidateSession(ctx, tokenHash, time.Now()); err == nil {
@@ -142,12 +141,10 @@ func TestDisableAndResetInvalidateSessions(t *testing.T) {
 func TestUserScopeAuthorizationIsNamespaceExact(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	if err := store.BootstrapAdmin(ctx, "AdminPass123"); err != nil {
-		t.Fatalf("BootstrapAdmin: %v", err)
-	}
-	user, err := store.CreateNormalUser(ctx, "dev01")
+	root := bootstrapRoot(t, store)
+	user, _, err := store.CreateUser(ctx, root, "dev01", RoleUser)
 	if err != nil {
-		t.Fatalf("CreateNormalUser: %v", err)
+		t.Fatalf("CreateUser: %v", err)
 	}
 	combos, err := store.UpsertCombo(ctx, "cluster-a", "default", "")
 	if err != nil {
@@ -184,4 +181,20 @@ func TestUserScopeAuthorizationIsNamespaceExact(t *testing.T) {
 	if ok {
 		t.Fatal("scope grant leaked to another cluster")
 	}
+}
+
+func bootstrapRoot(t *testing.T, store *Store) User {
+	t.Helper()
+	ctx := context.Background()
+	if err := store.BootstrapAdmin(ctx, "AdminPass123"); err != nil {
+		t.Fatalf("BootstrapAdmin: %v", err)
+	}
+	root, err := store.UserByUsername(ctx, "admin")
+	if err != nil {
+		t.Fatalf("UserByUsername admin: %v", err)
+	}
+	if !root.IsRoot || root.Role != RoleAdmin {
+		t.Fatalf("bootstrap user = %#v, want root admin", root.User)
+	}
+	return root.User
 }

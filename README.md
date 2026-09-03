@@ -6,7 +6,7 @@ WebLens 是一个面向 Kubernetes 运维场景的 Web 控制台。它通过浏�
 
 ## 核心功能
 
-- **登录与权限**：首次部署通过 `scripts/init.sh` 初始化 `admin`；用户、平台配置和作用域授权保存到 SQLite（默认 `data/weblens.db`）；所有用户必须登录，普通用户仅能看到被授权的 `集群 + 单一 namespace` 作用域，说明见 `doc/guide/authentication.md`
+- **登录与权限**：首次部署通过 `scripts/init.sh` 初始化唯一受保护的根管理员 `admin`；根管理员可创建平台管理员或普通用户，创建/重置使用一次性随机临时密码；本机可通过 `scripts/reset-admin-password.sh` 恢复遗失的 root 密码。用户、平台配置和授权保存到 SQLite（默认 `data/weblens.db`）；支持 `viewer/operator` 作用域角色、后端能力拦截及操作审计，最终权限仍与 Kubernetes RBAC 取交集，说明见 `doc/guide/authentication.md`
 - **界面主题**：支持 **浅色 / 深色** 切换（顶栏右上角太阳/月亮 icon），样式由 CSS 变量统一驱动；平台配置入口为同组 **齿轮 icon**，下拉菜单与设置项行为不变
 - **多集群**：作用域选择（cluster + namespace preset）、应用与刷新
 - **Pods / Deployments / StatefulSets**：列表采用 **HTTP List（快照）+ Watch（增量）** 同一套模式；Deployments / StatefulSets 支持 Describe、扩缩容、重启、删除等（以当前版本为准）；Pods Describe 侧栏
@@ -35,6 +35,12 @@ WebLens 是一个面向 Kubernetes 运维场景的 Web 控制台。它通过浏�
 ```
 
 初始化成功后再启动服务。发布包升级时不要覆盖 `data/` 目录；默认数据库路径为 `data/weblens.db`，可通过 `WEBLENS_DB_PATH` 指定。
+
+如果根管理员 `admin` 的密码遗失，请在 WebLens 主机的交互式终端执行：
+
+```bash
+./scripts/reset-admin-password.sh
+```
 
 首次使用请通过环境变量 **`WEBLENS_KUBECONFIG_DIR`**（**绝对路径**）指向 kubeconfig 目录，或在 Web 控制台「平台配置 · kubeconfig 存放目录」中填写保存。未配置时集群列表为空，直至目录配置成功。
 

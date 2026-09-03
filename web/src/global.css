@@ -234,6 +234,16 @@ button.wl-confirm-btn-danger:active:not(:disabled) {
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
+/* 权限盾牌菜单：用整行底色表达键盘焦点，避免浏览器默认轮廓在末项显示为粗黑底线。 */
+.wl-access-menu-item:focus {
+  outline: none;
+}
+
+.wl-access-menu-item:focus-visible {
+  background-color: var(--wl-menu-item-hover);
+}
+
+
 /* 当前展开子菜单的一级项（Shell/Logs）弱高亮 */
 .wl-menu-item.is-active {
   background-color: var(--wl-menu-item-active);
@@ -1098,22 +1108,35 @@ th.wl-table-select-th input[type="checkbox"] {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
 }
 
+.wl-auth-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: #05070a;
+  opacity: 0.08;
+  animation: wl-auth-video-breathe 5.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: opacity;
+}
+
 .wl-auth-hero-video {
   position: absolute;
   inset: 0;
+  z-index: 0;
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  filter: brightness(0.86) contrast(0.9) saturate(0.88);
-  transform: scale(1.015);
+  filter: brightness(0.9) contrast(0.9) saturate(0.88);
+  transform: translateZ(0) scale(1.025);
   transform-origin: center;
-  animation: wl-auth-video-breathe 4.2s ease-in-out infinite;
-  will-change: filter, transform;
+  backface-visibility: hidden;
 }
 
 .wl-auth-hero-content {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   width: 100%;
   max-width: 720px;
   display: grid;
@@ -1388,12 +1411,10 @@ th.wl-table-select-th input[type="checkbox"] {
 @keyframes wl-auth-video-breathe {
   0%,
   100% {
-    filter: brightness(0.84) contrast(0.88) saturate(0.86);
-    transform: scale(1.015);
+    opacity: 0.08;
   }
   50% {
-    filter: brightness(0.94) contrast(0.93) saturate(0.94);
-    transform: scale(1.03);
+    opacity: 0.3;
   }
 }
 

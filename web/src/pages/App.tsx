@@ -56,6 +56,7 @@ import { ThemeToggleButton } from "../components/ThemeToggleButton";
 import { AdminAccessModal } from "../auth/AdminAccessModal";
 import { UserMenu } from "../auth/UserMenu";
 import { useAuth } from "../auth/AuthContext";
+import { canInScope, scopeAccessRole, scopeRoleLabel } from "../auth/permissions";
 import { ResourceTable, type Column } from "../components/ResourceTable";
 import { BottomPanel, type PanelTab } from "../components/BottomPanel";
 import { ResizableTh } from "../components/ResizableTh";
@@ -194,6 +195,7 @@ import { EVENT_COLUMN_KEYS, EVENT_COLUMN_DEFAULTS, EventsListTable } from "../co
 import { EventDescribeContent } from "../components/describe/EventDescribeContent";
 import { ResourceJumpChip } from "../components/ResourceJumpChip";
 import { ResourceNameWithCopy } from "../components/ResourceNameWithCopy";
+import { AuditReasonDialog, type AuditedActionConfirmRequest } from "../components/AuditReasonDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useResourceListColumnResize } from "../resourceList/useResourceListColumnResize";
 import {
@@ -838,7 +840,7 @@ export const App: React.FC = () => {
   const [accessMenuOpen, setAccessMenuOpen] = useState(false);
   const [accessGearSpinning, setAccessGearSpinning] = useState(false);
   const [accessModalOpen, setAccessModalOpen] = useState(false);
-  const [accessModalTab, setAccessModalTab] = useState<"users" | "scopes">("users");
+  const [accessModalTab, setAccessModalTab] = useState<"users" | "grants" | "groups" | "audit">("users");
   /** 集群作用域预设（cluster + namespace） */
   const [clusterCombos, setClusterCombos] = useState<ClusterCombo[]>([]);
   const [clusterCombosLoading, setClusterCombosLoading] = useState(false);
@@ -865,6 +867,11 @@ export const App: React.FC = () => {
   /** 作用域选择：当前选中（待应用）与已应用 */
   const [activeComboId, setActiveComboId] = useState<string | null>(null);
   const [effectiveComboId, setEffectiveComboId] = useState<string | null>(null);
+  const effectiveScopeAccessRole = scopeAccessRole(auth, effectiveComboId);
+  const canResourceWrite = canInScope(auth, effectiveComboId, "resource.write");
+  const canPodExec = canInScope(auth, effectiveComboId, "pod.exec");
+  const isEffectiveScopeReadOnly = effectiveScopeAccessRole === "viewer";
+
   /** 当前打开操作菜单的 Pod（namespace/name），null 表示未打开 */
   const [podMenuOpenKey, setPodMenuOpenKey] = useState<string | null>(null);
   /** Deployments 行三点菜单：namespace/name */
@@ -886,6 +893,7 @@ export const App: React.FC = () => {
     name: string;
     current: number;
     resource: "deployment" | "statefulset";
+    auditReason: string;
   } | null>(null);
   const [deployScaleInput, setDeployScaleInput] = useState("");
   const [deployScaleSaving, setDeployScaleSaving] = useState(false);
@@ -898,6 +906,7 @@ export const App: React.FC = () => {
   const [batchConfirm, setBatchConfirm] = useState<{
     kind: "pods-delete" | "deployments-delete" | "deployments-restart" | "configmaps-delete";
     keys: string[];
+    auditReason: string;
   } | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
   /** 单行/单次危险操作统一确认（替代 window.confirm） */
@@ -908,8 +917,45 @@ export const App: React.FC = () => {
     variant: "danger" | "primary";
     onConfirm: () => Promise<void>;
   } | null>(null);
+  const [auditReasonRequest, setAuditReasonRequest] = useState<{
+    actionLabel: string;
+    items: string[];
+    onConfirm: (auditReason: string) => void;
+  } | null>(null);
   const actionConfirmRef = useRef(actionConfirm);
   actionConfirmRef.current = actionConfirm;
+
+  const requestAuditReason = useCallback((
+    actionLabel: string,
+    items: string[],
+    onConfirm: (auditReason: string) => void,
+  ) => {
+    setAuditReasonRequest({ actionLabel, items, onConfirm });
+  }, []);
+
+  const openAuditedActionConfirm = useCallback((request: AuditedActionConfirmRequest) => {
+    requestAuditReason(
+      request.variant === "danger" ? "删除" : "重启",
+      request.items,
+      (auditReason) => {
+        setActionConfirm({
+          ...request,
+          onConfirm: () => request.onConfirm(auditReason),
+        });
+      },
+    );
+  }, [requestAuditReason]);
+
+  const openAuditedBatchConfirm = useCallback((request: {
+    kind: "pods-delete" | "deployments-delete" | "deployments-restart" | "configmaps-delete";
+    keys: string[];
+  }) => {
+    requestAuditReason(
+      request.kind === "deployments-restart" ? "批量重启" : "批量删除",
+      request.keys,
+      (auditReason) => setBatchConfirm({ ...request, auditReason }),
+    );
+  }, [requestAuditReason]);
   /** Deployment 行上异步操作（restart/delete） */
   const [deploymentRowBusyKey, setDeploymentRowBusyKey] = useState<string | null>(null);
   const [statefulsetRowBusyKey, setStatefulsetRowBusyKey] = useState<string | null>(null);
@@ -1262,9 +1308,50 @@ export const App: React.FC = () => {
       setPvcItems([]);
       setConfigMapItems([]);
       setEventItems([]);
+      setDescribeTarget(null);
       setToastMessage("当前作用域授权已变更，请重新选择");
     }
   }, [activeComboId, auth?.user.role, auth?.scopes, effectiveComboId]);
+
+  useEffect(() => {
+    if (!auth || auth.user.role !== "user") return;
+    const scopes = auth.scopes || [];
+    setPanelTabs((current) => {
+      let changed = false;
+      const next = current.flatMap((tab) => {
+        const scope = scopes.find(
+          (item) => item.clusterId === tab.clusterId && item.namespace === tab.namespace,
+        );
+        if (!scope) {
+          changed = true;
+          return [];
+        }
+        if (tab.type === "shell" && !canInScope(auth, scope.id, "pod.exec")) {
+          changed = true;
+          return [];
+        }
+        if (tab.type === "config-editor" && !canInScope(auth, scope.id, "resource.write")) {
+          changed = true;
+          return [];
+        }
+        if (tab.type === "edit") {
+          const readOnly = !canInScope(auth, scope.id, "resource.write");
+          if (tab.readOnly !== readOnly) {
+            changed = true;
+            return [{ ...tab, readOnly }];
+          }
+        }
+        return [tab];
+      });
+      return changed ? next : current;
+    });
+  }, [auth]);
+
+  useEffect(() => {
+    if (activePanelTabId && !panelTabs.some((tab) => tab.id === activePanelTabId)) {
+      setActivePanelTabId(panelTabs[0]?.id ?? null);
+    }
+  }, [activePanelTabId, panelTabs]);
 
   useEffect(() => {
     currentViewRef.current = currentView;
@@ -1615,6 +1702,10 @@ export const App: React.FC = () => {
   }, [describeDragging]);
 
   const openPanelTab = (type: "shell" | "logs", pod: Pod, container: string) => {
+    if (type === "shell" && !canPodExec) {
+      setToastMessage("当前作用域角色不允许打开 Shell");
+      return;
+    }
     if (!effectiveClusterId) return;
     const ns = pod.metadata.namespace;
     const name = pod.metadata.name;
@@ -1663,6 +1754,7 @@ export const App: React.FC = () => {
         container: "",
         title: name,
         containers: getPodContainerNames(pod),
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1695,6 +1787,7 @@ export const App: React.FC = () => {
         title: `${name} (Deployment)`,
         containers: [],
         yamlKind: "deployment",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1764,6 +1857,7 @@ export const App: React.FC = () => {
         title: `${name} (StatefulSet)`,
         containers: [],
         yamlKind: "statefulset",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1805,6 +1899,7 @@ export const App: React.FC = () => {
         title: `${name} (Ingress)`,
         containers: [],
         yamlKind: "ingress",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1846,6 +1941,7 @@ export const App: React.FC = () => {
         title: `${name} (Service)`,
         containers: [],
         yamlKind: "service",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1887,6 +1983,7 @@ export const App: React.FC = () => {
         title: `${name} (PVC)`,
         containers: [],
         yamlKind: "pvc",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1928,6 +2025,7 @@ export const App: React.FC = () => {
         title: `${name} (ConfigMap)`,
         containers: [],
         yamlKind: "configmap",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -1943,6 +2041,10 @@ export const App: React.FC = () => {
 
   const openConfigMapEditorTab = (cm: ConfigMapListRow) => {
     if (!effectiveClusterId) return;
+    if (!canResourceWrite) {
+      setToastMessage("当前作用域为只读角色，不能打开 Config Editor");
+      return;
+    }
     const ns = cm.metadata.namespace ?? "";
     const name = cm.metadata.name;
     const id = `config-editor-${ns}-${name}`;
@@ -2022,6 +2124,7 @@ export const App: React.FC = () => {
         title: `${name} (Node)`,
         containers: [],
         yamlKind: "node",
+        readOnly: !canResourceWrite,
       };
       return [...prev, tab];
     });
@@ -2230,6 +2333,7 @@ export const App: React.FC = () => {
     if (!batchConfirm || !effectiveClusterId) return;
     const keys = batchConfirm.keys;
     const kind = batchConfirm.kind;
+    const auditReason = batchConfirm.auditReason;
     setBatchBusy(true);
     setError(null);
     try {
@@ -2237,7 +2341,7 @@ export const App: React.FC = () => {
       if (kind === "pods-delete") {
         for (const key of keys) {
           const { namespace, name } = parseNsNameRowKey(key);
-          await deletePod(effectiveClusterId, namespace, name);
+          await deletePod(effectiveClusterId, namespace, name, auditReason);
         }
         trackUsage({
           event: "delete_pod",
@@ -2252,7 +2356,7 @@ export const App: React.FC = () => {
       } else if (kind === "deployments-delete") {
         for (const key of keys) {
           const { namespace, name } = parseNsNameRowKey(key);
-          await deleteDeployment(effectiveClusterId, namespace, name);
+          await deleteDeployment(effectiveClusterId, namespace, name, auditReason);
         }
         trackUsage({
           event: "delete_deployment",
@@ -2270,7 +2374,7 @@ export const App: React.FC = () => {
           }),
         );
       } else if (kind === "configmaps-delete") {
-        await batchDeleteConfigMaps(effectiveClusterId, keys.map((key) => parseNsNameRowKey(key)));
+        await batchDeleteConfigMaps(effectiveClusterId, keys.map((key) => parseNsNameRowKey(key)), auditReason);
         trackUsage({
           event: "delete_configmap",
           resource: "configmap",
@@ -2284,7 +2388,7 @@ export const App: React.FC = () => {
       } else {
         for (const key of keys) {
           const { namespace, name } = parseNsNameRowKey(key);
-          await restartDeployment(effectiveClusterId, namespace, name);
+          await restartDeployment(effectiveClusterId, namespace, name, auditReason);
         }
         trackUsage({
           event: "restart_deployment",
@@ -4569,12 +4673,14 @@ export const App: React.FC = () => {
                           deployScaleModal.namespace,
                           deployScaleModal.name,
                           n,
+                          deployScaleModal.auditReason,
                         )
                       : scaleDeployment(
                           effectiveClusterId,
                           deployScaleModal.namespace,
                           deployScaleModal.name,
                           n,
+                          deployScaleModal.auditReason,
                         );
                   scaleFn
                     .then((data) => {
@@ -4608,6 +4714,18 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
+      <AuditReasonDialog
+        open={!!auditReasonRequest}
+        actionLabel={auditReasonRequest?.actionLabel ?? "资源操作"}
+        items={auditReasonRequest?.items ?? []}
+        onClose={() => setAuditReasonRequest(null)}
+        onConfirm={(auditReason) => {
+          const request = auditReasonRequest;
+          if (!request) return;
+          request.onConfirm(auditReason);
+          setAuditReasonRequest(null);
+        }}
+      />
       <ConfirmDialog
         open={!!batchConfirm && !!effectiveClusterId}
         title={
@@ -4733,7 +4851,7 @@ export const App: React.FC = () => {
                 >
                   <button
                     type="button"
-                    className="wl-menu-item"
+                    className="wl-menu-item wl-access-menu-item"
                     onClick={() => {
                       setAccessMenuOpen(false);
                       setAccessModalTab("users");
@@ -4746,18 +4864,28 @@ export const App: React.FC = () => {
                   >
                     用户管理
                   </button>
-                  <button
-                    type="button"
-                    className="wl-menu-item"
-                    onClick={() => {
-                      setAccessMenuOpen(false);
-                      setAccessModalTab("scopes");
-                      setAccessModalOpen(true);
-                    }}
-                    style={menuItemStyleForDropdown}
-                  >
-                    作用域授权
-                  </button>
+                  {([
+                    ["grants", "角色授权"],
+                    ["groups", "作用域分组"],
+                    ["audit", "审计记录"],
+                  ] as const).map(([tab, label]) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      className="wl-menu-item wl-access-menu-item"
+                      onClick={() => {
+                        setAccessMenuOpen(false);
+                        setAccessModalTab(tab);
+                        setAccessModalOpen(true);
+                      }}
+                      style={{
+                        ...menuItemStyleForDropdown,
+                        borderBottom: tab === "audit" ? "none" : "1px solid var(--wl-border-subtle)",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </DropdownMenuPortal>
               )}
               <button
@@ -5586,6 +5714,28 @@ export const App: React.FC = () => {
                       })()
                     : "未应用"}
                   {" "}（仅点击「应用」后才生效）
+                  {effectiveComboId && effectiveScopeAccessRole && (
+                    <span
+                      title={
+                        isEffectiveScopeReadOnly
+                          ? "只读角色可查看资源、Logs 与 YAML，但不能编辑、删除、重启、扩缩容或打开 Shell"
+                          : "当前作用域允许读写操作，最终仍受 Kubernetes RBAC 限制"
+                      }
+                      style={{
+                        display: "inline-flex",
+                        marginLeft: 8,
+                        padding: "2px 7px",
+                        borderRadius: 999,
+                        border: `1px solid ${isEffectiveScopeReadOnly ? "var(--wl-pill-info-border)" : "var(--wl-pill-success-border)"}`,
+                        background: isEffectiveScopeReadOnly ? "var(--wl-pill-info-bg)" : "var(--wl-pill-success-bg)",
+                        color: isEffectiveScopeReadOnly ? "var(--wl-pill-info-text)" : "var(--wl-pill-success-text)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {scopeRoleLabel(effectiveScopeAccessRole)}
+                    </span>
+                  )}
                 </div>
 
                 <div
@@ -5700,7 +5850,7 @@ export const App: React.FC = () => {
                         刷新列表
                       </button>
                     )}
-                    {currentView === "pods" && selectedPodKeys.size > 0 && (
+                    {canResourceWrite && currentView === "pods" && selectedPodKeys.size > 0 && (
                       <div className="wl-bulk-action-bar">
                         <span>
                           已选 <span className="wl-bulk-action-bar__count">{selectedPodKeys.size}</span> 项
@@ -5716,7 +5866,7 @@ export const App: React.FC = () => {
                           className="wl-bulk-btn wl-bulk-btn--danger"
                           disabled={!effectiveClusterId}
                           onClick={() =>
-                            setBatchConfirm({
+                            openAuditedBatchConfirm({
                               kind: "pods-delete",
                               keys: [...selectedPodKeys].sort(),
                             })
@@ -5733,7 +5883,7 @@ export const App: React.FC = () => {
                         </button>
                       </div>
                     )}
-                    {currentView === "deployments" && selectedDeploymentKeys.size > 0 && (
+                    {canResourceWrite && currentView === "deployments" && selectedDeploymentKeys.size > 0 && (
                       <div className="wl-bulk-action-bar">
                         <span>
                           已选 <span className="wl-bulk-action-bar__count">{selectedDeploymentKeys.size}</span> 项
@@ -5749,7 +5899,7 @@ export const App: React.FC = () => {
                           className="wl-bulk-btn wl-bulk-btn--danger"
                           disabled={!effectiveClusterId}
                           onClick={() =>
-                            setBatchConfirm({
+                            openAuditedBatchConfirm({
                               kind: "deployments-delete",
                               keys: [...selectedDeploymentKeys].sort(),
                             })
@@ -5762,7 +5912,7 @@ export const App: React.FC = () => {
                           className="wl-bulk-btn wl-bulk-btn--secondary"
                           disabled={!effectiveClusterId}
                           onClick={() =>
-                            setBatchConfirm({
+                            openAuditedBatchConfirm({
                               kind: "deployments-restart",
                               keys: [...selectedDeploymentKeys].sort(),
                             })
@@ -5790,12 +5940,13 @@ export const App: React.FC = () => {
                             </span>
                           )}
                         </span>
+                        {canResourceWrite && (
                         <button
                           type="button"
                           className="wl-bulk-btn wl-bulk-btn--danger"
                           disabled={!effectiveClusterId}
                           onClick={() =>
-                            setBatchConfirm({
+                            openAuditedBatchConfirm({
                               kind: "configmaps-delete",
                               keys: [...selectedConfigMapKeys].sort(),
                             })
@@ -5803,6 +5954,7 @@ export const App: React.FC = () => {
                         >
                           删除
                         </button>
+                        )}
                         <button
                           type="button"
                           className="wl-bulk-btn wl-bulk-btn--secondary"
@@ -5984,6 +6136,8 @@ export const App: React.FC = () => {
                       <tr>
                         <SelectionHeaderCell thBase={thStyle} width={LIST_SELECT_COL_WIDTH}>
                           <input
+                            disabled={!canResourceWrite}
+                            style={{ visibility: canResourceWrite ? "visible" : "hidden" }}
                             ref={podTableHeaderSelectRef}
                             type="checkbox"
                             aria-label="全选当前可见 Pod"
@@ -6077,6 +6231,8 @@ export const App: React.FC = () => {
                               onClick={(e) => e.stopPropagation()}
                             >
                               <input
+                                disabled={!canResourceWrite}
+                                style={{ visibility: canResourceWrite ? "visible" : "hidden" }}
                                 type="checkbox"
                                 checked={selectedPodKeys.has(podRowSelectKey)}
                                 aria-label={`选择 Pod ${podRowSelectKey}`}
@@ -6183,7 +6339,7 @@ export const App: React.FC = () => {
                                       className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
                                       style={{
                                         ...menuItemStyleForDropdown,
-                                        display: "flex",
+                                        display: canPodExec ? "flex" : "none",
                                         alignItems: "center",
                                         justifyContent: "space-between",
                                         width: "100%",
@@ -6213,7 +6369,7 @@ export const App: React.FC = () => {
                                       className="wl-menu-item"
                                       style={menuItemStyleForDropdown}
                                     >
-                                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                                      <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                     </button>
                                     <button
                                       type="button"
@@ -6223,14 +6379,14 @@ export const App: React.FC = () => {
                                         if (!effectiveClusterId) return;
                                         const ns = p.metadata.namespace;
                                         const name = p.metadata.name;
-                                        setActionConfirm({
+                                        openAuditedActionConfirm({
                                           title: "确认删除 1 个 Pod？",
                                           description: "删除后 Pod 将终止并从集群移除。",
                                           items: [`${ns}/${name}`],
                                           variant: "danger",
-                                          onConfirm: async () => {
+                                          onConfirm: async (auditReason) => {
                                             try {
-                                              await deletePod(effectiveClusterId, ns, name);
+                                              await deletePod(effectiveClusterId, ns, name, auditReason);
                                               trackUsage({
                                                 event: "delete_pod",
                                                 resource: "pod",
@@ -6246,12 +6402,15 @@ export const App: React.FC = () => {
                                         });
                                       }}
                                       className="wl-menu-item wl-menu-item-danger"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                     >
                                       <span style={{ marginRight: 8 }}>🗑</span> Delete
                                     </button>
                                   </div>
-                                  {podMenuSubmenu && (
+                                  {podMenuSubmenu && (podMenuSubmenu !== "shell" || canPodExec) && (
                                     <div style={{ minWidth: 100, padding: "4px 0" }}>
                                       {containers.map((c) => (
                                         <button
@@ -6297,6 +6456,8 @@ export const App: React.FC = () => {
                       <tr>
                         <SelectionHeaderCell thBase={thStyle} width={LIST_SELECT_COL_WIDTH}>
                           <input
+                            disabled={!canResourceWrite}
+                            style={{ visibility: canResourceWrite ? "visible" : "hidden" }}
                             ref={deployTableHeaderSelectRef}
                             type="checkbox"
                             aria-label="全选当前可见 Deployment"
@@ -6393,6 +6554,8 @@ export const App: React.FC = () => {
                               onClick={(e) => e.stopPropagation()}
                             >
                               <input
+                                disabled={!canResourceWrite}
+                                style={{ visibility: canResourceWrite ? "visible" : "hidden" }}
                                 type="checkbox"
                                 checked={selectedDeploymentKeys.has(deployRowSelectKey)}
                                 aria-label={`选择 Deployment ${deployRowSelectKey}`}
@@ -6489,16 +6652,22 @@ export const App: React.FC = () => {
                                   <button
                                     type="button"
                                     className="wl-menu-item"
-                                    style={menuItemStyleForDropdown}
+                                    style={{
+                                      ...menuItemStyleForDropdown,
+                                      display: canResourceWrite ? undefined : "none",
+                                    }}
                                     disabled={rowBusy}
                                     onClick={() => {
                                       setDeploymentMenuOpenKey(null);
                                       setDeployScaleInput(String(d.spec?.replicas ?? 0));
-                                      setDeployScaleModal({
-                                        namespace: ns,
-                                        name: dname,
-                                        current: d.spec?.replicas ?? 0,
-                                        resource: "deployment",
+                                      requestAuditReason("扩缩容", [`${ns}/${dname}`], (auditReason) => {
+                                        setDeployScaleModal({
+                                          namespace: ns,
+                                          name: dname,
+                                          current: d.spec?.replicas ?? 0,
+                                          resource: "deployment",
+                                          auditReason,
+                                        });
                                       });
                                     }}
                                   >
@@ -6507,20 +6676,23 @@ export const App: React.FC = () => {
                                   <button
                                     type="button"
                                     className="wl-menu-item"
-                                    style={menuItemStyleForDropdown}
+                                    style={{
+                                      ...menuItemStyleForDropdown,
+                                      display: canResourceWrite ? undefined : "none",
+                                    }}
                                     disabled={rowBusy || !effectiveClusterId}
                                     onClick={() => {
                                       setDeploymentMenuOpenKey(null);
                                       if (!effectiveClusterId) return;
-                                      setActionConfirm({
+                                      openAuditedActionConfirm({
                                         title: "确认重启 1 个 Deployment？",
                                         description: "将触发滚动更新，Pod 会按策略逐步重建。",
                                         items: [`${ns}/${dname}`],
                                         variant: "primary",
-                                        onConfirm: async () => {
+                                        onConfirm: async (auditReason) => {
                                           setDeploymentRowBusyKey(menuKey);
                                           try {
-                                            const data = await restartDeployment(effectiveClusterId, ns, dname);
+                                            const data = await restartDeployment(effectiveClusterId, ns, dname, auditReason);
                                             trackUsage({
                                               event: "restart_deployment",
                                               resource: "deployment",
@@ -6551,25 +6723,28 @@ export const App: React.FC = () => {
                                     disabled={rowBusy}
                                     onClick={() => openEditDeploymentTab(d)}
                                   >
-                                    <span style={{ marginRight: 8 }}>✎</span> Edit
+                                    <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                   </button>
                                   <button
                                     type="button"
                                     className="wl-menu-item wl-menu-item-danger"
-                                    style={menuItemStyleForDropdown}
+                                    style={{
+                                      ...menuItemStyleForDropdown,
+                                      display: canResourceWrite ? undefined : "none",
+                                    }}
                                     disabled={rowBusy || !effectiveClusterId}
                                     onClick={() => {
                                       setDeploymentMenuOpenKey(null);
                                       if (!effectiveClusterId) return;
-                                      setActionConfirm({
+                                      openAuditedActionConfirm({
                                         title: "确认删除 1 个 Deployment？",
                                         description: "删除后不可恢复。",
                                         items: [`${ns}/${dname}`],
                                         variant: "danger",
-                                        onConfirm: async () => {
+                                        onConfirm: async (auditReason) => {
                                           setDeploymentRowBusyKey(menuKey);
                                           try {
-                                            await deleteDeployment(effectiveClusterId, ns, dname);
+                                            await deleteDeployment(effectiveClusterId, ns, dname, auditReason);
                                             trackUsage({
                                               event: "delete_deployment",
                                               resource: "deployment",
@@ -6875,16 +7050,22 @@ export const App: React.FC = () => {
                                     <button
                                       type="button"
                                       className="wl-menu-item"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                       disabled={rowBusy}
                                       onClick={() => {
                                         setStatefulsetMenuOpenKey(null);
                                         setDeployScaleInput(String(s.spec?.replicas ?? 0));
-                                        setDeployScaleModal({
-                                          namespace: ns,
-                                          name: sname,
-                                          current: s.spec?.replicas ?? 0,
-                                          resource: "statefulset",
+                                        requestAuditReason("扩缩容", [`${ns}/${sname}`], (auditReason) => {
+                                          setDeployScaleModal({
+                                            namespace: ns,
+                                            name: sname,
+                                            current: s.spec?.replicas ?? 0,
+                                            resource: "statefulset",
+                                            auditReason,
+                                          });
                                         });
                                       }}
                                     >
@@ -6893,23 +7074,27 @@ export const App: React.FC = () => {
                                     <button
                                       type="button"
                                       className="wl-menu-item"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                       disabled={rowBusy || !effectiveClusterId}
                                       onClick={() => {
                                         setStatefulsetMenuOpenKey(null);
                                         if (!effectiveClusterId) return;
-                                        setActionConfirm({
+                                        openAuditedActionConfirm({
                                           title: "确认重启 1 个 StatefulSet？",
                                           description: "将按策略滚动更新 Pod。",
                                           items: [`${ns}/${sname}`],
                                           variant: "primary",
-                                          onConfirm: async () => {
+                                          onConfirm: async (auditReason) => {
                                             setStatefulsetRowBusyKey(menuKey);
                                             try {
                                               const data = await restartStatefulSet(
                                                 effectiveClusterId,
                                                 ns,
                                                 sname,
+                                                auditReason,
                                               );
                                               trackUsage({
                                                 event: "restart_statefulset",
@@ -6943,25 +7128,28 @@ export const App: React.FC = () => {
                                       disabled={rowBusy}
                                       onClick={() => openEditStatefulSetTab(s)}
                                     >
-                                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                                      <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                     </button>
                                     <button
                                       type="button"
                                       className="wl-menu-item wl-menu-item-danger"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                       disabled={rowBusy || !effectiveClusterId}
                                       onClick={() => {
                                         setStatefulsetMenuOpenKey(null);
                                         if (!effectiveClusterId) return;
-                                        setActionConfirm({
+                                        openAuditedActionConfirm({
                                           title: "确认删除 1 个 StatefulSet？",
                                           description: "删除后不可恢复。",
                                           items: [`${ns}/${sname}`],
                                           variant: "danger",
-                                          onConfirm: async () => {
+                                          onConfirm: async (auditReason) => {
                                             setStatefulsetRowBusyKey(menuKey);
                                             try {
-                                              await deleteStatefulSet(effectiveClusterId, ns, sname);
+                                              await deleteStatefulSet(effectiveClusterId, ns, sname, auditReason);
                                               trackUsage({
                                                 event: "delete_statefulset",
                                                 resource: "statefulset",
@@ -7268,7 +7456,7 @@ export const App: React.FC = () => {
                                                         className={`wl-menu-item${podMenuSubmenu === "shell" ? " is-active" : ""}`}
                                                         style={{
                                                           ...menuItemStyleForDropdown,
-                                                          display: "flex",
+                                                          display: canPodExec ? "flex" : "none",
                                                           alignItems: "center",
                                                           justifyContent: "space-between",
                                                           width: "100%",
@@ -7306,7 +7494,7 @@ export const App: React.FC = () => {
                                                         className="wl-menu-item"
                                                         style={menuItemStyleForDropdown}
                                                       >
-                                                        <span style={{ marginRight: 8 }}>✎</span> Edit
+                                                        <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                                       </button>
                                                       <button
                                                         type="button"
@@ -7316,17 +7504,18 @@ export const App: React.FC = () => {
                                                           if (!effectiveClusterId) return;
                                                           const ns0 = p.metadata.namespace;
                                                           const name0 = p.metadata.name;
-                                                          setActionConfirm({
+                                                          openAuditedActionConfirm({
                                                             title: "确认删除 1 个 Pod？",
                                                             description: "删除后 Pod 将终止并从集群移除。",
                                                             items: [`${ns0}/${name0}`],
                                                             variant: "danger",
-                                                            onConfirm: async () => {
+                                                            onConfirm: async (auditReason) => {
                                                               try {
                                                                 await deletePod(
                                                                   effectiveClusterId,
                                                                   ns0,
                                                                   name0,
+                                                                  auditReason,
                                                                 );
                                                                 trackUsage({
                                                                   event: "delete_pod",
@@ -7347,12 +7536,15 @@ export const App: React.FC = () => {
                                                           });
                                                         }}
                                                         className="wl-menu-item wl-menu-item-danger"
-                                                        style={menuItemStyleForDropdown}
+                                                        style={{
+                                                          ...menuItemStyleForDropdown,
+                                                          display: canResourceWrite ? undefined : "none",
+                                                        }}
                                                       >
                                                         <span style={{ marginRight: 8 }}>🗑</span> Delete
                                                       </button>
                                                     </div>
-                                                    {podMenuSubmenu && (
+                                                    {podMenuSubmenu && (podMenuSubmenu !== "shell" || canPodExec) && (
                                                       <div style={{ minWidth: 100, padding: "4px 0" }}>
                                                         {pContainers.map((c) => (
                                                           <button
@@ -7653,25 +7845,28 @@ export const App: React.FC = () => {
                                       disabled={rowBusy}
                                       onClick={() => openEditIngressTab(ing)}
                                     >
-                                      <span style={{ marginRight: 8 }}>✎</span> Edit
+                                      <span style={{ marginRight: 8 }}>✎</span> {canResourceWrite ? "Edit" : "View YAML"}
                                     </button>
                                     <button
                                       type="button"
                                       className="wl-menu-item wl-menu-item-danger"
-                                      style={menuItemStyleForDropdown}
+                                      style={{
+                                        ...menuItemStyleForDropdown,
+                                        display: canResourceWrite ? undefined : "none",
+                                      }}
                                       disabled={rowBusy || !effectiveClusterId}
                                       onClick={() => {
                                         setIngressMenuOpenKey(null);
                                         if (!effectiveClusterId) return;
-                                        setActionConfirm({
+                                        openAuditedActionConfirm({
                                           title: "确认删除 1 个 Ingress？",
                                           description: "删除后不可恢复。",
                                           items: [`${ns}/${iname}`],
                                           variant: "danger",
-                                          onConfirm: async () => {
+                                          onConfirm: async (auditReason) => {
                                             setIngressRowBusyKey(menuKey);
                                             try {
-                                              await deleteIngress(effectiveClusterId, ns, iname);
+                                              await deleteIngress(effectiveClusterId, ns, iname, auditReason);
                                               trackUsage({
                                                 event: "delete_ingress",
                                                 resource: "ingress",
@@ -7834,6 +8029,7 @@ export const App: React.FC = () => {
                     pods={pods}
                     listAgeNow={listAgeNow}
                     effectiveClusterId={effectiveClusterId}
+                    canWrite={canResourceWrite}
                     menuOpenKey={serviceMenuOpenKey}
                     setMenuOpenKey={setServiceMenuOpenKey}
                     rowBusyKey={serviceRowBusyKey}
@@ -7842,7 +8038,7 @@ export const App: React.FC = () => {
                     openEditTab={openEditServiceTab}
                     jumpToPods={jumpServiceToPods}
                     copyName={copyName}
-                    setActionConfirm={setActionConfirm}
+                    setActionConfirm={openAuditedActionConfirm}
                     onDeletedOne={(ns, name) => {
                       setServiceItems((prev) =>
                         prev.filter(
@@ -7868,6 +8064,7 @@ export const App: React.FC = () => {
                     pods={pods}
                     listAgeNow={listAgeNow}
                     effectiveClusterId={effectiveClusterId}
+                    canWrite={canResourceWrite}
                     menuOpenKey={pvcMenuOpenKey}
                     setMenuOpenKey={setPvcMenuOpenKey}
                     rowBusyKey={pvcRowBusyKey}
@@ -7875,7 +8072,7 @@ export const App: React.FC = () => {
                     openDescribe={openDescribeForPvc}
                     openEditTab={openEditPvcTab}
                     copyName={copyName}
-                    setActionConfirm={setActionConfirm}
+                    setActionConfirm={openAuditedActionConfirm}
                     onDeletedOne={(ns, name) => {
                       setPvcItems((prev) =>
                         prev.filter(
@@ -7902,6 +8099,7 @@ export const App: React.FC = () => {
                     risksByKey={configMapRisksByKey}
                     listAgeNow={listAgeNow}
                     effectiveClusterId={effectiveClusterId}
+                    canWrite={canResourceWrite}
                     selectedKeys={selectedConfigMapKeys}
                     onToggleRow={(key, checked) => {
                       setSelectedConfigMapKeys((prev) => {
@@ -7931,7 +8129,7 @@ export const App: React.FC = () => {
                     openConfigEditorTab={openConfigMapEditorTab}
                     downloadYaml={downloadConfigMapYaml}
                     copyName={copyName}
-                    setActionConfirm={setActionConfirm}
+                    setActionConfirm={openAuditedActionConfirm}
                     onDeletedOne={(ns, name) => {
                       setConfigMapItems((prev) =>
                         prev.filter((it) => !((it.metadata.namespace ?? "") === ns && it.metadata.name === name)),

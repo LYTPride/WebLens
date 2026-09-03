@@ -1,4 +1,5 @@
 import axios from "axios";
+import { auditReasonHeaders } from "./constants/audit";
 
 export interface ClusterSummary {
   id: string;
@@ -407,11 +408,31 @@ export interface NodeDescribe {
   events: K8sEvent[];
 }
 
+export type AccessRole = "viewer" | "operator";
+
+export type ScopeCapability =
+  | "resource.read"
+  | "resource.write"
+  | "pod.logs"
+  | "pod.exec"
+  | "file.read"
+  | "file.write"
+  | "platform.manage"
+  | "audit.read";
+
+export interface ScopeGroupSummary {
+  id: number;
+  name: string;
+}
+
 export interface ClusterCombo {
   id: string;
   clusterId: string;
   namespace: string;
   alias?: string;
+  group?: ScopeGroupSummary;
+  accessRole?: AccessRole;
+  capabilities?: ScopeCapability[];
 }
 
 /** 从 Pod 取容器名列表（用于 Shell/Logs 子菜单），优先 spec.containers，否则 status.containerStatuses */
@@ -436,6 +457,7 @@ export interface AuthUser {
   id: number;
   username: string;
   role: "admin" | "user";
+  isRoot: boolean;
   disabled: boolean;
   mustChangePassword: boolean;
   createdAt?: number;
@@ -454,6 +476,51 @@ export interface AuthEnvelope {
 export interface AdminUserRow extends AuthUser {
   scopeCount: number;
 }
+export interface ScopeGroup {
+  id: number;
+  name: string;
+  description: string;
+  sortOrder: number;
+  scopeIds: string[];
+  scopeCount: number;
+  grantCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ScopeGrant {
+  scopeId: string;
+  role: AccessRole;
+}
+
+export interface GroupGrant {
+  groupId: number;
+  role: AccessRole;
+}
+
+export interface UserGrants {
+  groupGrants: GroupGrant[];
+  scopeGrants: ScopeGrant[];
+}
+
+export interface AuditEntry {
+  id: number;
+  userId?: number;
+  username: string;
+  action: string;
+  method: string;
+  path: string;
+  clusterId?: string;
+  namespace?: string;
+  resourceKind?: string;
+  resourceName?: string;
+  result: "success" | "failure" | "denied";
+  statusCode: number;
+  operationLog?: string;
+  detail?: string;
+  createdAt: number;
+}
+
 
 export function emitAuthEvent(code: string, message: string): void {
   if (typeof window === "undefined") return;
@@ -506,8 +573,8 @@ export async function fetchAdminUsers(): Promise<AdminUserRow[]> {
   return res.data.items;
 }
 
-export async function createAdminUser(username: string): Promise<{ user: AuthUser; defaultPassword: string }> {
-  const res = await api.post<{ user: AuthUser; defaultPassword: string }>("/api/auth/admin/users", { username });
+export async function createAdminUser(username: string, role: AuthUser["role"]): Promise<{ user: AuthUser; temporaryPassword: string }> {
+  const res = await api.post<{ user: AuthUser; temporaryPassword: string }>("/api/auth/admin/users", { username, role });
   return res.data;
 }
 
@@ -515,8 +582,8 @@ export async function setAdminUserEnabled(id: number, enabled: boolean): Promise
   await api.patch(`/api/auth/admin/users/${encodeURIComponent(String(id))}/enabled`, { enabled });
 }
 
-export async function resetAdminUserPassword(id: number): Promise<{ defaultPassword: string }> {
-  const res = await api.post<{ defaultPassword: string }>(`/api/auth/admin/users/${encodeURIComponent(String(id))}/reset-password`, {});
+export async function resetAdminUserPassword(id: number): Promise<{ temporaryPassword: string }> {
+  const res = await api.post<{ temporaryPassword: string }>(`/api/auth/admin/users/${encodeURIComponent(String(id))}/reset-password`, {});
   return res.data;
 }
 
@@ -532,6 +599,58 @@ export async function fetchAdminUserScopes(id: number): Promise<string[]> {
 export async function saveAdminUserScopes(id: number, scopeIds: string[]): Promise<void> {
   await api.put(`/api/auth/admin/users/${encodeURIComponent(String(id))}/scopes`, { scopeIds });
 }
+export async function fetchAdminScopeGroups(): Promise<ScopeGroup[]> {
+  const res = await api.get<{ items: ScopeGroup[] }>("/api/auth/admin/scope-groups");
+  return res.data.items;
+}
+
+export async function createAdminScopeGroup(name: string, description: string): Promise<ScopeGroup> {
+  const res = await api.post<ScopeGroup>("/api/auth/admin/scope-groups", { name, description });
+  return res.data;
+}
+
+export async function updateAdminScopeGroup(
+  id: number,
+  input: { name: string; description: string; sortOrder: number },
+): Promise<void> {
+  await api.patch(`/api/auth/admin/scope-groups/${encodeURIComponent(String(id))}`, input);
+}
+
+export async function deleteAdminScopeGroup(id: number): Promise<void> {
+  await api.delete(`/api/auth/admin/scope-groups/${encodeURIComponent(String(id))}`);
+}
+
+export async function saveAdminScopeGroupScopes(id: number, scopeIds: string[]): Promise<void> {
+  await api.put(`/api/auth/admin/scope-groups/${encodeURIComponent(String(id))}/scopes`, { scopeIds });
+}
+
+export async function fetchAdminUserGrants(id: number): Promise<UserGrants> {
+  const res = await api.get<UserGrants>(`/api/auth/admin/users/${encodeURIComponent(String(id))}/grants`);
+  return res.data;
+}
+
+export async function saveAdminUserGrants(id: number, grants: UserGrants): Promise<void> {
+  await api.put(`/api/auth/admin/users/${encodeURIComponent(String(id))}/grants`, grants);
+}
+
+export async function fetchAdminAuditLogs(filters?: {
+  userId?: number;
+  action?: string;
+  result?: AuditEntry["result"] | "";
+  limit?: number;
+}): Promise<AuditEntry[]> {
+  const params = new URLSearchParams();
+  if (filters?.userId) params.set("userId", String(filters.userId));
+  if (filters?.action) params.set("action", filters.action);
+  if (filters?.result) params.set("result", filters.result);
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  const query = params.toString();
+  const res = await api.get<{ items: AuditEntry[] }>(
+    `/api/auth/admin/audit-logs${query ? `?${query}` : ""}`,
+  );
+  return res.data.items;
+}
+
 
 export async function fetchClusters() {
   const res = await api.get<{ items: ClusterSummary[] }>("/api/clusters");
@@ -1126,18 +1245,20 @@ export async function applyPodYaml(
   namespace: string,
   pod: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<void> {
   await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
 }
 
 /** 删除 Pod */
-export async function deletePod(clusterId: string, namespace: string, pod: string): Promise<void> {
+export async function deletePod(clusterId: string, namespace: string, pod: string, auditReason: string): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1160,11 +1281,12 @@ export async function applyDeploymentYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
@@ -1174,10 +1296,12 @@ export async function scaleDeployment(
   namespace: string,
   name: string,
   replicas: number,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.patch(
     `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
     { replicas },
+    { headers: auditReasonHeaders(auditReason) },
   );
   return res.data;
 }
@@ -1186,9 +1310,12 @@ export async function restartDeployment(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.post(
     `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+    undefined,
+    { headers: auditReasonHeaders(auditReason) },
   );
   return res.data;
 }
@@ -1197,9 +1324,11 @@ export async function deleteDeployment(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1231,11 +1360,12 @@ export async function applyStatefulSetYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
@@ -1245,10 +1375,12 @@ export async function scaleStatefulSet(
   namespace: string,
   name: string,
   replicas: number,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.patch(
     `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
     { replicas },
+    { headers: auditReasonHeaders(auditReason) },
   );
   return res.data;
 }
@@ -1257,9 +1389,12 @@ export async function restartStatefulSet(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.post(
     `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+    undefined,
+    { headers: auditReasonHeaders(auditReason) },
   );
   return res.data;
 }
@@ -1268,9 +1403,11 @@ export async function deleteStatefulSet(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1302,11 +1439,12 @@ export async function applyIngressYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
@@ -1315,9 +1453,11 @@ export async function deleteIngress(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1349,11 +1489,12 @@ export async function applyServiceYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
@@ -1362,9 +1503,11 @@ export async function deleteService(
   clusterId: string,
   namespace: string,
   name: string,
+  auditReason: string,
 ): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1392,18 +1535,20 @@ export async function applyPvcYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/persistentvolumeclaims/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
 
-export async function deletePvc(clusterId: string, namespace: string, name: string): Promise<void> {
+export async function deletePvc(clusterId: string, namespace: string, name: string, auditReason: string): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/persistentvolumeclaims/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
@@ -1431,25 +1576,31 @@ export async function applyConfigMapYaml(
   namespace: string,
   name: string,
   yamlBody: string,
+  auditReason: string,
 ): Promise<ConfigMap> {
   const res = await api.put<ConfigMap>(
     `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
 
-export async function deleteConfigMap(clusterId: string, namespace: string, name: string): Promise<void> {
+export async function deleteConfigMap(clusterId: string, namespace: string, name: string, auditReason: string): Promise<void> {
   await api.delete(
     `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { headers: auditReasonHeaders(auditReason) },
   );
 }
 
 export type ConfigMapBatchItem = { namespace: string; name: string };
 
-export async function batchDeleteConfigMaps(clusterId: string, items: ConfigMapBatchItem[]): Promise<void> {
-  await api.post(`/api/clusters/${encodeURIComponent(clusterId)}/configmaps/batch-delete`, { items });
+export async function batchDeleteConfigMaps(clusterId: string, items: ConfigMapBatchItem[], auditReason: string): Promise<void> {
+  await api.post(
+    `/api/clusters/${encodeURIComponent(clusterId)}/configmaps/batch-delete`,
+    { items },
+    { headers: auditReasonHeaders(auditReason) },
+  );
 }
 
 export async function exportConfigMapsYaml(clusterId: string, items: ConfigMapBatchItem[]): Promise<string> {
@@ -1476,11 +1627,11 @@ export async function fetchNodeYaml(clusterId: string, name: string): Promise<st
   return res.data;
 }
 
-export async function applyNodeYaml(clusterId: string, name: string, yamlBody: string): Promise<unknown> {
+export async function applyNodeYaml(clusterId: string, name: string, yamlBody: string, auditReason: string): Promise<unknown> {
   const res = await api.put(
     `/api/clusters/${encodeURIComponent(clusterId)}/nodes/${encodeURIComponent(name)}`,
     yamlBody,
-    { headers: { "Content-Type": "text/yaml" } },
+    { headers: { "Content-Type": "text/yaml", ...auditReasonHeaders(auditReason) } },
   );
   return res.data;
 }
