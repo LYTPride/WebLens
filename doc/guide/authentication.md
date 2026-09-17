@@ -1,6 +1,6 @@
 # 登录、用户与作用域权限
 
-WebLens 需要登录后才能进入操作页面。当前版本提供两层权限模型：`admin/user` 保存平台身份，`isRoot` 区分唯一根管理员与受委派的平台管理员，`viewer/operator` 决定普通用户在具体作用域内能做什么。
+CloudScope 需要登录后才能进入操作页面。当前版本提供两层权限模型：`admin/user` 保存平台身份，`isRoot` 区分唯一根管理员与受委派的平台管理员，`viewer/operator` 决定普通用户在具体作用域内能做什么。
 
 ## 首次初始化
 
@@ -18,7 +18,7 @@ WebLens 需要登录后才能进入操作页面。当前版本提供两层权限
 
 ## 登录与会话
 
-- 登录页使用固定深色双栏视觉，左侧为 WebLens 品牌与低刺激呼吸式视频背景，右侧为账号密码表单；登录页不提供深浅主题切换。
+- 登录页使用固定深色双栏视觉，左侧为云镜智能体品牌与低刺激呼吸式视频背景，右侧为账号密码表单；登录页不提供深浅主题切换。
 - 密码默认以圆点隐藏，可用小眼睛图标切换显示；用户名、密码和首次改密输入框使用高对比光标。
 - 用户名加数据库中的密码哈希不能登录，必须输入原始密码。
 - 会话保存在服务端，浏览器使用 HttpOnly Cookie。
@@ -60,10 +60,10 @@ WebLens 需要登录后才能进入操作页面。当前版本提供两层权限
 
 ## 根管理员密码遗失时的本机恢复
 
-WebLens 不提供网页或远程 API 来重置 root 密码。具备 WebLens 主机和部署目录访问权限的运维人员，在交互式终端执行：
+CloudScope 不提供网页或远程 API 来重置 root 密码。具备 CloudScope 主机和部署目录访问权限的运维人员，在交互式终端执行：
 
 ```bash
-cd <WebLens 部署目录>
+cd <CloudScope 部署目录>
 ./scripts/reset-admin-password.sh
 ```
 
@@ -119,7 +119,7 @@ kubectl --kubeconfig <config_file> -n <namespace>
 - 旧版已有作用域授权升级后自动作为运维授权保留。
 - 当前作用域角色会显示在 Console 顶部；观察者打开 YAML 时进入只读模式。
 
-WebLens 角色不会绕过 Kubernetes RBAC。即使 WebLens 授予运维角色，目标集群账号仍需拥有相应 Kubernetes 权限。
+CloudScope 角色不会绕过 Kubernetes RBAC。即使 CloudScope 授予运维角色，目标集群账号仍需拥有相应 Kubernetes 权限。
 
 ## 权限调整生效
 

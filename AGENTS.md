@@ -1,10 +1,10 @@
-# WebLens Agent Guide
+# CloudScope Agent Guide
 
 Keep this file focused on durable product decisions and non-obvious engineering constraints. Use the references below only when relevant to the task; implementation details and history belong in `doc/`.
 
 ## Product and code map
 
-WebLens is a Kubernetes operations console with cluster/namespace scoping, resource lists, a right-side Describe drawer, and bottom workspace tabs for operational sessions.
+CloudScope is a Kubernetes operations console with cluster/namespace scoping, resource lists, a right-side Describe drawer, and bottom workspace tabs for operational sessions.
 
 - Go + Gin + client-go backend: `server/internal/httpapi/`; serves the API and built frontend from `web/dist` on the same origin.
 - React + TypeScript + Vite frontend: orchestration in `web/src/pages/App.tsx`, API client in `web/src/api.ts`, shared UI in `web/src/components/`.
@@ -15,7 +15,7 @@ WebLens is a Kubernetes operations console with cluster/namespace scoping, resou
 | Line | Canonical host | Purpose |
 | --- | --- | --- |
 | Personal / 个人线 | GitHub `LYTPride/WebLens` | Personal ideas, experiments, and general features |
-| Enterprise / 企业线 | Company GitLab (planned name: `WebLens-Enterprise`) | Company-specific requirements and releases |
+| Enterprise / 企业线 | Company GitLab `CloudScope` | Company-specific requirements and releases |
 
 - Use separate local clones, each with its own canonical `origin` and `main`. No enterprise GitHub mirror, automatic cross-repository synchronization, or whole-main merges.
 - Develop on short-lived branches from the target repository's current `main`, then merge through GitHub PRs or GitLab MRs. Use `feat/`, `fix/`, `hotfix/`, `chore/`, or `sync/` as appropriate; tool-required prefixes such as `codex/` are also valid.

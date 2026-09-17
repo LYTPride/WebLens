@@ -1,6 +1,6 @@
 # Ingress 与 Services 使用说明
 
-本文说明 WebLens 中 **Ingress**、**Services** 资源页的列表、行展开、Describe 面板，以及 **跨资源联动**（跳转到 Services / Pods / Ingress）与 **名称展示** 的交互约定。
+本文说明 CloudScope 中 **Ingress**、**Services** 资源页的列表、行展开、Describe 面板，以及 **跨资源联动**（跳转到 Services / Pods / Ingress）与 **名称展示** 的交互约定。
 
 ## 列表与展开
 

@@ -22,7 +22,7 @@ Permissions V2 在现有 `admin/user` 数据模型上增加不可变的 `is_root
 | 平台管理员 | 平台管理能力，加全部已添加作用域的 Operator 能力；未添加作用域和 Nodes 默认拒绝 |
 | 根管理员 | 平台管理能力，加全部作用域与集群级资源的 fallback |
 
-WebLens 在请求进入 Kubernetes 客户端前检查平台能力；Kubernetes RBAC 仍是第二道权限边界，因此最终权限是 WebLens 与 Kubernetes RBAC 的交集。
+CloudScope 在请求进入 Kubernetes 客户端前检查平台能力；Kubernetes RBAC 仍是第二道权限边界，因此最终权限是 CloudScope 与 Kubernetes RBAC 的交集。
 
 ## 后端拦截
 

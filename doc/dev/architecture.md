@@ -1,8 +1,8 @@
-# WebLens 架构设计
+# CloudScope 架构设计
 
 ## 总体结构
 
-WebLens 采用前后端分离 + 同源部署模式：
+CloudScope 采用前后端分离 + 同源部署模式：
 
 - 前端：React + TypeScript + Vite
 - 后端：Go + Gin + client-go

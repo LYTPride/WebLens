@@ -749,6 +749,30 @@ th.wl-table-select-th input[type="checkbox"] {
   overflow: hidden;
 }
 
+/* 产品品牌：图形标志配中文产品名，适配工作台顶栏。 */
+.wl-product-brand {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+}
+
+.wl-product-brand__logo {
+  flex: none;
+  filter: drop-shadow(0 4px 10px rgba(14, 116, 144, 0.18));
+}
+
+.wl-product-brand__name {
+  color: var(--wl-text-heading);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
 /* 顶栏右上角统一 icon 操作区 */
 .wl-header-tray .wl-theme-toggle {
   padding: 4px;
@@ -1164,31 +1188,32 @@ th.wl-table-select-th input[type="checkbox"] {
 }
 
 .wl-auth-hero-brand {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  font-size: clamp(18px, 1.3vw, 21px);
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0;
+  gap: 12px;
 }
 
-.wl-auth-hero-mark {
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  background: #ffffff;
-  box-shadow: 0 0 18px rgba(255, 255, 255, 0.28);
+.wl-auth-hero-logo {
+  flex: none;
+  filter: drop-shadow(0 8px 22px rgba(14, 165, 233, 0.24));
+}
+
+.wl-auth-hero-brand-name {
+  color: #ffffff;
+  font-size: clamp(20px, 1.55vw, 24px);
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0.02em;
 }
 
 .wl-auth-hero-title {
   max-width: 100%;
   color: #ffffff;
-  font-size: clamp(21px, 2.6vw, 38px);
+  font-size: clamp(21px, 2.4vw, 36px);
   font-weight: 500;
-  line-height: 1.08;
-  letter-spacing: 0;
+  line-height: 1.16;
+  letter-spacing: 0.015em;
   white-space: nowrap;
 }
 

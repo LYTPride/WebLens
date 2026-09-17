@@ -85,7 +85,7 @@ const beforeMount: BeforeMount = (monaco) => {
 
 /**
  * 统一 YAML 编辑：Monaco + 原生 sticky scroll（indentation 模型）+ 内置行号与 minimap。
- * 主题随 WebLens 深浅切换（不丢编辑器状态）。
+ * 主题随 CloudScope 深浅切换（不丢编辑器状态）。
  */
 export const YamlMonacoEditor = forwardRef<YamlMonacoEditorHandle, YamlMonacoEditorProps>(
   function YamlMonacoEditor({ value, onChange, readOnly = false }, ref) {

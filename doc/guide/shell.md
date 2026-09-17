@@ -1,6 +1,6 @@
 # Shell 使用手册
 
-本文面向使用者，说明如何在 WebLens 中进入 Pod Shell 并进行基本排障。
+本文面向使用者，说明如何在 CloudScope 中进入 Pod Shell 并进行基本排障。
 
 ## 打开 Shell
 

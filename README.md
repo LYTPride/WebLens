@@ -1,6 +1,6 @@
-# WebLens
+# 云镜智能体 CloudScope
 
-WebLens 是一个面向 Kubernetes 运维场景的 Web 控制台。它通过浏览器提供多集群资源查看、Pod 排障与基础运维能力，后端作为 Kubernetes API Proxy 统一处理请求。
+云镜智能体（CloudScope）是一个面向 Kubernetes 运维场景的 Web 控制台。它通过浏览器提供多集群资源查看、Pod 排障与基础运维能力，后端作为 Kubernetes API Proxy 统一处理请求。
 
 > 说明：本 README **只概括重大核心特色**；字段级交互、样式与迭代细节默认写在 `doc/`，不在此逐条展开。
 
@@ -36,7 +36,7 @@ WebLens 是一个面向 Kubernetes 运维场景的 Web 控制台。它通过浏�
 
 初始化成功后再启动服务。发布包升级时不要覆盖 `data/` 目录；默认数据库路径为 `data/weblens.db`，可通过 `WEBLENS_DB_PATH` 指定。
 
-如果根管理员 `admin` 的密码遗失，请在 WebLens 主机的交互式终端执行：
+如果根管理员 `admin` 的密码遗失，请在 CloudScope 主机的交互式终端执行：
 
 ```bash
 ./scripts/reset-admin-password.sh

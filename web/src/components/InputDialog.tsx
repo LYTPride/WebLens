@@ -15,7 +15,7 @@ export type InputDialogProps = {
 };
 
 /**
- * WebLens 风格单行输入弹窗，替代 window.prompt（重命名、新建文件夹等）。
+ * CloudScope 风格单行输入弹窗，替代 window.prompt（重命名、新建文件夹等）。
  */
 export const InputDialog: React.FC<InputDialogProps> = ({
   open,

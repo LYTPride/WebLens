@@ -5,18 +5,18 @@ BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PID_FILE="${BASE_DIR}/weblens.pid"
 
 if [[ ! -f "${PID_FILE}" ]]; then
-  echo "WebLens is not running (no PID file)."
+  echo "CloudScope is not running (no PID file)."
   exit 0
 fi
 
 PID="$(cat "${PID_FILE}")"
 if ! kill -0 "${PID}" 2>/dev/null; then
-  echo "WebLens process ${PID} not found, removing stale PID file."
+  echo "CloudScope process ${PID} not found, removing stale PID file."
   rm -f "${PID_FILE}"
   exit 0
 fi
 
-echo "Stopping WebLens (PID ${PID})..."
+echo "Stopping CloudScope (PID ${PID})..."
 kill "${PID}"
 
 for _ in {1..20}; do

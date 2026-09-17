@@ -37,7 +37,7 @@ func main() {
 		log.Fatalf("check auth database: %v", err)
 	}
 	if !initialized {
-		log.Fatalf("WebLens is not initialized. Please run scripts/init.sh first.")
+		log.Fatalf("CloudScope is not initialized. Please run scripts/init.sh first.")
 	}
 	if err := store.MigrateLegacyConfig(ctx); err != nil {
 		log.Fatalf("migrate legacy config: %v", err)
@@ -61,7 +61,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("WebLens server listening on %s", config.HTTPAddr())
+	log.Printf("CloudScope server listening on %s", config.HTTPAddr())
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
@@ -96,13 +96,13 @@ func runCommand(cmd string) {
 		password := strings.TrimRight(string(passwordBytes), "\r\n")
 		if err := store.BootstrapAdmin(ctx, password); err != nil {
 			if errors.Is(err, auth.ErrAlreadyInitialized) {
-				fmt.Fprintln(os.Stderr, "WebLens has already been initialized.")
+				fmt.Fprintln(os.Stderr, "CloudScope has already been initialized.")
 				os.Exit(1)
 			}
 			fmt.Fprintf(os.Stderr, "initialize admin: %v\n", err)
 			os.Exit(2)
 		}
-		fmt.Println("WebLens admin user initialized.")
+		fmt.Println("CloudScope admin user initialized.")
 	case "reset-admin-password":
 		passwordBytes, err := io.ReadAll(io.LimitReader(os.Stdin, 4096))
 		if err != nil {
@@ -115,7 +115,7 @@ func runCommand(cmd string) {
 			fmt.Fprintf(os.Stderr, "reset admin password: %v\n", err)
 			os.Exit(2)
 		}
-		fmt.Println("WebLens admin password was reset successfully.")
+		fmt.Println("CloudScope admin password was reset successfully.")
 		fmt.Printf("%d existing admin sessions were revoked.\n", revokedSessions)
 		fmt.Println("The next admin login must change this temporary password.")
 	default:

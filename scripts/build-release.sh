@@ -2,9 +2,9 @@
 # 用法：
 #   ./scripts/build-release.sh            # 使用当天日期作为版本号，例如 weblens-20260309.tar.gz
 #   ./scripts/build-release.sh v1.0.0     # 指定版本号，生成 weblens-v1.0.0.tar.gz
-# 打包内容包含启动 WebLens 所需的 server/bin/weblens-server、web/dist、启停脚本和 admin 恢复脚本，
+# 打包内容包含启动 CloudScope 所需的 server/bin/weblens-server、web/dist、启停脚本和 admin 恢复脚本，
 # 排除测试脚本、源码、node_modules 和已有日志等，仅用于部署。
-# 构建并打包 WebLens 部署包 .tar.gz（包含启动服务所需文件，排除测试与日志）
+# 构建并打包 CloudScope 部署包 .tar.gz（包含启动服务所需文件，排除测试与日志）
 set -euo pipefail
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,7 +17,7 @@ OUT_DIR="${BASE_DIR}/release"
 VERSION="${1:-$(date +%Y%m%d)}"
 TARBALL="${OUT_DIR}/${RELEASE_NAME}-${VERSION}.tar.gz"
 
-echo "=== WebLens 部署包构建 ==="
+echo "=== CloudScope 部署包构建 ==="
 
 # 0. 前置检查
 if ! command -v go &>/dev/null; then
@@ -96,7 +96,7 @@ done
 mkdir -p "${STAGING}/${RELEASE_NAME}/config"
 if [[ ! -f config/weblens.env.example ]]; then
   cat > "${STAGING}/${RELEASE_NAME}/config/weblens.env.example" << 'EOF'
-# WebLens 环境变量示例（复制为 weblens.env 后按需修改）
+# CloudScope 环境变量示例（复制为 weblens.env 后按需修改）
 # WEBLENS_HTTP_ADDR=0.0.0.0:8080
 # WEBLENS_KUBECONFIG_DIR=/path/to/kubeconfigs
 # WEBLENS_WEB_DIST_DIR=  # 可选，默认 ./web/dist

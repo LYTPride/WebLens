@@ -24,7 +24,7 @@ export type PvcListRow = {
 export type PvcStatusSummary = {
   /** 主表展示文案：Bound / Pending / Lost / Terminating */
   display: string;
-  /** 与 WebLens 健康标签色系一致 */
+  /** 与 CloudScope 健康标签色系一致 */
   label: "健康" | "警告" | "严重" | "删除中";
   /** 排序用：健康=0 删除中=1 警告=2 严重=3 */
   healthRank: number;

@@ -1,4 +1,4 @@
-# WebLens 资源列表数据流（目标架构与接入约定）
+# CloudScope 资源列表数据流（目标架构与接入约定）
 
 本文描述 Pods / Deployments / StatefulSets 及后续资源应遵循的 **list + watch + 作用域缓存** 模式，与实现位置对应关系。
 

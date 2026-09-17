@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WebLens 冒烟测试：构建前端、启动后端、校验关键接口与静态资源，然后停止服务。
+# CloudScope 冒烟测试：构建前端、启动后端、校验关键接口与静态资源，然后停止服务。
 # 用法：在项目根目录执行 ./scripts/smoke-test.sh
 # 可选：WEBLENS_HTTP_ADDR=0.0.0.0:18080 已写死端口，避免与默认 8080 冲突。
 

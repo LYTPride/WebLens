@@ -1,6 +1,6 @@
 # 资源列表：筛选、排序与实时更新
 
-本文说明 WebLens 中 **Pods**、**Deployments**、**StatefulSets**、**ConfigMaps**、**PersistentVolumeClaims（PVC）**、**Events** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。**Ingress**、**Services** 列表同样支持 Name 筛选、表头调宽与排序等（以当前版本为准）；展开区与 Describe 中的名称与联动交互见 [Ingress 与 Services](./ingress-services.md)。**ConfigMaps** 的影响范围、风险标签与配置编辑见 [ConfigMaps 使用手册](./configmaps.md)。**Events** 的默认排序策略与 Involved Object 跳转约定见 [Events 使用手册](./events.md)。
+本文说明 CloudScope 中 **Pods**、**Deployments**、**StatefulSets**、**ConfigMaps**、**PersistentVolumeClaims（PVC）**、**Events** 等资源表格的共用列表能力（其他资源类型后续可按同一套能力扩展）。**Ingress**、**Services** 列表同样支持 Name 筛选、表头调宽与排序等（以当前版本为准）；展开区与 Describe 中的名称与联动交互见 [Ingress 与 Services](./ingress-services.md)。**ConfigMaps** 的影响范围、风险标签与配置编辑见 [ConfigMaps 使用手册](./configmaps.md)。**Events** 的默认排序策略与 Involved Object 跳转约定见 [Events 使用手册](./events.md)。
 
 ## 列表标题格式
 
@@ -80,7 +80,7 @@
 
 ## Nodes 与访问权限（RBAC）
 
-- **Nodes** 是 **集群级（cluster-scoped）** 资源，许多集群只为命名空间级角色授予权限；若当前身份 **无权 list/watch Nodes**，WebLens **不会**用整页红色错误栈打断你，而是在列表主区域显示与产品风格一致的 **受限态**（标题如「当前身份无权查看 Nodes」、说明如何联系管理员授权）。
+- **Nodes** 是 **集群级（cluster-scoped）** 资源，许多集群只为命名空间级角色授予权限；若当前身份 **无权 list/watch Nodes**，CloudScope **不会**用整页红色错误栈打断你，而是在列表主区域显示与产品风格一致的 **受限态**（标题如「当前身份无权查看 Nodes」、说明如何联系管理员授权）。
 - **技术摘要**（若有）默认折叠，需要时再展开查看短摘要，避免把原始 RBAC 长文直接铺在页面上。
 - 同一 **已选集群** 下，若已判定为无权限，会 **减少重复的 list/watch 与错误提示**；换集群或希望重新探测时，点击 **「刷新列表」** 会清除该资源在本集群的探测缓存并再次请求。
 - **当前 v1 产品策略**：左侧导航 **默认不展示 Nodes 入口**（避免无集群级权限用户误点），但 **Nodes 列表、Watch、受限态与 API 逻辑仍保留在代码中**；若后续对目标用户开放，只需在配置层恢复侧栏项即可。有权限且能进入 Nodes 视图时，行为仍与上文「受限态 / 刷新重探测」一致。

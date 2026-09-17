@@ -25,17 +25,17 @@ if [[ ! -x "${BIN}" ]]; then
 fi
 
 if [[ -f "${PID_FILE}" ]] && kill -0 "$(cat "${PID_FILE}")" 2>/dev/null; then
-  echo "WebLens is already running with PID $(cat "${PID_FILE}")"
+  echo "CloudScope is already running with PID $(cat "${PID_FILE}")"
   exit 0
 fi
 
 if ! "${BIN}" is-initialized >/dev/null 2>&1; then
-  echo "WebLens is not initialized. Please run ${BASE_DIR}/scripts/init.sh first." >&2
+  echo "CloudScope is not initialized. Please run ${BASE_DIR}/scripts/init.sh first." >&2
   exit 1
 fi
 
-echo "Starting WebLens..."
+echo "Starting CloudScope..."
 nohup "${BIN}" >>"${LOG_DIR}/weblens.log" 2>&1 &
 echo $! >"${PID_FILE}"
-echo "WebLens started with PID $(cat "${PID_FILE}")"
+echo "CloudScope started with PID $(cat "${PID_FILE}")"
 

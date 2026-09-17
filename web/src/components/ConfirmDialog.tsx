@@ -23,7 +23,7 @@ export type ConfirmDialogProps = {
 };
 
 /**
- * WebLens 统一确认弹窗：深色主题，与批量删除等现有模态一致。
+ * CloudScope 统一确认弹窗：深色主题，与批量删除等现有模态一致。
  * 后续新增危险操作/需确认的操作应优先使用本组件。
  */
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({

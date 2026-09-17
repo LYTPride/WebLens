@@ -34,12 +34,12 @@ if [[ ! -t 0 || ! -t 1 ]]; then
 fi
 
 if ! "${BIN}" is-initialized >/dev/null 2>&1; then
-  echo "WebLens is not initialized or the authentication database is unavailable." >&2
+  echo "CloudScope is not initialized or the authentication database is unavailable." >&2
   exit 1
 fi
 
 echo
-echo "=== WebLens admin 密码恢复 ==="
+echo "=== CloudScope admin 密码恢复 ==="
 echo
 echo "即将重置根管理员 admin 的密码。"
 echo

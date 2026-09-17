@@ -52,6 +52,7 @@ import {
   type ConfigMapDescribe,
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
+import { CloudScopeLogo } from "../components/CloudScopeLogo";
 import { ThemeToggleButton } from "../components/ThemeToggleButton";
 import { AdminAccessModal } from "../auth/AdminAccessModal";
 import { UserMenu } from "../auth/UserMenu";
@@ -4782,30 +4783,9 @@ export const App: React.FC = () => {
           zIndex: 2,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "12px 20px",
-            flex: 1,
-            minWidth: 0,
-          }}
-        >
-          <span
-            style={{
-              padding: "2px 8px",
-              borderRadius: 999,
-              backgroundColor: "var(--wl-logo-badge-bg)",
-              color: "var(--wl-logo-badge-text)",
-              fontSize: 14,
-              fontWeight: 700,
-              letterSpacing: 0.5,
-            }}
-          >
-            Web
-          </span>
-          <span style={{ fontSize: 18, fontWeight: 600, color: "var(--wl-text-heading)" }}>Lens</span>
+        <div className="wl-product-brand" aria-label="云镜智能体">
+          <CloudScopeLogo size={32} className="wl-product-brand__logo" />
+          <span className="wl-product-brand__name">云镜智能体</span>
         </div>
         <div
           className="wl-header-tray"
@@ -5020,7 +5000,7 @@ export const App: React.FC = () => {
                   type="text"
                   value={configKubeconfigDir}
                   onChange={(e) => setConfigKubeconfigDir(e.target.value)}
-                  placeholder="填写绝对路径，例如 /var/lib/weblens/kubeconfigs"
+                  placeholder="填写绝对路径，例如 /var/lib/cloudscope/kubeconfigs"
                   style={{
                     width: "100%",
                     boxSizing: "border-box",
@@ -5968,7 +5948,7 @@ export const App: React.FC = () => {
                                 const url = URL.createObjectURL(blob);
                                 const a = document.createElement("a");
                                 a.href = url;
-                                a.download = `weblens-configmaps-${items.length}.yaml`;
+                                a.download = `cloudscope-configmaps-${items.length}.yaml`;
                                 document.body.appendChild(a);
                                 a.click();
                                 document.body.removeChild(a);

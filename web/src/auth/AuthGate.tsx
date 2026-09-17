@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { CloudScopeLogo } from "../components/CloudScopeLogo";
 import { useAuth } from "./AuthContext";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
@@ -54,16 +55,16 @@ const PasswordInput: React.FC<{
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <main className="wl-auth-page">
-    <section className="wl-auth-hero" aria-label="WebLens 控制台入口">
+    <section className="wl-auth-hero" aria-label="云镜智能体控制台入口">
       <video className="wl-auth-hero-video" autoPlay muted loop playsInline preload="auto" aria-hidden="true">
         <source src={AUTH_VIDEO_SRC} type="video/mp4" />
       </video>
       <div className="wl-auth-hero-content">
         <div className="wl-auth-hero-brand">
-          <span className="wl-auth-hero-mark" aria-hidden="true" />
-          <span>WebLens</span>
+          <CloudScopeLogo size={42} className="wl-auth-hero-logo" />
+          <span className="wl-auth-hero-brand-name">云镜智能体</span>
         </div>
-        <div className="wl-auth-hero-title">Kubernetes operations console</div>
+        <div className="wl-auth-hero-title">让集群运维更清晰、更智能</div>
         <div className="wl-auth-hero-subtitle">聚焦集群资源、日志、终端与 YAML 操作</div>
       </div>
     </section>
@@ -97,8 +98,8 @@ const LoginPage: React.FC = () => {
     <AuthShell>
       <form className="wl-auth-card" onSubmit={submit}>
         <div className="wl-auth-heading">
-          <div className="wl-auth-title">登录 WebLens</div>
-          <div className="wl-auth-subtitle">输入账号密码进入 Kubernetes operations console</div>
+          <div className="wl-auth-title">登录云镜智能体</div>
+          <div className="wl-auth-subtitle">输入账号密码进入 Kubernetes 运维控制台</div>
         </div>
         <label className="wl-auth-label">
           用户名
@@ -274,7 +275,7 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <AuthShell>
         <div className="wl-auth-card">
           <div className="wl-auth-heading">
-            <div className="wl-auth-title">WebLens</div>
+            <div className="wl-auth-title">云镜智能体</div>
             <div className="wl-auth-subtitle">正在检查登录状态...</div>
           </div>
         </div>

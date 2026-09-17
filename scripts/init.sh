@@ -20,7 +20,7 @@ if [[ ! -x "${BIN}" ]]; then
 fi
 
 if "${BIN}" is-initialized >/dev/null 2>&1; then
-  echo "WebLens has already been initialized."
+  echo "CloudScope has already been initialized."
   exit 0
 fi
 

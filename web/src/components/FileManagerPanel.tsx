@@ -270,7 +270,7 @@ export const FileManagerPanel: React.FC<Props> = ({
     const label =
       selectedPaths.length === 1
         ? selectedPaths[0].replace(/^.*\//, "") || "download.tar"
-        : `打包 ${selectedPaths.length} 项 → weblens-files-${pod}.tar`;
+        : `打包 ${selectedPaths.length} 项 → cloudscope-files-${pod}.tar`;
     const id = newTaskId();
     const initialBasis = estimateBytes > 0 ? "estimated" : "unknown";
     setTransferTasks((prev) => [
@@ -354,7 +354,7 @@ export const FileManagerPanel: React.FC<Props> = ({
       const href = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = href;
-      a.download = `weblens-files-${pod}.tar`;
+      a.download = `cloudscope-files-${pod}.tar`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

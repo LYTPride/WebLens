@@ -1,5 +1,5 @@
 /**
- * WebLens 主题 token：界面层级色随 [data-theme] 切换；语义色在 :root 固定（Pod 健康等组件内联色不改）。
+ * CloudScope 主题 token：界面层级色随 [data-theme] 切换；语义色在 :root 固定（Pod 健康等组件内联色不改）。
  * 首屏脚本与 ThemeProvider 均设置 document.documentElement[data-theme]。
  */
 
@@ -58,9 +58,6 @@
 
   --wl-bg-toast: rgba(15, 23, 42, 0.95);
   --wl-shadow-toast: 0 4px 12px rgba(0, 0, 0, 0.45);
-
-  --wl-logo-badge-bg: #f9fafb;
-  --wl-logo-badge-text: #0f172a;
 
   --wl-menu-surface: #1e293b;
   --wl-menu-border: #334155;
@@ -248,9 +245,6 @@
 
   --wl-bg-toast: rgba(255, 255, 255, 0.97);
   --wl-shadow-toast: 0 4px 16px rgba(15, 23, 42, 0.12);
-
-  --wl-logo-badge-bg: #0ea5e9;
-  --wl-logo-badge-text: #ffffff;
 
   --wl-menu-surface: #ffffff;
   --wl-menu-border: #cbd5e1;

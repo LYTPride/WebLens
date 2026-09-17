@@ -1,6 +1,6 @@
 # 资源列表数据流（list + watch + 作用域缓存）
 
-本文面向开发者，说明 WebLens 资源表格背后的数据流约定；**规范正文与接入清单**以仓库内源码为准：
+本文面向开发者，说明 CloudScope 资源表格背后的数据流约定；**规范正文与接入清单**以仓库内源码为准：
 
 → [`web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md`](../../web/src/resourceList/RESOURCE_LIST_ARCHITECTURE.md)
 

@@ -1,5 +1,5 @@
 /**
- * WebLens 全局 z-index 约定（避免魔法数分散）。
+ * CloudScope 全局 z-index 约定（避免魔法数分散）。
  * 关系：底栏 < 下拉 < 部分业务模态 < 确认框 < Toast < Shell 全屏层
  */
 export const Z_INDEX = {
