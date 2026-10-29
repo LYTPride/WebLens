@@ -30,6 +30,8 @@
 
 - **不要**再给 `DropdownMenuPortal` 传 `open`；打开状态完全由「是否渲染组件」表达。
 - 子菜单或内容高度变化时传 **`repositionKey`**（如子菜单展开状态、搜索关键字、过滤结果长度），以触发重新测量。
+- 可搜索面板默认以 **320px** 为高度上限；视口可用空间更小时使用定位结果给出的更小高度。面板外层保持 `overflow: hidden`，搜索区固定在顶部，选项列表承担垂直滚动，禁止让全部选项把 Portal 撑满页面。
+- 定位完成后的自动聚焦只依赖 `layout != null` 的布尔跃迁，不要依赖完整 `layout` 对象。定位 hook 的第二帧测量会产生新对象；若聚焦 effect 依赖该对象，后续更新可能在 focus 执行前清理定时任务，导致搜索框无法自动获得焦点。
 - 可搜索面板的列表区必须由内部滚动容器承载：滚动区使用 `overflow-y: auto`、`overflow-x: hidden`、`overscroll-behavior: contain` 与稳定 scrollbar gutter；面板内部滚动不会触发 `useFloatingDropdownPosition` 重新测量，避免 kubeconfig 列表较多时滚轮滚动导致菜单重绘、滚动条消失或无法继续滚动。
 - 下拉表面会阻止 `wheel` 事件继续冒泡到外层遮罩/弹窗；不要在业务页额外全局拦截滚轮，避免破坏下拉内部滚动。
 - 列表 **sticky 表头** 的 z-index 与 `Z_INDEX.stickyTableHead` 对齐：`web/src/components/ResizableTh.tsx`。
