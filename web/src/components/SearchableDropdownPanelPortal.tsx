@@ -35,7 +35,6 @@ export function SearchableDropdownPanelPortal({
   autoFocusSelectAllIfNonEmpty = false,
 }: SearchableDropdownPanelPortalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const hadLayoutRef = useRef(false);
   useEscapeToClose(onClose, true);
 
   const beforeMeasure = useCallback(
@@ -54,13 +53,9 @@ export function SearchableDropdownPanelPortal({
     contentKey: repositionKey,
   });
 
+  const positioned = layout != null;
   useLayoutEffect(() => {
-    if (!autoFocusInputRef) return;
-    const hasLayout = layout != null;
-    const prevHadLayout = hadLayoutRef.current;
-    hadLayoutRef.current = hasLayout;
-    const justPositioned = hasLayout && !prevHadLayout;
-    if (!justPositioned) return;
+    if (!positioned || !autoFocusInputRef) return;
     let cancelled = false;
     let raf2 = 0;
     const raf1 = requestAnimationFrame(() => {
@@ -80,7 +75,7 @@ export function SearchableDropdownPanelPortal({
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
-  }, [layout, autoFocusInputRef, autoFocusSelectAllIfNonEmpty]);
+  }, [positioned, autoFocusInputRef, autoFocusSelectAllIfNonEmpty]);
 
   const positionedVisible =
     layout != null
@@ -89,8 +84,8 @@ export function SearchableDropdownPanelPortal({
           top: layout.top,
           left: layout.left,
           minWidth: layout.minWidth,
-          maxHeight: layout.maxHeight,
-          overflow: layout.maxHeight ? ("hidden" as const) : undefined,
+          maxHeight: Math.min(layout.maxHeight ?? 320, 320),
+          overflow: "hidden" as const,
           overflowX: "hidden" as const,
           display: "flex" as const,
           flexDirection: "column" as const,
@@ -104,6 +99,8 @@ export function SearchableDropdownPanelPortal({
           left: 0,
           visibility: "hidden" as const,
           minWidth: minWidthPx,
+          maxHeight: 320,
+          overflow: "hidden" as const,
           overflowX: "hidden" as const,
           display: "flex" as const,
           flexDirection: "column" as const,
