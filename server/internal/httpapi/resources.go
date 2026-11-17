@@ -17,8 +17,10 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 
@@ -744,6 +746,46 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.St
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		c.Status(http.StatusOK)
+	})
+
+	// Force delete the selected Pod instance with a zero grace period.
+	r.DELETE("/api/clusters/:id/pods/:namespace/:pod/force-delete", func(c *gin.Context) {
+		id, ns, name := c.Param("id"), c.Param("namespace"), c.Param("pod")
+		uid := types.UID(c.Query("uid"))
+		if uid == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "pod uid is required"})
+			return
+		}
+		client, ok := reg.Client(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		c.Set(auditDetailContextKey, "force-delete: gracePeriodSeconds=0, uid="+string(uid))
+		zero := int64(0)
+		err := client.CoreV1().Pods(ns).Delete(c.Request.Context(), name, metav1.DeleteOptions{
+			GracePeriodSeconds: &zero,
+			Preconditions:      &metav1.Preconditions{UID: &uid},
+		})
+		switch {
+		case apierrors.IsConflict(err):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		case apierrors.IsForbidden(err):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		case err != nil && !apierrors.IsNotFound(err):
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		listCacheMu.Lock()
+		delete(listCache, listCacheKey("pods", id, ns))
+		delete(listCache, listCacheKey("pods", id, corev1.NamespaceAll))
+		listCacheMu.Unlock()
+		podDescribeCacheMu.Lock()
+		delete(podDescribeCache, podDescribeCacheKey(id, ns, name))
+		podDescribeCacheMu.Unlock()
 		c.Status(http.StatusOK)
 	})
 
