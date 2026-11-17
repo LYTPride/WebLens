@@ -17,6 +17,7 @@ import {
   testClusterCombo,
   type ClusterCombo,
   deletePod,
+  forceDeletePod,
   type ResourceKind,
   watchPods,
   watchResourceList,
@@ -197,6 +198,7 @@ import { EventDescribeContent } from "../components/describe/EventDescribeConten
 import { ResourceJumpChip } from "../components/ResourceJumpChip";
 import { ResourceNameWithCopy } from "../components/ResourceNameWithCopy";
 import { AuditReasonDialog, type AuditedActionConfirmRequest } from "../components/AuditReasonDialog";
+import { InputDialog } from "../components/InputDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useResourceListColumnResize } from "../resourceList/useResourceListColumnResize";
 import {
@@ -249,6 +251,12 @@ import {
 } from "../utils/v1HiddenViews";
 import { trackUsage } from "../utils/usageAnalytics";
 import { CopyIcon } from "../components/icons/CopyIcon";
+
+type BatchAction = { keys: string[] } & (
+  | { kind: "pods-delete" | "deployments-delete" | "deployments-restart" | "configmaps-delete" }
+  | { kind: "pods-force-delete"; podUids: Record<string, string> }
+  | { kind: "deployments-scale"; replicas: number }
+);
 
 const ALL_NAMESPACES = "";
 
@@ -904,11 +912,11 @@ export const App: React.FC = () => {
   const [selectedConfigMapKeys, setSelectedConfigMapKeys] = useState<Set<string>>(() => new Set());
   const podTableHeaderSelectRef = useRef<HTMLInputElement>(null);
   const deployTableHeaderSelectRef = useRef<HTMLInputElement>(null);
-  const [batchConfirm, setBatchConfirm] = useState<{
-    kind: "pods-delete" | "deployments-delete" | "deployments-restart" | "configmaps-delete";
-    keys: string[];
+  const [batchScaleKeys, setBatchScaleKeys] = useState<string[]>([]);
+  const [batchConfirm, setBatchConfirm] = useState<(BatchAction & {
+    clusterId: string;
     auditReason: string;
-  } | null>(null);
+  }) | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
   /** 单行/单次危险操作统一确认（替代 window.confirm） */
   const [actionConfirm, setActionConfirm] = useState<{
@@ -947,16 +955,32 @@ export const App: React.FC = () => {
     );
   }, [requestAuditReason]);
 
-  const openAuditedBatchConfirm = useCallback((request: {
-    kind: "pods-delete" | "deployments-delete" | "deployments-restart" | "configmaps-delete";
-    keys: string[];
-  }) => {
+  const openAuditedBatchConfirm = useCallback((request: BatchAction) => {
+    if (!effectiveClusterId || !canResourceWrite || request.keys.length === 0) return;
+    const labels = {
+      "pods-delete": "批量删除",
+      "pods-force-delete": "强制删除",
+      "deployments-delete": "批量删除",
+      "deployments-restart": "批量重启",
+      "deployments-scale": "批量副本缩放",
+      "configmaps-delete": "批量删除",
+    };
     requestAuditReason(
-      request.kind === "deployments-restart" ? "批量重启" : "批量删除",
+      labels[request.kind],
       request.keys,
-      (auditReason) => setBatchConfirm({ ...request, auditReason }),
+      (auditReason) => setBatchConfirm({ ...request, clusterId: effectiveClusterId, auditReason }),
     );
-  }, [requestAuditReason]);
+  }, [canResourceWrite, effectiveClusterId, requestAuditReason]);
+
+  const openForceDelete = (targets: Pod[]) => {
+    setPodMenuOpenKey(null);
+    setPodMenuSubmenu(null);
+    const podUids = Object.fromEntries(targets.map(({ metadata }) => [
+      nsNameRowKey(metadata.namespace, metadata.name),
+      metadata.uid,
+    ]));
+    openAuditedBatchConfirm({ kind: "pods-force-delete", keys: Object.keys(podUids).sort(), podUids });
+  };
   /** Deployment 行上异步操作（restart/delete） */
   const [deploymentRowBusyKey, setDeploymentRowBusyKey] = useState<string | null>(null);
   const [statefulsetRowBusyKey, setStatefulsetRowBusyKey] = useState<string | null>(null);
@@ -1206,6 +1230,7 @@ export const App: React.FC = () => {
     setSelectedPodKeys(new Set());
     setSelectedDeploymentKeys(new Set());
     setSelectedConfigMapKeys(new Set());
+    setBatchScaleKeys([]);
   }, [listScopeKey]);
 
   useEffect(() => {
@@ -2331,7 +2356,7 @@ export const App: React.FC = () => {
   }, [syncServerClock]);
 
   const confirmBatchAction = useCallback(async () => {
-    if (!batchConfirm || !effectiveClusterId) return;
+    if (!batchConfirm || !canResourceWrite || batchConfirm.clusterId !== effectiveClusterId) return;
     const keys = batchConfirm.keys;
     const kind = batchConfirm.kind;
     const auditReason = batchConfirm.auditReason;
@@ -2339,7 +2364,35 @@ export const App: React.FC = () => {
     setError(null);
     try {
       const nsApi = effectiveNamespace || undefined;
-      if (kind === "pods-delete") {
+      if (kind === "pods-force-delete" || kind === "deployments-scale") {
+        const failed: string[] = [];
+        let firstError = "";
+        for (const key of keys) {
+          const { namespace, name } = parseNsNameRowKey(key);
+          try {
+            if (kind === "pods-force-delete") {
+              await forceDeletePod(effectiveClusterId, namespace, name, batchConfirm.podUids[key], auditReason);
+            } else {
+              await scaleDeployment(effectiveClusterId, namespace, name, batchConfirm.replicas, auditReason);
+            }
+          } catch (err: any) {
+            failed.push(key);
+            if (!firstError) firstError = `${key}：${err?.response?.data?.error ?? err?.message ?? "操作失败"}`;
+          }
+        }
+        const failedKeys = new Set(failed);
+        const completed = new Set(keys.filter((key) => !failedKeys.has(key)));
+        const setSelection = kind === "pods-force-delete" ? setSelectedPodKeys : setSelectedDeploymentKeys;
+        setSelection((prev) => new Set([...prev].filter((key) => !completed.has(key))));
+        if (failed.length > 0) {
+          setBatchConfirm({ ...batchConfirm, keys: failed });
+          throw new Error(`成功 ${completed.size} 项，失败 ${failed.length} 项。 ${firstError}`);
+        }
+        setBatchConfirm(null);
+        setToastMessage(kind === "pods-force-delete"
+          ? `已强制删除 ${keys.length} 个 Pod`
+          : `已将 ${keys.length} 个 Deployment 缩放至 ${batchConfirm.replicas} 个副本`);
+      } else if (kind === "pods-delete") {
         for (const key of keys) {
           const { namespace, name } = parseNsNameRowKey(key);
           await deletePod(effectiveClusterId, namespace, name, auditReason);
@@ -2413,7 +2466,7 @@ export const App: React.FC = () => {
     } finally {
       setBatchBusy(false);
     }
-  }, [batchConfirm, effectiveClusterId, effectiveNamespace, syncServerClock, usageScopeFields]);
+  }, [batchConfirm, canResourceWrite, effectiveClusterId, effectiveNamespace, syncServerClock, usageScopeFields]);
 
   const loadResourceList = useCallback(async () => {
     if (!effectiveClusterId) return;
@@ -4727,27 +4780,51 @@ export const App: React.FC = () => {
           setAuditReasonRequest(null);
         }}
       />
+      <InputDialog
+        open={batchScaleKeys.length > 0}
+        title="批量调整 Deployment 副本数"
+        label="目标副本数（0 表示缩容到零）"
+        initialValue=""
+        confirmText="继续"
+        onClose={() => setBatchScaleKeys([])}
+        onConfirm={(value) => {
+          const replicas = Number(value);
+          if (!/^\d+$/.test(value) || replicas > 2_147_483_647) {
+            setToastMessage("请输入 0 到 2147483647 之间的整数副本数");
+            return false;
+          }
+          openAuditedBatchConfirm({ kind: "deployments-scale", keys: batchScaleKeys, replicas });
+        }}
+      />
       <ConfirmDialog
-        open={!!batchConfirm && !!effectiveClusterId}
+        open={!!batchConfirm && canResourceWrite && batchConfirm.clusterId === effectiveClusterId}
         title={
-          batchConfirm?.kind === "pods-delete"
-            ? `确认删除 ${batchConfirm.keys.length} 个 Pod？`
-            : batchConfirm?.kind === "deployments-delete"
-              ? `确认删除 ${batchConfirm.keys.length} 个 Deployment？`
-              : batchConfirm?.kind === "deployments-restart"
-                ? `确认重启 ${batchConfirm.keys.length} 个 Deployment？`
-                : batchConfirm?.kind === "configmaps-delete"
-                  ? `确认删除 ${batchConfirm.keys.length} 个 ConfigMap？`
-                : ""
-        }
-        description={
-          batchConfirm?.kind === "deployments-restart"
-            ? "将触发滚动更新，Pod 会按策略逐步重建。"
-            : batchConfirm?.kind === "deployments-delete"
-              ? "删除后不可恢复。"
-              : batchConfirm?.kind === "configmaps-delete"
-                ? "删除后不可恢复；若被工作负载引用，相关应用可能启动失败或配置异常。"
-              : undefined
+          batchConfirm?.kind === "pods-force-delete"
+            ? `确认强制删除 ${batchConfirm.keys.length} 个 Pod？`
+            : batchConfirm?.kind === "deployments-scale"
+              ? `确认将 ${batchConfirm.keys.length} 个 Deployment 缩放至 ${batchConfirm.replicas} 个副本？`
+              : batchConfirm?.kind === "pods-delete"
+                ? `确认删除 ${batchConfirm.keys.length} 个 Pod？`
+                : batchConfirm?.kind === "deployments-delete"
+                  ? `确认删除 ${batchConfirm.keys.length} 个 Deployment？`
+                  : batchConfirm?.kind === "deployments-restart"
+                        ? `确认重启 ${batchConfirm.keys.length} 个 Deployment？`
+                        : batchConfirm?.kind === "configmaps-delete"
+                          ? `确认删除 ${batchConfirm.keys.length} 个 ConfigMap？`
+                        : ""
+            }
+            description={
+              batchConfirm?.kind === "pods-force-delete"
+                ? "普通删除会给予容器终止宽限期。强制删除将宽限期设为 0，API 不等待容器退出。原 Pod 不会重新拉起，工作负载控制器可能创建替代 Pod。"
+                : batchConfirm?.kind === "deployments-scale"
+                  ? "所有列出的 Deployment 将设置为相同的副本数。缩容至 0 会终止其所有副本。"
+                  : batchConfirm?.kind === "deployments-restart"
+                ? "将触发滚动更新，Pod 会按策略逐步重建。"
+                : batchConfirm?.kind === "deployments-delete"
+                  ? "删除后不可恢复。"
+                  : batchConfirm?.kind === "configmaps-delete"
+                    ? "删除后不可恢复；若被工作负载引用，相关应用可能启动失败或配置异常。"
+                  : undefined
         }
         items={batchConfirm?.keys ?? []}
         variant={batchConfirm?.kind === "deployments-restart" ? "primary" : "danger"}
@@ -5856,6 +5933,16 @@ export const App: React.FC = () => {
                         </button>
                         <button
                           type="button"
+                          className="wl-bulk-btn wl-bulk-btn--danger"
+                          disabled={!effectiveClusterId}
+                          onClick={() => openForceDelete(pods.filter(({ metadata }) =>
+                            selectedPodKeys.has(nsNameRowKey(metadata.namespace, metadata.name)),
+                          ))}
+                        >
+                          强制删除
+                        </button>
+                        <button
+                          type="button"
                           className="wl-bulk-btn wl-bulk-btn--ghost"
                           onClick={() => setSelectedPodKeys(new Set())}
                         >
@@ -5899,6 +5986,14 @@ export const App: React.FC = () => {
                           }
                         >
                           重启
+                        </button>
+                        <button
+                          type="button"
+                          className="wl-bulk-btn wl-bulk-btn--danger"
+                          disabled={!effectiveClusterId}
+                          onClick={() => setBatchScaleKeys([...selectedDeploymentKeys].sort())}
+                        >
+                          副本缩放
                         </button>
                         <button
                           type="button"
@@ -6389,6 +6484,16 @@ export const App: React.FC = () => {
                                     >
                                       <span style={{ marginRight: 8 }}>🗑</span> Delete
                                     </button>
+                                    {canResourceWrite && (
+                                      <button
+                                        type="button"
+                                        className="wl-menu-item wl-menu-item-danger"
+                                        style={menuItemStyleForDropdown}
+                                        onClick={() => openForceDelete([p])}
+                                      >
+                                        <span style={{ marginRight: 8 }}>🗑</span> Force Delete
+                                      </button>
+                                    )}
                                   </div>
                                   {podMenuSubmenu && (podMenuSubmenu !== "shell" || canPodExec) && (
                                     <div style={{ minWidth: 100, padding: "4px 0" }}>
@@ -7523,6 +7628,16 @@ export const App: React.FC = () => {
                                                       >
                                                         <span style={{ marginRight: 8 }}>🗑</span> Delete
                                                       </button>
+                                                      {canResourceWrite && (
+                                                        <button
+                                                          type="button"
+                                                          className="wl-menu-item wl-menu-item-danger"
+                                                          style={menuItemStyleForDropdown}
+                                                          onClick={() => openForceDelete([p])}
+                                                        >
+                                                          <span style={{ marginRight: 8 }}>🗑</span> Force Delete
+                                                        </button>
+                                                      )}
                                                     </div>
                                                     {podMenuSubmenu && (podMenuSubmenu !== "shell" || canPodExec) && (
                                                       <div style={{ minWidth: 100, padding: "4px 0" }}>

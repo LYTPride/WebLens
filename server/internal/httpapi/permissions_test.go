@@ -33,6 +33,8 @@ func TestRequiredCapabilityForRequest(t *testing.T) {
 		{name: "file read", method: http.MethodGet, path: "/api/clusters/c1/pods/default/p1/files", want: auth.CapabilityFileRead},
 		{name: "file write", method: http.MethodPost, path: "/api/clusters/c1/pods/default/p1/files/upload", want: auth.CapabilityFileWrite},
 		{name: "delete", method: http.MethodDelete, path: "/api/clusters/c1/pods/default/p1", want: auth.CapabilityResourceWrite},
+		{name: "force delete", method: http.MethodDelete, path: "/api/clusters/c1/pods/files-ns/files-pod/force-delete", want: auth.CapabilityResourceWrite},
+		{name: "scale deployment", method: http.MethodPatch, path: "/api/clusters/c1/deployments/files-ns/files-app/scale", want: auth.CapabilityResourceWrite},
 		{name: "configmap export", method: http.MethodPost, path: "/api/clusters/c1/configmaps/export", want: auth.CapabilityResourceRead},
 		{name: "non cluster", method: http.MethodGet, path: "/api/auth/me", want: ""},
 	}
@@ -70,7 +72,7 @@ func TestAuditActionClassifiesSensitiveOperations(t *testing.T) {
 
 func TestAuditOperationLogRequiredForResourceWrites(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	c := permissionTestContext(http.MethodDelete, "/api/clusters/c1/pods/default/p1")
+	c := permissionTestContext(http.MethodDelete, "/api/clusters/c1/pods/default/p1/force-delete")
 	if _, err := auditOperationLogForRequest(c, auditActionForRequest(c)); !errors.Is(err, errAuditReasonRequired) {
 		t.Fatalf("missing operation log error = %v, want %v", err, errAuditReasonRequired)
 	}
@@ -103,6 +105,16 @@ func TestClusterScopeFromPath(t *testing.T) {
 	clusterID, namespace, kind, batch := clusterScopeFromPath(c)
 	if clusterID != "c1" || namespace != "default" || kind != "pods" || batch {
 		t.Fatalf("scope = %q/%q kind=%q batch=%v", clusterID, namespace, kind, batch)
+	}
+
+	for _, path := range []string{
+		"/api/clusters/c1/pods/restricted/p1/force-delete?namespace=allowed",
+		"/api/clusters/c1/deployments/restricted/d1/scale?namespace=allowed",
+	} {
+		_, namespace, _, _ := clusterScopeFromPath(permissionTestContext(http.MethodGet, path))
+		if namespace != "restricted" {
+			t.Errorf("%s resolved to namespace %q, want restricted", path, namespace)
+		}
 	}
 
 	c = permissionTestContext(http.MethodPost, "/api/clusters/c1/configmaps/batch-delete")

@@ -45,21 +45,19 @@ func registerExecRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.Store)
 
 		req := client.CoreV1().RESTClient().Post().
 			Resource("pods").Namespace(ns).Name(podName).SubResource("exec")
-		// 优先进入 bash 交互 shell：设置 TERM 与 PS1，兼容方向键/历史命令（若容器内存在 bash）
-		// 若无 bash，则退回到 /bin/sh -i，同样设置 TERM 与 PS1。
+		// Bash 自带用户、主机、工作目录和权限标记的提示符转义；sh 使用容器内的身份信息。
 		opts := &corev1.PodExecOptions{
 			Container: container,
 			Command: []string{
 				"/bin/sh", "-c",
-				"if command -v bash >/dev/null 2>&1; then " +
-					"export TERM=xterm-256color; " +
-					"export PS1='root@$(hostname 2>/dev/null || true):\\w# '; " +
-					"exec bash -li; " +
-					"else " +
-					"export TERM=xterm-256color; " +
-					"export PS1='root@$(hostname 2>/dev/null || true):\\w# '; " +
-					"exec /bin/sh -i; " +
-					"fi",
+				"export TERM=xterm-256color; " +
+					"if command -v bash >/dev/null 2>&1; then " +
+					"export PS1='\\u@\\h:\\w\\$ '; exec bash -li; " +
+					"fi; " +
+					"uid=$(id -u 2>/dev/null); user=$(id -un 2>/dev/null) || user=${uid:-unknown}; " +
+					"host=$(hostname 2>/dev/null) || host=${HOSTNAME:-unknown}; " +
+					"prompt='$'; if [ \"$uid\" = 0 ]; then prompt='#'; fi; " +
+					"export PS1=\"$user@$host:\"'$PWD'\"$prompt \"; exec /bin/sh -i",
 			},
 			Stdin:  true,
 			Stdout: true,
