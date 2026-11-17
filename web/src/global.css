@@ -182,20 +182,16 @@ button.wl-confirm-btn-danger:active:not(:disabled) {
   height: 6px;
 }
 
-/*
- * 底部标签栏（Shell / Logs / YAML 等）：整格可点区域 hover，与全局按钮叠层共用 --wl-btn-overlay-hover。
- * 层次：激活（实底 --wl-bg-control）> 非激活 hover（仅叠层）> 非激活常态；激活上再 hover 仅轻微叠层，不压过选中识别。
- * 边框宽度不变，避免整排抖动。
- */
+/* 活动标签用独立背景、轮廓和阴影凸显，标签切换时保持行高不变。 */
 .wl-bottom-panel-tab {
   position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  margin: 0;
-  border: none;
-  border-right: 1px solid var(--wl-border-sidebar);
+  padding: 5px 10px;
+  margin: 3px 2px 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
@@ -213,12 +209,11 @@ button.wl-confirm-btn-danger:active:not(:disabled) {
 }
 
 .wl-bottom-panel-tab--active {
-  background-color: var(--wl-bg-control);
+  transform: translateY(-1px);
+  border-color: var(--wl-workspace-tab-active-border);
+  background-color: var(--wl-workspace-tab-active-bg);
   color: var(--wl-text-heading);
-}
-
-.wl-bottom-panel-tab--active:hover {
-  box-shadow: inset 0 0 0 999px var(--wl-btn-overlay-hover);
+  box-shadow: var(--wl-workspace-tab-active-shadow);
 }
 
 .wl-bottom-panel-tab:focus-visible {

@@ -1262,6 +1262,20 @@ export async function deletePod(clusterId: string, namespace: string, pod: strin
   );
 }
 
+/** 强制删除指定 UID 的 Pod，避免删到同名替代实例。 */
+export async function forceDeletePod(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+  uid: string,
+  auditReason: string,
+): Promise<void> {
+  await api.delete(
+    `/api/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/force-delete`,
+    { params: { uid }, headers: auditReasonHeaders(auditReason) },
+  );
+}
+
 /** Deployment YAML（编辑） */
 export async function fetchDeploymentYaml(
   clusterId: string,

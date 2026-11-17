@@ -340,8 +340,12 @@ func clusterScopeFromPath(c *gin.Context) (clusterID string, namespace string, k
 	if kind == "nodes" {
 		return clusterID, "", kind, false
 	}
-	if kind == "configmaps" && len(parts) >= 5 && (parts[4] == "batch-delete" || parts[4] == "export") {
+	if kind == "configmaps" && len(parts) == 5 && (parts[4] == "batch-delete" || parts[4] == "export") {
 		return clusterID, "", kind, true
+	}
+	// Named resources are authorized against the namespace used by the handler.
+	if len(parts) >= 6 {
+		return clusterID, parts[4], kind, false
 	}
 	if ns := c.Query("namespace"); ns != "" {
 		return clusterID, ns, kind, false
