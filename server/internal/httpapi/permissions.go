@@ -32,17 +32,19 @@ func requiredCapabilityForRequest(c *gin.Context) auth.Capability {
 	if !strings.HasPrefix(path, "/api/clusters/") {
 		return ""
 	}
-	if strings.HasSuffix(path, "/exec") {
-		return auth.CapabilityPodExec
-	}
-	if strings.HasSuffix(path, "/logs") {
-		return auth.CapabilityPodLogs
-	}
-	if strings.Contains(path, "/files") {
-		if c.Request.Method == http.MethodGet {
-			return auth.CapabilityFileRead
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) >= 7 && parts[3] == "pods" {
+		switch parts[6] {
+		case "exec":
+			return auth.CapabilityPodExec
+		case "logs":
+			return auth.CapabilityPodLogs
+		case "files":
+			if c.Request.Method == http.MethodGet {
+				return auth.CapabilityFileRead
+			}
+			return auth.CapabilityFileWrite
 		}
-		return auth.CapabilityFileWrite
 	}
 	if c.Request.Method == http.MethodGet {
 		return auth.CapabilityResourceRead
