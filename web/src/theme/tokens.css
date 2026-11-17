@@ -136,6 +136,9 @@
 
   --wl-shadow-bottom-panel: 0 -2px 12px rgba(0, 0, 0, 0.3);
   --wl-bottom-resize-handle: #475569;
+  --wl-workspace-tab-active-bg: #193454;
+  --wl-workspace-tab-active-border: #4b83b7;
+  --wl-workspace-tab-active-shadow: 0 2px 5px rgba(0, 0, 0, 0.45);
 
   /* 状态/健康胶囊（深色下保持原对比；浅色在 light 块中单独提高字色对比） */
   --wl-pill-success-text: #bbf7d0;
@@ -323,6 +326,9 @@
 
   --wl-shadow-bottom-panel: 0 -4px 20px rgba(15, 23, 42, 0.08);
   --wl-bottom-resize-handle: #94a3b8;
+  --wl-workspace-tab-active-bg: #deedfc;
+  --wl-workspace-tab-active-border: #6e9ac8;
+  --wl-workspace-tab-active-shadow: 0 2px 5px rgba(39, 71, 110, 0.24);
 
   --wl-pill-success-text: #166534;
   --wl-pill-success-bg: rgba(22, 163, 74, 0.14);
