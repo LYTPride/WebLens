@@ -1,12 +1,9 @@
 import React, { useState } from "react";
 import type { K8sEvent, Pod, PvcDescribeView } from "../../api";
 import { DescribeEventsSection } from "./DescribeEventsSection";
-import { ResourceJumpChip } from "../ResourceJumpChip";
-import { ResourceNameWithCopy } from "../ResourceNameWithCopy";
-import { PodHealthPill, PodListStatusPill } from "../PodStatusPills";
+import { DescribePodReferencesTable } from "./DescribePodReferencesTable";
 import {
   describePvcStorageClassNote,
-  derivePvcExpandUsedByRows,
   podIsHealthAbnormal,
   podsUsingPvcClaim,
   type PvcListRow,
@@ -86,22 +83,6 @@ function CollapsibleAnnotations({ annotations }: { annotations: Record<string, s
   );
 }
 
-const miniTh: React.CSSProperties = {
-  textAlign: "left",
-  padding: "6px 8px",
-  borderBottom: "1px solid var(--wl-border-table-header)",
-  fontSize: 11,
-  color: "var(--wl-text-secondary)",
-};
-const miniTd: React.CSSProperties = {
-  padding: "6px 8px",
-  borderBottom: "1px solid var(--wl-border-table-row)",
-  fontSize: 12,
-  color: "var(--wl-text-heading)",
-  verticalAlign: "top",
-  wordBreak: "break-word",
-};
-
 export type PvcDescribeContentProps = {
   view?: PvcDescribeView | null;
   events: K8sEvent[];
@@ -124,7 +105,6 @@ export function PvcDescribeContent({
   }
 
   const statusText = view.isTerminating ? "Terminating" : view.statusPhase || "—";
-  const usedRows = derivePvcExpandUsedByRows(pods, view.namespace, view.name);
   const mountingPods = podsUsingPvcClaim(pods, view.namespace, view.name);
   const abnormalMountCount = mountingPods.filter(podIsHealthAbnormal).length;
   const scNoteRow: PvcListRow = {
@@ -195,55 +175,10 @@ export function PvcDescribeContent({
             {abnormalMountCount} 个挂载 Pod 处于非「健康」或 Status 异常，可从下表跳转 Pods 排查。
           </div>
         )}
-        {usedRows.length === 0 ? (
+        {mountingPods.length === 0 ? (
           <div style={{ fontSize: 12, color: "var(--wl-text-muted)" }}>无关联 Pod</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", backgroundColor: "var(--wl-describe-table-bg)", minWidth: 560 }}>
-              <thead>
-                <tr>
-                  <th style={miniTh}>Pod</th>
-                  <th style={miniTh}>状态标签</th>
-                  <th style={miniTh}>Status</th>
-                  <th style={miniTh}>Node</th>
-                  <th style={miniTh}>联动</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usedRows.map((r) => (
-                  <tr key={r.podName}>
-                    <td style={miniTd}>
-                      <ResourceNameWithCopy
-                        name={r.podName}
-                        onCopy={onCopyName}
-                        fontSize={12}
-                        copyButtonTitle="复制 Pod 名称"
-                      />
-                    </td>
-                    <td style={miniTd}>
-                      <PodHealthPill label={r.healthLabel} title={r.healthReasonsText || undefined} />
-                    </td>
-                    <td style={miniTd}>
-                      <PodListStatusPill text={r.statusText} />
-                    </td>
-                    <td style={{ ...miniTd, fontSize: 11 }}>{r.node}</td>
-                    <td style={miniTd}>
-                      {onJumpPods ? (
-                        <ResourceJumpChip
-                          label="Pods"
-                          compact
-                          onClick={() => onJumpPods(r.podName)}
-                          title="打开 Pods 并过滤"
-                        />
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DescribePodReferencesTable pods={mountingPods} onCopyName={onCopyName} onJumpPods={onJumpPods} />
         )}
       </section>
 

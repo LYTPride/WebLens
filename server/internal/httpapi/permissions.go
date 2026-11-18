@@ -33,6 +33,9 @@ func requiredCapabilityForRequest(c *gin.Context) auth.Capability {
 		return ""
 	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if c.Request.Method == http.MethodGet && len(parts) == 7 && parts[3] == "secrets" && parts[6] == "keys" {
+		return auth.CapabilityResourceWrite
+	}
 	if len(parts) >= 7 && parts[3] == "pods" {
 		switch parts[6] {
 		case "exec":

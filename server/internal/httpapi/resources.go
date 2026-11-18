@@ -20,9 +20,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/gin-gonic/gin"
 	"sigs.k8s.io/yaml"
@@ -332,10 +334,16 @@ func setPodDescribeCache(key string, data PodDescribeResponse) {
 
 // watchAndStream 是通用的 Kubernetes Watch 封装：将 watch.Interface 输出为按行 JSON 事件流
 func watchAndStream(c *gin.Context, id, ns string, w watch.Interface) {
+	streamWatch(c, id, ns, w, nil)
+}
+
+func streamWatch(c *gin.Context, id, ns string, w watch.Interface, project func(runtime.Object) any) {
 	defer w.Stop()
 
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
+	if c.Writer.Header().Get("Cache-Control") == "" {
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+	}
 	// 关闭常见反向代理对响应体的缓冲，避免 watch 事件被攒批延迟（运维体感「一分钟才更新」）
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.WriteHeader(http.StatusOK)
@@ -356,13 +364,23 @@ func watchAndStream(c *gin.Context, id, ns string, w watch.Interface) {
 			if !ok {
 				return
 			}
+			var object any = ev.Object
+			if project != nil {
+				if ev.Type == watch.Error {
+					return
+				}
+				object = project(ev.Object)
+				if object == nil {
+					continue
+				}
+			}
 			out := struct {
 				Type         watch.EventType `json:"type"`
 				Object       interface{}     `json:"object"`
 				ServerTimeMs int64           `json:"serverTimeMs"`
 			}{
 				Type:         ev.Type,
-				Object:       ev.Object,
+				Object:       object,
 				ServerTimeMs: time.Now().UnixMilli(),
 			}
 			if err := enc.Encode(&out); err != nil {
@@ -1368,66 +1386,12 @@ func registerResourceRoutes(r *gin.Engine, reg *cluster.Registry, store *auth.St
 		watchAndStream(c, id, ns, w)
 	})
 
-	// Secrets
-	r.GET("/api/clusters/:id/secrets", func(c *gin.Context) {
-		id, ns := c.Param("id"), c.Query("namespace")
-		if ns == "" {
-			ns = corev1.NamespaceAll
-		}
-		cacheKey := listCacheKey("secrets", id, ns)
-		if data, ok := getListFromCache(cacheKey); ok {
-			c.JSON(http.StatusOK, gin.H{"items": data, "serverTimeMs": time.Now().UnixMilli()})
-			return
-		}
+	registerSecretRoutes(r, func(id, namespace string) (typedcorev1.SecretInterface, bool) {
 		client, ok := reg.Client(id)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
-			return
+			return nil, false
 		}
-		list, err := client.CoreV1().Secrets(ns).List(c.Request.Context(), metav1.ListOptions{})
-		if err != nil {
-			if ns == corev1.NamespaceAll && isForbiddenClusterScope(err) {
-				if def := defaultNamespaceForCluster(reg, id); def != "" {
-					list, err = client.CoreV1().Secrets(def).List(c.Request.Context(), metav1.ListOptions{})
-				}
-			}
-			if err != nil {
-				if isForbiddenClusterScope(err) {
-					c.JSON(http.StatusOK, gin.H{"items": []corev1.Secret{}, "serverTimeMs": time.Now().UnixMilli()})
-					return
-				}
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-		}
-		setListCache(cacheKey, list.Items)
-		c.JSON(http.StatusOK, gin.H{"items": list.Items, "serverTimeMs": time.Now().UnixMilli()})
-	})
-
-	// Secrets Watch
-	r.GET("/api/clusters/:id/secrets/watch", func(c *gin.Context) {
-		id, ns := c.Param("id"), c.Query("namespace")
-		if ns == "" {
-			ns = corev1.NamespaceAll
-		}
-		client, ok := reg.Client(id)
-		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
-			return
-		}
-		w, err := client.CoreV1().Secrets(ns).Watch(c.Request.Context(), metav1.ListOptions{
-			Watch:           true,
-			ResourceVersion: "0",
-		})
-		if err != nil {
-			if isForbiddenClusterScope(err) {
-				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		watchAndStream(c, id, ns, w)
+		return client.CoreV1().Secrets(namespace), true
 	})
 
 	// Services

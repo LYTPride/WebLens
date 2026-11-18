@@ -28,6 +28,7 @@ WebLens 在请求进入 Kubernetes 客户端前检查平台能力；Kubernetes R
 
 - 每个集群请求先映射为语义能力，再检查用户在目标作用域上的有效角色。
 - ConfigMap 批量导出逐项检查读取能力；批量删除逐项检查写入能力。
+- Secrets 的 List、Watch、Describe 和脱敏 YAML 使用资源读取权限，仅返回白名单字段。查询键名、轮换键值和删除使用资源写入权限。Secrets Watch 同时复核会话和作用域授权。
 - 未配置权限策略的非 root 接口默认拒绝，避免新增写接口时意外放行。
 - 除 root 外，namespace 请求必须命中明确的已添加/已授权作用域；Nodes 等集群级资源只允许 root fallback。
 - Watch 与 Shell 的认证中间件每 5 秒复核 session；禁用、重置密码或本机恢复后会取消请求 context。Shell 另行复核 `pod.exec` 能力，作用域撤销或降级后主动关闭连接。

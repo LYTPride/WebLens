@@ -187,6 +187,7 @@ func attachSessionRevocation(c *gin.Context, store *auth.Store, tokenHash string
 	if !strings.HasSuffix(path, "/watch") && !strings.HasSuffix(path, "/exec") {
 		return func() {}
 	}
+	clusterID, namespace, kind, _ := clusterScopeFromPath(c)
 	requestCtx, cancelRequest := context.WithCancel(c.Request.Context())
 	c.Request = c.Request.WithContext(requestCtx)
 	done := make(chan struct{})
@@ -199,7 +200,15 @@ func attachSessionRevocation(c *gin.Context, store *auth.Store, tokenHash string
 				return
 			case <-ticker.C:
 				checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				_, _, err := store.ValidateSession(checkCtx, tokenHash, time.Now())
+				user, _, err := store.ValidateSession(checkCtx, tokenHash, time.Now())
+				if err == nil && kind == "secrets" && !user.IsRoot {
+					role, allowed, scopeErr := store.UserAccessRoleForScope(checkCtx, user, clusterID, namespace)
+					if scopeErr == nil && (!allowed || !auth.RoleAllows(role, auth.CapabilityResourceRead)) {
+						cancel()
+						cancelRequest()
+						return
+					}
+				}
 				cancel()
 				if errors.Is(err, sql.ErrNoRows) || errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
 					cancelRequest()
@@ -342,6 +351,9 @@ func clusterScopeFromPath(c *gin.Context) (clusterID string, namespace string, k
 	}
 	if kind == "configmaps" && len(parts) == 5 && (parts[4] == "batch-delete" || parts[4] == "export") {
 		return clusterID, "", kind, true
+	}
+	if kind == "secrets" && (len(parts) == 4 || (len(parts) == 5 && parts[4] == "watch")) {
+		return clusterID, c.Query("namespace"), kind, false
 	}
 	// Named resources are authorized against the namespace used by the handler.
 	if len(parts) >= 6 {
