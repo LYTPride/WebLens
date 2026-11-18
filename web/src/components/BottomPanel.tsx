@@ -5,11 +5,12 @@ import { PodYamlEditTab } from "./PodYamlEditTab";
 import { podExecWsUrl, type ConfigMap } from "../api";
 import { FileManagerPanel } from "./FileManagerPanel";
 import { ConfigMapEditorTab } from "./ConfigMapEditorTab";
+import { SecretKeyEditor, SecretYamlPreview } from "./SecretWorkspaceTab";
 import type { ConfigMapReferenceSummary } from "../utils/configMapTable";
 
 export interface PanelTab {
   id: string;
-  type: "shell" | "logs" | "edit" | "config-editor";
+  type: "shell" | "logs" | "edit" | "config-editor" | "secret-yaml" | "secret-editor";
   clusterId: string;
   namespace: string;
   pod: string;
@@ -23,6 +24,7 @@ export interface PanelTab {
   readOnly?: boolean;
   configMap?: ConfigMap;
   configMapReferences?: ConfigMapReferenceSummary;
+  secretUid?: string;
 }
 
 interface BottomPanelProps {
@@ -553,6 +555,19 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   onSaved={(result) => onEditSaved?.(tab, result)}
                   isActive={activeTabId === tab.id}
                   readOnly={tab.readOnly}
+                />
+              ) : tab.type === "secret-yaml" ? (
+                <SecretYamlPreview clusterId={tab.clusterId} namespace={tab.namespace} name={tab.pod} />
+              ) : tab.type === "secret-editor" && tab.secretUid ? (
+                <SecretKeyEditor
+                  clusterId={tab.clusterId}
+                  namespace={tab.namespace}
+                  name={tab.pod}
+                  uid={tab.secretUid}
+                  onSaved={() => {
+                    onEditSaved?.(tab);
+                    onToast?.("Secret 键值已更新");
+                  }}
                 />
               ) : tab.configMap && tab.configMapReferences ? (
                 <ConfigMapEditorTab
