@@ -13,6 +13,7 @@
 - **列表能力**（Pods、Deployments 等）：主标题为 **类型 · 命名空间 / 条数**（集群与作用域详情见上方「集群与命名空间」小字，避免重复占宽）；Name 筛选、表头拖拽调宽、**按列排序**（Watch 更新后仍按当前排序重排；开启排序时若某行排序位置因数据变化而改变，可有轻量行内提示）；**Age 列** 以服务端下发的 **`serverTimeMs`** 为时间基准（配合前端单调推进），减轻本机时间与集群不一致带来的误判；偏差超阈值时有轻量提示；**Ingress / StatefulSet / Service 行内展开子表** 同样支持表头调宽与格内换行，下拉菜单统一 **body Portal** 定位（见 `doc/dev/portal-dropdown-and-secondary-tables.md`）
 - **YAML 编辑**（Pods、Deployments、StatefulSets、Ingresses、Services、PVCs、ConfigMaps 等）：Monaco（高亮、minimap、折叠、sticky 上下文、搜索与保存），按资源类型走对应 API
 - **ConfigMaps**：配置资源一等页面，支持 List + Watch、Name 打开结构化 Describe、引用 Pod 影响范围、风险标签、YAML 编辑、配置 key 编辑、导出与删除；说明见 `doc/guide/configmaps.md`
+- **Secrets**：按作用域实时更新，支持 Describe、Pod 联动和脱敏 YAML 预览。读写用户可轮换指定键或删除 Secret。详见 [Secrets 使用手册](doc/guide/secrets.md)
 - **其他资源**：Workloads / Config / Network / Cluster 等浏览
 - **Nodes（集群级）**：列表与 Watch 与命名空间无关；若当前 kubeconfig / ServiceAccount **无 list/watch nodes** 权限，页面以统一 **「暂无访问权限 / 受限态」** 展示（非整页报错），并支持按集群缓存拒绝结果；管理员放权后可通过 **「刷新列表」** 重新探测。**当前 v1 侧栏默认不展示 Nodes 入口**（便于无集群级权限的团队使用），相关逻辑与路由仍保留，恢复入口见 `doc/dev/theme-ui.md` 与 `doc/dev/changelog.md`，用户说明见 `doc/guide/resource-lists.md`
 - **PersistentVolumeClaims（PVC）**：命名空间内列表 **List + Watch**、结构化 **Describe**、**YAML 编辑** 与删除（以当前 RBAC 为准）；列表能力（筛选、排序、Age、`serverTimeMs`）与其他资源列表一致，说明见 `doc/guide/resource-lists.md`
@@ -74,7 +75,7 @@ npm run dev
 详细文档在 `doc/`：
 
 - 文档二级首页：`doc/README.md`
-- 用户手册：`doc/guide/`（含 Pods、Deployments、**ConfigMaps**、**Events**、Shell、文件管理、**资源列表排序与实时更新**）
+- 用户手册：`doc/guide/`（含 Pods、Deployments、**ConfigMaps**、**Secrets**、**Events**、Shell、文件管理、**资源列表排序与实时更新**）
 - 开发文档：`doc/dev/`（含架构、**资源列表数据流 list + watch + 作用域缓存**、**v1 埋点**、健康标签、Shell/文件管理实现说明）
 - 规划：`doc/roadmap.md`
 

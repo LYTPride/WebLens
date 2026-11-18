@@ -33,7 +33,10 @@ const MENU: { title: string; items: { id: ResourceKind; label: string }[] }[] = 
   },
   {
     title: "配置",
-    items: [{ id: "configmaps", label: "ConfigMaps" }],
+    items: [
+      { id: "configmaps", label: "ConfigMaps" },
+      { id: "secrets", label: "Secrets" },
+    ],
   },
 ];
 

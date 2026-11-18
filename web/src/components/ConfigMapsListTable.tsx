@@ -4,7 +4,7 @@ import { ResizableTh } from "./ResizableTh";
 import { ResourceSortArrows } from "./ResourceSortArrows";
 import { SelectionHeaderCell } from "./SelectionHeaderCell";
 import { CopyIcon } from "./icons/CopyIcon";
-import { DropdownMenuPortal } from "./DropdownMenuPortal";
+import { ResourceRowMenu, ResourceRowMenuItem } from "./ResourceRowMenu";
 import { formatAgeFromMetadata } from "../utils/k8sCreationTimestamp";
 import type { ResourceListSortState } from "../utils/resourceListSort";
 import {
@@ -74,16 +74,6 @@ const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
   borderBottom: "1px solid var(--wl-border-table-row)",
   fontSize: 13,
-};
-
-const menuItemStyleForDropdown: React.CSSProperties = {
-  display: "block",
-  width: "100%",
-  padding: "8px 12px",
-  border: "none",
-  cursor: "pointer",
-  fontSize: 13,
-  textAlign: "left",
 };
 
 function riskPillStyle(risk: ConfigMapRisk): React.CSSProperties {
@@ -184,7 +174,6 @@ export function ConfigMapsListTable({
   setError,
   deleteConfigMapApi,
 }: ConfigMapsListTableProps) {
-  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const headerSelectRef = useRef<HTMLInputElement>(null);
   const visibleKeys = sortedRows.map((row) => configMapKey(row.metadata.namespace, row.metadata.name));
   const visibleSelected = visibleKeys.filter((key) => selectedKeys.has(key)).length;
@@ -363,116 +352,84 @@ export function ConfigMapsListTable({
               </td>
               <td style={baseCell} title={age}>{age}</td>
               <td style={{ ...tdStyle, overflow: "visible" }} onClick={(e) => e.stopPropagation()}>
-                <div style={{ position: "relative" }}>
-                  <button
-                    ref={isMenuOpen ? menuTriggerRef : undefined}
-                    type="button"
-                    className="wl-table-menu-trigger"
-                    disabled={rowBusy || !effectiveClusterId}
-                    onClick={() => setMenuOpenKey(isMenuOpen ? null : rowKey)}
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: "50%",
-                      cursor: rowBusy ? "not-allowed" : "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 16,
-                      lineHeight: 1,
-                      opacity: rowBusy ? 0.5 : 1,
+                <ResourceRowMenu
+                  label={`操作 ConfigMap ${name}`}
+                  open={isMenuOpen}
+                  busy={rowBusy}
+                  disabled={!effectiveClusterId}
+                  onOpenChange={(open) => setMenuOpenKey(open ? rowKey : null)}
+                >
+                  <ResourceRowMenuItem
+                    icon="✎"
+                    disabled={rowBusy}
+                    onClick={() => {
+                      setMenuOpenKey(null);
+                      openEditYamlTab(row);
                     }}
-                    title="操作"
                   >
-                    ⋮
-                  </button>
-                  {isMenuOpen && (
-                    <DropdownMenuPortal
-                      onClose={() => setMenuOpenKey(null)}
-                      triggerRef={menuTriggerRef}
-                      align="right"
-                      surfaceStyle={{ padding: "4px 0", minWidth: 176 }}
+                    {canWrite ? "编辑 YAML" : "查看 YAML"}
+                  </ResourceRowMenuItem>
+                  {canWrite && (
+                    <ResourceRowMenuItem
+                      icon="⚙"
+                      disabled={rowBusy}
+                      onClick={() => {
+                        setMenuOpenKey(null);
+                        openConfigEditorTab(row);
+                      }}
                     >
-                      <button
-                        type="button"
-                        className="wl-menu-item"
-                        style={menuItemStyleForDropdown}
-                        disabled={rowBusy}
-                        onClick={() => {
-                          setMenuOpenKey(null);
-                          openEditYamlTab(row);
-                        }}
-                      >
-                        <span style={{ marginRight: 8 }}>✎</span> {canWrite ? "编辑 YAML" : "查看 YAML"}
-                      </button>
-                      {canWrite && (
-                      <button
-                        type="button"
-                        className="wl-menu-item"
-                        style={menuItemStyleForDropdown}
-                        disabled={rowBusy}
-                        onClick={() => {
-                          setMenuOpenKey(null);
-                          openConfigEditorTab(row);
-                        }}
-                      >
-                        <span style={{ marginRight: 8 }}>⚙</span> 编辑配置
-                      </button>
-                      )}
-                      <button
-                        type="button"
-                        className="wl-menu-item"
-                        style={menuItemStyleForDropdown}
-                        disabled={rowBusy}
-                        onClick={() => {
-                          setMenuOpenKey(null);
-                          void downloadYaml(row);
-                        }}
-                      >
-                        <span style={{ marginRight: 8 }}>⇩</span> 下载 YAML
-                      </button>
-                      {canWrite && (
-                      <button
-                        type="button"
-                        className="wl-menu-item wl-menu-item-danger"
-                        style={menuItemStyleForDropdown}
-                        disabled={rowBusy || !effectiveClusterId}
-                        onClick={() => {
-                          setMenuOpenKey(null);
-                          if (!effectiveClusterId) return;
-                          const refText = formatConfigMapReferenceSummary(refs);
-                          setActionConfirm({
-                            title: "确认删除 1 个 ConfigMap？",
-                            description:
-                              refs.totalResources > 0
-                                ? `该 ConfigMap 被 ${refText} 引用。删除后相关工作负载可能启动失败或配置异常。`
-                                : "当前未发现引用资源。删除后不可恢复。",
-                            items: [`${ns}/${name}`],
-                            variant: "danger",
-                            onConfirm: async (auditReason) => {
-                              setRowBusyKey(rowKey);
-                              try {
-                                await deleteConfigMapApi(effectiveClusterId, ns, name, auditReason);
-                                onDeletedOne(ns, name);
-                                setToastMessage("已删除 ConfigMap");
-                                setError(null);
-                              } catch (err: unknown) {
-                                const e = err as { response?: { data?: { error?: string } }; message?: string };
-                                setToastMessage(e?.response?.data?.error ?? e?.message ?? "删除失败");
-                                throw err;
-                              } finally {
-                                setRowBusyKey(null);
-                              }
-                            },
-                          });
-                        }}
-                      >
-                        <span style={{ marginRight: 8 }}>🗑</span> 删除
-                      </button>
-                      )}
-                    </DropdownMenuPortal>
+                      编辑配置
+                    </ResourceRowMenuItem>
                   )}
-                </div>
+                  <ResourceRowMenuItem
+                    icon="⇩"
+                    disabled={rowBusy}
+                    onClick={() => {
+                      setMenuOpenKey(null);
+                      void downloadYaml(row);
+                    }}
+                  >
+                    下载 YAML
+                  </ResourceRowMenuItem>
+                  {canWrite && (
+                    <ResourceRowMenuItem
+                      icon="🗑"
+                      danger
+                      disabled={rowBusy || !effectiveClusterId}
+                      onClick={() => {
+                        setMenuOpenKey(null);
+                        if (!effectiveClusterId) return;
+                        const refText = formatConfigMapReferenceSummary(refs);
+                        setActionConfirm({
+                          title: "确认删除 1 个 ConfigMap？",
+                          description:
+                            refs.totalResources > 0
+                              ? `该 ConfigMap 被 ${refText} 引用。删除后相关工作负载可能启动失败或配置异常。`
+                              : "当前未发现引用资源。删除后不可恢复。",
+                          items: [`${ns}/${name}`],
+                          variant: "danger",
+                          onConfirm: async (auditReason) => {
+                            setRowBusyKey(rowKey);
+                            try {
+                              await deleteConfigMapApi(effectiveClusterId, ns, name, auditReason);
+                              onDeletedOne(ns, name);
+                              setToastMessage("已删除 ConfigMap");
+                              setError(null);
+                            } catch (err: unknown) {
+                              const e = err as { response?: { data?: { error?: string } }; message?: string };
+                              setToastMessage(e?.response?.data?.error ?? e?.message ?? "删除失败");
+                              throw err;
+                            } finally {
+                              setRowBusyKey(null);
+                            }
+                          },
+                        });
+                      }}
+                    >
+                      删除
+                    </ResourceRowMenuItem>
+                  )}
+                </ResourceRowMenu>
               </td>
             </tr>
           );

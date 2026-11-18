@@ -48,31 +48,46 @@ export interface Pod {
   };
   spec?: {
     nodeName?: string;
-    containers?: Array<{
+    imagePullSecrets?: Array<{ name?: string }>;
+    containers?: Array<PodContainerEnv & {
       name: string;
       image?: string;
       ports?: Array<{ containerPort?: number; protocol?: string }>;
-      envFrom?: Array<{ configMapRef?: { name?: string; optional?: boolean } }>;
-      env?: Array<{ name?: string; valueFrom?: { configMapKeyRef?: { name?: string; key?: string; optional?: boolean } } }>;
     }>;
-    initContainers?: Array<{
+    initContainers?: Array<PodContainerEnv & {
       name: string;
       image?: string;
       ports?: Array<{ containerPort?: number; protocol?: string }>;
-      envFrom?: Array<{ configMapRef?: { name?: string; optional?: boolean } }>;
-      env?: Array<{ name?: string; valueFrom?: { configMapKeyRef?: { name?: string; key?: string; optional?: boolean } } }>;
     }>;
+    ephemeralContainers?: PodContainerEnv[];
     /** 列表接口若带 volumes，可用于展示 Pod 挂载的 PVC 名称 */
     volumes?: Array<{
       name?: string;
       persistentVolumeClaim?: { claimName?: string };
       configMap?: { name?: string; optional?: boolean; items?: Array<{ key?: string; path?: string }> };
+      secret?: { secretName?: string };
+      projected?: { sources?: Array<{ secret?: { name?: string } }> };
+      csi?: { nodePublishSecretRef?: { name?: string } };
     }>;
   };
   // 后端计算得到的健康信息，仅用于前端标签展示与解释
   healthLabel?: "健康" | "关注" | "警告" | "严重";
   healthReasons?: string[];
   healthScore?: number;
+}
+
+interface PodContainerEnv {
+  envFrom?: Array<{
+    configMapRef?: { name?: string; optional?: boolean };
+    secretRef?: { name?: string };
+  }>;
+  env?: Array<{
+    name?: string;
+    valueFrom?: {
+      configMapKeyRef?: { name?: string; key?: string; optional?: boolean };
+      secretKeyRef?: { name?: string };
+    };
+  }>;
 }
 
 export interface ContainerFileEntry {
@@ -918,6 +933,7 @@ export interface ResourceWatchEvent<T = any> {
 export interface ListWithServerTime<T> {
   items: T[];
   serverTimeMs?: number;
+  resourceVersion?: string;
 }
 
 /**
@@ -1043,6 +1059,9 @@ export function watchResourceList<T = any>(
     onEvent: (ev: ResourceWatchEvent<T>) => void;
     onError?: (err: Error) => void;
     onConnectionEstablished?: () => void;
+    resourceVersion?: string;
+    /** 接管重连，适用于需要重新 List 获取新版本的资源。 */
+    onDisconnect?: (httpStatus?: number) => void;
     /**
      * 返回 false 时不自动重连（用于 401/403 等永久型失败，避免刷屏重试）。
      * httpStatus 来自响应或 Error.message 中的 HTTP nnn（无则 undefined）。
@@ -1059,6 +1078,7 @@ export function watchResourceList<T = any>(
   if (namespace && namespace !== "") {
     url.searchParams.set("namespace", namespace);
   }
+  if (opts.resourceVersion) url.searchParams.set("resourceVersion", opts.resourceVersion);
 
   let cancelled = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1073,6 +1093,7 @@ export function watchResourceList<T = any>(
   const connect = () => {
     if (cancelled) return;
     let suppressReconnect = false;
+    let httpStatus: number | undefined;
     fetchAbort = new AbortController();
     fetch(url.toString(), { credentials: "same-origin", signal: fetchAbort.signal })
       .then(async (res) => {
@@ -1099,7 +1120,7 @@ export function watchResourceList<T = any>(
         if (err?.name === "AbortError" || cancelled) return;
         opts.onError?.(err);
         const httpMatch = /HTTP (\d{3})/.exec(err.message || "");
-        const httpStatus = httpMatch ? parseInt(httpMatch[1], 10) : undefined;
+        httpStatus = httpMatch ? parseInt(httpMatch[1], 10) : undefined;
         if (opts.shouldReconnect && opts.shouldReconnect(err, httpStatus) === false) {
           suppressReconnect = true;
         }
@@ -1108,6 +1129,10 @@ export function watchResourceList<T = any>(
         if (cancelled) return;
         clearReconnect();
         if (suppressReconnect) return;
+        if (opts.onDisconnect) {
+          opts.onDisconnect(httpStatus);
+          return;
+        }
         reconnectTimer = setTimeout(connect, 600);
       });
   };
@@ -1626,6 +1651,71 @@ export async function exportConfigMapsYaml(clusterId: string, items: ConfigMapBa
   return res.data;
 }
 
+export interface SecretSummary {
+  metadata: {
+    name: string;
+    namespace: string;
+    uid: string;
+    creationTimestamp?: string;
+    resourceVersion: string;
+  };
+  type: string;
+  immutable: boolean;
+  keyCount: number;
+}
+
+export interface SecretKeys {
+  secret: SecretSummary;
+  keys: string[];
+}
+
+export type SecretValueEncoding = "text" | "base64";
+
+function secretUrl(clusterId: string, namespace: string, name: string): string {
+  return `/api/clusters/${encodeURIComponent(clusterId)}/secrets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`;
+}
+
+export async function fetchSecretDescribe(
+  clusterId: string, namespace: string, name: string, signal: AbortSignal,
+): Promise<SecretSummary> {
+  const res = await api.get<SecretSummary>(`${secretUrl(clusterId, namespace, name)}/describe`, { signal });
+  return res.data;
+}
+
+export async function fetchSecretYaml(clusterId: string, namespace: string, name: string, signal: AbortSignal): Promise<string> {
+  const res = await api.get<string>(`${secretUrl(clusterId, namespace, name)}/yaml`, { responseType: "text", signal });
+  return res.data;
+}
+
+export async function fetchSecretKeys(clusterId: string, namespace: string, name: string, signal: AbortSignal): Promise<SecretKeys> {
+  const res = await api.get<SecretKeys>(`${secretUrl(clusterId, namespace, name)}/keys`, { signal });
+  return res.data;
+}
+
+export async function updateSecretKey(
+  clusterId: string,
+  { metadata }: SecretSummary,
+  key: string,
+  value: string,
+  encoding: SecretValueEncoding,
+  auditReason: string,
+): Promise<SecretSummary> {
+  const { namespace, name, uid, resourceVersion } = metadata;
+  const res = await api.patch<SecretSummary>(
+    secretUrl(clusterId, namespace, name),
+    { uid, resourceVersion, key, value, encoding },
+    { headers: auditReasonHeaders(auditReason) },
+  );
+  return res.data;
+}
+
+export async function deleteSecret(clusterId: string, { metadata }: SecretSummary, auditReason: string): Promise<void> {
+  await api.delete(secretUrl(clusterId, metadata.namespace, metadata.name), {
+    params: { uid: metadata.uid },
+    headers: auditReasonHeaders(auditReason),
+  });
+}
+
 export async function fetchNodeDescribe(clusterId: string, name: string): Promise<NodeDescribe> {
   const res = await api.get<NodeDescribe>(
     `/api/clusters/${encodeURIComponent(clusterId)}/nodes/${encodeURIComponent(name)}/describe`,
@@ -1655,12 +1745,14 @@ export async function fetchResourceList<T = unknown>(
   clusterId: string,
   resourcePath: string,
   namespace?: string,
+  signal?: AbortSignal,
 ): Promise<ListWithServerTime<T>> {
   const res = await api.get<ListWithServerTime<T>>(
     `/api/clusters/${encodeURIComponent(clusterId)}/${resourcePath}`,
-    { params: namespace ? { namespace } : {} },
+    { params: namespace ? { namespace } : {}, signal },
   );
-  return { items: res.data.items || [], serverTimeMs: res.data.serverTimeMs };
+  const { items, serverTimeMs, resourceVersion } = res.data;
+  return { items: items || [], serverTimeMs, resourceVersion };
 }
 
 export type ResourceKind =
