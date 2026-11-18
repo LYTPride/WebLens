@@ -65,6 +65,12 @@
 - 支持 **Describe** 侧栏、**YAML 编辑**、**配置 key 编辑**、**导出 YAML**、**删除** 与 **批量删除/导出**（需集群 RBAC 允许）；Name 打开 Describe，三点菜单只放操作。
 - 表格会基于同作用域 Pod 数据派生引用统计、配置规模和风险标签；详情见 [ConfigMaps 使用手册](./configmaps.md)。
 
+## Secrets
+
+- **Secrets** 按已应用的集群和命名空间执行 List + Watch。表格显示类型、键数量、不可变状态和 Age。
+- 点击 Name 打开 Describe，关联 Pod 可复制名称并跳转到 Pods 列表。行尾三点菜单提供脱敏 YAML 预览，作用域读写用户还可轮换指定键或删除 Secret。
+- 详情见 [Secrets 使用手册](./secrets.md)。
+
 ## PersistentVolumeClaims（PVC）
 
 - **PVC** 为 **命名空间作用域** 资源：列表受当前已应用的 **集群 + 命名空间** 约束（与 Pods、Deployments 等一致），采用与其他资源相同的 **HTTP list + watch** 模式。
@@ -95,4 +101,5 @@
 - [Pods 使用手册](./pods.md)
 - [Deployments 使用手册](./deployments.md)
 - [ConfigMaps 使用手册](./configmaps.md)
+- [Secrets 使用手册](./secrets.md)
 - [Events 使用手册](./events.md)

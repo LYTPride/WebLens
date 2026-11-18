@@ -10,7 +10,6 @@ export const V1_HIDDEN_VIEWS: ReadonlySet<ResourceKind> = new Set<ResourceKind>(
   "daemonsets",
   "jobs",
   "cronjobs",
-  "secrets",
 ]);
 
 const SESSION_LEGACY_NAMESPACE_VIEW = "namespaces";
