@@ -51,6 +51,9 @@ import {
   exportConfigMapsYaml,
   type ConfigMap,
   type ConfigMapDescribe,
+  deleteSecret,
+  fetchSecretDescribe,
+  type SecretSummary,
 } from "../api";
 import { Sidebar } from "../components/Sidebar";
 import { CloudScopeLogo } from "../components/CloudScopeLogo";
@@ -188,10 +191,12 @@ import { IngressDescribeContent } from "../components/describe/IngressDescribeCo
 import { ServiceDescribeContent } from "../components/describe/ServiceDescribeContent";
 import { PvcDescribeContent } from "../components/describe/PvcDescribeContent";
 import { ConfigMapDescribeContent } from "../components/describe/ConfigMapDescribeContent";
+import { SecretDescribeContent } from "../components/describe/SecretDescribeContent";
 import { NodeDescribeContent } from "../components/describe/NodeDescribeContent";
 import { ServicesListTable } from "../components/ServicesListTable";
 import { PVC_COLUMN_KEYS, PVC_COLUMN_DEFAULTS, PVCListTable } from "../components/PVCListTable";
 import { CONFIGMAP_COLUMN_KEYS, CONFIGMAP_COLUMN_DEFAULTS, ConfigMapsListTable } from "../components/ConfigMapsListTable";
+import { SecretsListTable, type SecretListSort } from "../components/SecretsListTable";
 import { NODE_COLUMN_KEYS, NODE_COLUMN_DEFAULTS, NodesListTable } from "../components/NodesListTable";
 import { EVENT_COLUMN_KEYS, EVENT_COLUMN_DEFAULTS, EventsListTable } from "../components/EventsListTable";
 import { EventDescribeContent } from "../components/describe/EventDescribeContent";
@@ -219,6 +224,7 @@ import {
 } from "../components/SecondaryExpandTable";
 import { useSortedRowPositionChangeHighlight } from "../hooks/useSortedRowPositionChangeHighlight";
 import { useNowTick } from "../hooks/useNowTick";
+import { useSecretsList } from "../hooks/useSecretsList";
 import {
   applyK8sClusterScopedWatchEvent,
   applyK8sNamespacedWatchEvent,
@@ -894,6 +900,8 @@ export const App: React.FC = () => {
   const [servicesListNonce, setServicesListNonce] = useState(0);
   const [pvcsListNonce, setPvcsListNonce] = useState(0);
   const [configMapsListNonce, setConfigMapsListNonce] = useState(0);
+  const [secretsListNonce, setSecretsListNonce] = useState(0);
+  const [secretsListSort, setSecretsListSort] = useState<SecretListSort>(null);
   const [eventsListNonce, setEventsListNonce] = useState(0);
   const [nodesListNonce, setNodesListNonce] = useState(0);
   /** Deployment / StatefulSet Scale 弹窗 */
@@ -1163,7 +1171,7 @@ export const App: React.FC = () => {
   /** Describe 右侧弹层：Pod 或 Deployment */
   const [describeTarget, setDescribeTarget] = useState<
     | {
-        kind: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "configmap" | "node";
+        kind: "pod" | "deployment" | "statefulset" | "ingress" | "service" | "pvc" | "configmap" | "secret" | "node";
         clusterId: string;
         namespace: string;
         name: string;
@@ -1178,6 +1186,9 @@ export const App: React.FC = () => {
   const [describeServiceData, setDescribeServiceData] = useState<ServiceDescribe | null>(null);
   const [describePvcData, setDescribePvcData] = useState<PvcDescribe | null>(null);
   const [describeConfigMapData, setDescribeConfigMapData] = useState<ConfigMapDescribe | null>(null);
+  const [describeSecretData, setDescribeSecretData] = useState<SecretSummary | null>(null);
+  const [describeSecretPods, setDescribeSecretPods] = useState<Pod[] | null>();
+  const secretDescribeRequest = useRef<AbortController | null>(null);
   const [describeNodeData, setDescribeNodeData] = useState<NodeDescribe | null>(null);
   const [describeLoading, setDescribeLoading] = useState(false);
   const [describeError, setDescribeError] = useState<string | null>(null);
@@ -1213,6 +1224,7 @@ export const App: React.FC = () => {
       currentView === "services" ||
       currentView === "persistentvolumeclaims" ||
       currentView === "configmaps" ||
+      currentView === "secrets" ||
       currentView === "events" ||
       currentView === "nodes" ||
       describeTarget !== null);
@@ -1356,7 +1368,7 @@ export const App: React.FC = () => {
           changed = true;
           return [];
         }
-        if (tab.type === "config-editor" && !canInScope(auth, scope.id, "resource.write")) {
+        if ((tab.type === "config-editor" || tab.type === "secret-editor") && !canInScope(auth, scope.id, "resource.write")) {
           changed = true;
           return [];
         }
@@ -1646,6 +1658,32 @@ export const App: React.FC = () => {
           }
         })
         .finally(() => setDescribeLoading(false));
+    } else if (describeTarget.kind === "secret") {
+      secretDescribeRequest.current?.abort();
+      const controller = new AbortController();
+      secretDescribeRequest.current = controller;
+      const { clusterId, namespace, name } = describeTarget;
+      setDescribeSecretData(null);
+      setDescribeSecretPods(undefined);
+      fetchSecretDescribe(clusterId, namespace, name, controller.signal)
+        .then((data) => {
+          if (!controller.signal.aborted) setDescribeSecretData(data);
+        })
+        .catch((e: any) => {
+          if (!controller.signal.aborted) {
+            setDescribeError(e?.response?.data?.error ?? "加载 Secret Describe 失败");
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setDescribeLoading(false);
+        });
+      fetchResourceList<Pod>(clusterId, "pods", namespace, controller.signal)
+        .then(({ items }) => {
+          if (!controller.signal.aborted) setDescribeSecretPods(items);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setDescribeSecretPods(null);
+        });
     } else if (describeTarget.kind === "configmap") {
       setDescribeConfigMapData(null);
       fetchConfigMapDescribe(describeTarget.clusterId, describeTarget.namespace, describeTarget.name)
@@ -1696,6 +1734,8 @@ export const App: React.FC = () => {
       setDescribePvcData(null);
       setDescribeConfigMapData(null);
       setDescribeNodeData(null);
+      setDescribeSecretData(null);
+      setDescribeSecretPods(undefined);
       setDescribeError(null);
       setDescribeLoading(false);
       return;
@@ -1706,6 +1746,7 @@ export const App: React.FC = () => {
       return;
     }
     refreshDescribe();
+    return () => secretDescribeRequest.current?.abort();
   }, [describeTarget, refreshDescribe]);
 
   // Pod Describe：拖拽宽度
@@ -2033,6 +2074,60 @@ export const App: React.FC = () => {
     });
   };
 
+  const openDescribeForSecret = ({ metadata }: SecretSummary) => {
+    if (!effectiveClusterId) return;
+    setDescribeTarget({
+      kind: "secret",
+      clusterId: effectiveClusterId,
+      namespace: metadata.namespace,
+      name: metadata.name,
+    });
+  };
+
+  const openSecretTab = ({ metadata }: SecretSummary, type: "secret-yaml" | "secret-editor") => {
+    if (!effectiveClusterId || (type === "secret-editor" && !canResourceWrite)) return;
+    const { namespace, name, uid } = metadata;
+    const id = `${type}/${effectiveClusterId}/${namespace}/${name}/${uid}`;
+    setPanelTabs((prev) => {
+      if (prev.some((tab) => tab.id === id)) return prev;
+      return [...prev, {
+        id,
+        type,
+        clusterId: effectiveClusterId,
+        namespace,
+        pod: name,
+        container: "",
+        containers: [],
+        title: `${name} · ${type === "secret-yaml" ? "脱敏 YAML" : "更新键值"}`,
+        secretUid: uid,
+      }];
+    });
+    setActivePanelTabId(id);
+    setPanelMinimized(false);
+  };
+
+  const confirmDeleteSecret = (secret: SecretSummary) => {
+    if (!effectiveClusterId || !canResourceWrite) return;
+    const { namespace, name } = secret.metadata;
+    openAuditedActionConfirm({
+      title: "确认删除 Secret？",
+      description: "删除后，引用该 Secret 的工作负载可能无法启动或重新加载。",
+      items: [`${namespace}/${name}`],
+      variant: "danger",
+      onConfirm: async (auditReason) => {
+        try {
+          await deleteSecret(effectiveClusterId, secret, auditReason);
+          setSecretsListNonce((n) => n + 1);
+          setToastMessage(`已删除 Secret ${name}`);
+        } catch (e: any) {
+          const description = e?.response?.data?.error ?? "删除 Secret 失败";
+          setActionConfirm((current) => current ? { ...current, description } : current);
+          throw e;
+        }
+      },
+    });
+  };
+
   const openEditConfigMapYamlTab = (cm: ConfigMapListRow) => {
     if (!effectiveClusterId) return;
     const ns = cm.metadata.namespace ?? "";
@@ -2332,6 +2427,7 @@ export const App: React.FC = () => {
     setActiveNamespace(nsToApply);
     setError(null);
     // 记录一次新的“应用”动作，即便作用域未变化也会触发重新加载
+    setDescribeTarget((target) => target?.kind === "secret" ? null : target);
     setApplyRevision((v) => v + 1);
   };
 
@@ -2341,6 +2437,25 @@ export const App: React.FC = () => {
     if (typeof serverTimeMs !== "number" || !Number.isFinite(serverTimeMs) || serverTimeMs <= 0) return;
     setServerClockSnapshot(newServerClockSnapshot(serverTimeMs));
   }, []);
+
+  const secretsList = useSecretsList(
+    currentView === "secrets" ? effectiveClusterId : null,
+    effectiveNamespace,
+    listScopeKey,
+    secretsListNonce,
+    pageVisible,
+    syncServerClock,
+  );
+  const filteredSecrets = useMemo(() => {
+    const term = nameFilter.trim().toLowerCase();
+    return term ? secretsList.items.filter((secret) => secret.metadata.name.toLowerCase().includes(term)) : secretsList.items;
+  }, [secretsList.items, nameFilter]);
+
+  useEffect(() => {
+    if (currentView === "secrets" && effectiveClusterId && !secretsList.loading) {
+      setApplyingSelection(false);
+    }
+  }, [currentView, effectiveClusterId, secretsList.loading]);
 
   const loadPods = useCallback(async (clusterId: string, namespace: string) => {
     const requestedNs = namespace || undefined;
@@ -3919,6 +4034,7 @@ export const App: React.FC = () => {
       currentView === "services" ||
       currentView === "persistentvolumeclaims" ||
       currentView === "configmaps" ||
+      currentView === "secrets" ||
       currentView === "events" ||
       currentView === "nodes"
     )
@@ -5828,6 +5944,8 @@ export const App: React.FC = () => {
                                   ? filteredPvcs.length
                                   : currentView === "configmaps"
                                     ? filteredConfigMaps.length
+                                  : currentView === "secrets"
+                                    ? filteredSecrets.length
                                   : currentView === "events"
                                     ? filteredEvents.length
                                     : currentView === "nodes"
@@ -5841,6 +5959,7 @@ export const App: React.FC = () => {
                       currentView === "services" ||
                       currentView === "persistentvolumeclaims" ||
                       currentView === "configmaps" ||
+                      currentView === "secrets" ||
                       currentView === "events" ||
                       currentView === "nodes") && (
                       <button
@@ -5878,6 +5997,9 @@ export const App: React.FC = () => {
                             setConfigMapsListSort(null);
                             setSelectedConfigMapKeys(new Set());
                             setConfigMapsListNonce((n) => n + 1);
+                          } else if (currentView === "secrets") {
+                            setSecretsListSort(null);
+                            setSecretsListNonce((n) => n + 1);
                           } else if (currentView === "events") {
                             eventsManualRefreshToastRef.current = true;
                             setEventsListSort(null);
@@ -8180,6 +8302,22 @@ export const App: React.FC = () => {
                     deletePvcApi={deletePvc}
                   />
                 </>
+              ) : currentView === "secrets" ? (
+                <SecretsListTable
+                  items={filteredSecrets}
+                  loading={secretsList.loading}
+                  error={secretsList.error}
+                  hasFilter={!!nameFilter.trim()}
+                  now={listAgeNow}
+                  canWrite={canResourceWrite}
+                  sort={secretsListSort}
+                  setSort={setSecretsListSort}
+                  onDescribe={openDescribeForSecret}
+                  onCopy={copyName}
+                  onPreview={(secret) => openSecretTab(secret, "secret-yaml")}
+                  onRotate={(secret) => openSecretTab(secret, "secret-editor")}
+                  onDelete={confirmDeleteSecret}
+                />
               ) : currentView === "configmaps" ? (
                 <>
                   <ConfigMapsListTable
@@ -8344,6 +8482,11 @@ export const App: React.FC = () => {
           if (tab.yamlKind === "node" && result) {
             setNodeItems((prev) => mergeDeploymentIntoList(prev, result));
           }
+          if (tab.type === "secret-editor" && describeTarget?.kind === "secret" &&
+              describeTarget.clusterId === tab.clusterId && describeTarget.namespace === tab.namespace &&
+              describeTarget.name === tab.pod) {
+            refreshDescribe();
+          }
         }}
       />
       </>
@@ -8435,6 +8578,8 @@ export const App: React.FC = () => {
                               ? "PersistentVolumeClaim"
                               : describeTarget.kind === "configmap"
                                 ? "ConfigMap"
+                              : describeTarget.kind === "secret"
+                                ? "Secret"
                               : describeTarget.kind === "node"
                                 ? "Node"
                                 : "Pod"}
@@ -8678,6 +8823,19 @@ export const App: React.FC = () => {
                   pods={pods}
                   onCopyName={copyName}
                   onJumpPods={jumpServiceToPods}
+                />
+              )}
+              {!describeLoading && describeTarget.kind === "secret" && describeSecretData && (
+                <SecretDescribeContent
+                  secret={describeSecretData}
+                  now={listAgeNow}
+                  pods={describeSecretPods}
+                  onCopy={copyName}
+                  onJumpPod={(name) => {
+                    setDescribeTarget(null);
+                    setCurrentView("pods");
+                    queueMicrotask(() => setNameFilter(name));
+                  }}
                 />
               )}
               {!describeLoading && describeTarget.kind === "pvc" && (
